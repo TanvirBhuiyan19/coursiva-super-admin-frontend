@@ -15,22 +15,19 @@ import {
 } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { api } from '@/lib/api/client';
-import { money, plural } from '@/lib/format';
+import { money } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useExtensionSettings, useExtensionSummary, useExtensions, useUpdateExtensionSettings } from '../api';
 import { CommitNumberInput } from '@/components/ui';
 import { ExtensionCatalogueTable } from '../components/ExtensionCatalogue';
+import { t, useT } from '../i18n';
 import { EXTENSION_TRIAL_DAYS, type ExtensionSettings, type ExtensionTrialDays } from '../types';
 
-const BUNDLE_NOTE =
-  'Tenants who add four or more extensions are prompted to switch to the bundle — it protects margin and reduces churn on individual add-ons.';
-const GRANT_NOTE =
-  'Toggle L / G / S on any extension to include it free for every tenant on that plan. One-off comps for a single tenant are set in the tenant drawer and show as “Comped by staff” on their invoice.';
-
-const trialText = (d: number) => (d ? `${d} days` : 'No trial');
-const TRIAL_OPTIONS = EXTENSION_TRIAL_DAYS.map((d) => [String(d), trialText(d)] as const);
+const trialText = (d: number) => (d ? t('bundle.trialDays', { days: d }) : t('bundle.noTrial'));
+const trialOptions = () => EXTENSION_TRIAL_DAYS.map((d) => [String(d), trialText(d)] as const);
 
 function Kpis() {
+  const t = useT();
   const q = useExtensionSummary();
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   if (!q.data)
@@ -48,92 +45,98 @@ function Kpis() {
   return (
     <KpiRow
       items={[
-        { label: 'Extension MRR', value: money(s.mrr), sub: `${s.payingInstalls} paying · ${s.freeInstalls} free by plan` },
-        { label: 'Attach rate', value: `${s.attachPct}%`, sub: `${s.tenantsWithAny} of ${s.tenants} tenants run at least one` },
-        { label: 'Avg per tenant', value: `${money(s.avgPerTenant)}/mo`, sub: `Across ${plural(s.extensions, 'extension')}` },
-        { label: 'Trial → paid', value: `${s.trialConversionPct}%`, sub: 'Extension trials, no card needed' },
+        { label: t('kpis.mrr'), value: money(s.mrr), sub: t('kpis.mrrSub', { paying: s.payingInstalls, free: s.freeInstalls }) },
+        {
+          label: t('kpis.attachRate'),
+          value: t('kpis.percent', { pct: s.attachPct }),
+          sub: t('kpis.attachRateSub', { withAny: s.tenantsWithAny, tenants: s.tenants }),
+        },
+        {
+          label: t('kpis.avgPerTenant'),
+          value: t('kpis.perMonth', { amount: money(s.avgPerTenant) }),
+          sub: t('kpis.avgPerTenantSub', { count: s.extensions }),
+        },
+        { label: t('kpis.trialToPaid'), value: t('kpis.percent', { pct: s.trialConversionPct }), sub: t('kpis.trialToPaidSub') },
       ]}
     />
   );
 }
 
 function BundleCard({ s }: { s: ExtensionSettings }) {
+  const t = useT();
   const can = useCan();
   const update = useUpdateExtensionSettings();
   const manage = can('billing.manage');
   return (
-    <Card title="All-access bundle" style={{ padding: '18px 20px' }}>
-      <div className="muted t-sm">One price for every extension — the upgrade path off à-la-carte add-ons.</div>
+    <Card title={t('bundle.title')} style={{ padding: '18px 20px' }}>
+      <div className="muted t-sm">{t('bundle.intro')}</div>
       <div className="hstack wrap" style={{ gap: 12, marginTop: 14 }}>
         {manage ? (
           <CommitNumberInput
             key={s.bundlePrice}
-            prefix="$"
-            suffix="/mo"
+            prefix={t('catalogue.currencyPrefix')}
+            suffix={t('bundle.perMonthSuffix')}
             value={s.bundlePrice}
             min={1}
             max={9999}
-            label="Bundle price per month"
-            rangeMessage="Whole dollars, $1–$9,999"
+            label={t('bundle.priceLabel')}
+            rangeMessage={t('bundle.priceRange')}
             style={{ width: 78, fontSize: 15, fontWeight: 700 }}
             onCommit={(bundlePrice) =>
               update.mutate(
                 { bundlePrice },
                 {
-                  onSuccess: (n) =>
-                    toast(`All-access bundle is now ${money(n.bundlePrice)}/mo — ${n.bundleDiscountPct}% off buying separately`),
+                  onSuccess: (n) => toast(t('bundle.priceToast', { price: money(n.bundlePrice), pct: n.bundleDiscountPct })),
                 },
               )
             }
           />
         ) : (
           <span className="display" style={{ fontSize: 17, fontWeight: 800 }}>
-            {money(s.bundlePrice)}/mo
+            {t('bundle.perMonth', { amount: money(s.bundlePrice) })}
           </span>
         )}
         <div className="muted t-sm">
-          vs <b style={{ color: 'var(--tx)' }}>{money(s.separatePrice)}</b> bought separately
+          {t('bundle.versusBefore')} <b style={{ color: 'var(--tx)' }}>{money(s.separatePrice)}</b> {t('bundle.versusAfter')}
         </div>
         <Badge pill tone="good">
-          {s.separatePrice ? `${s.bundleDiscountPct}% off` : '—'}
+          {s.separatePrice ? t('bundle.discount', { pct: s.bundleDiscountPct }) : '—'}
         </Badge>
       </div>
       <div className="hstack wrap" style={{ gap: 10, marginTop: 14 }}>
         <label className="t-sm" style={{ fontWeight: 600 }} htmlFor="ext-trial">
-          Free trial on every extension
+          {t('bundle.trialLabel')}
         </label>
         <Select
           id="ext-trial"
           style={{ width: 'auto', padding: '7px 10px', fontSize: 12.5 }}
           value={String(s.trialDays)}
-          options={TRIAL_OPTIONS}
+          options={trialOptions()}
           disabled={!manage || update.isPending}
           onChange={(v) => {
             const trialDays = Number(v) as ExtensionTrialDays;
             update.mutate(
               { trialDays },
               {
-                onSuccess: () =>
-                  toast(
-                    trialDays ? `Trial length is now ${trialDays} days for every extension` : 'Extensions no longer offer a free trial',
-                  ),
+                onSuccess: () => toast(trialDays ? t('bundle.trialToast', { days: trialDays }) : t('bundle.trialOffToast')),
               },
             );
           }}
         />
       </div>
       <p className="note" style={{ marginTop: 12 }}>
-        {BUNDLE_NOTE}
+        {t('bundle.note')}
       </p>
     </Card>
   );
 }
 
 function RulesCard({ s }: { s: ExtensionSettings }) {
+  const t = useT();
   const can = useCan();
   const update = useUpdateExtensionSettings();
   return (
-    <Card title="Selling rules" style={{ padding: '18px 20px' }}>
+    <Card title={t('rules.title')} style={{ padding: '18px 20px' }}>
       <div className="stack">
         {s.rules.map((r) => (
           <ToggleRow
@@ -145,20 +148,21 @@ function RulesCard({ s }: { s: ExtensionSettings }) {
             onChange={(enabled) =>
               update.mutate(
                 { rules: [{ key: r.key, enabled }] },
-                { onSuccess: () => toast(`${r.label} — ${enabled ? 'on for every extension' : 'turned off'}`) },
+                { onSuccess: () => toast(t(enabled ? 'rules.onToast' : 'rules.offToast', { label: r.label })) },
               )
             }
           />
         ))}
       </div>
       <p className="note" style={{ marginTop: 12 }}>
-        {GRANT_NOTE}
+        {t('rules.note')}
       </p>
     </Card>
   );
 }
 
 export default function ExtensionsPage() {
+  const t = useT();
   const list = useExtensions();
   const settings = useExtensionSettings();
   const [exporting, setExporting] = useState(false);
@@ -170,16 +174,16 @@ export default function ExtensionsPage() {
     setExporting(true);
     try {
       await api.download('/extensions/export', undefined, 'extension-revenue.csv');
-      toast('Extension revenue exported — installs, MRR and attach per extension');
+      toast(t('page.exported'));
     } catch {
-      toast('Export failed — try again', 'error');
+      toast(t('page.exportFailed'), 'error');
     } finally {
       setExporting(false);
     }
   };
 
   return (
-    <Screen max={1250} label="Extensions and add-ons">
+    <Screen max={1250} label={t('page.screenLabel')}>
       <Kpis />
 
       {list.error ? (
@@ -193,18 +197,18 @@ export default function ExtensionsPage() {
         >
           <div className="hstack wrap" style={{ alignItems: 'baseline', gap: 10, padding: '14px 0 10px' }}>
             <h2 id="ext-cat-title" className="card-title" style={{ flex: 'none' }}>
-              Extension catalogue
+              {t('page.catalogueTitle')}
             </h2>
-            {list.data && <span className="faint t-xs">{plural(categories, 'category', 'categories')}</span>}
+            {list.data && <span className="faint t-xs">{t('page.categories', { count: categories })}</span>}
             <div className="spacer" />
             <button type="button" className="btn btn--sm" disabled={exporting} onClick={() => void exportCsv()}>
-              {exporting ? 'Exporting…' : 'Export revenue'}
+              {exporting ? t('page.exporting') : t('page.exportRevenue')}
             </button>
           </div>
           {list.isPending ? (
             <SkeletonRows rows={8} h={26} />
           ) : rows.length === 0 ? (
-            <Empty>No extensions in the catalogue yet.</Empty>
+            <Empty>{t('page.empty')}</Empty>
           ) : (
             <ExtensionCatalogueTable rows={rows} />
           )}
@@ -216,11 +220,11 @@ export default function ExtensionsPage() {
           {(s) => <BundleCard s={s} />}
         </QueryState>
 
-        <Card title="Most installed" style={{ padding: '18px 20px' }}>
+        <Card title={t('page.mostInstalled')} style={{ padding: '18px 20px' }}>
           {list.isPending ? (
             <SkeletonRows rows={5} />
           ) : top.length === 0 ? (
-            <Empty>No installs yet.</Empty>
+            <Empty>{t('page.noInstalls')}</Empty>
           ) : (
             <ol className="plain-list">
               {top.map((r) => (
@@ -233,7 +237,7 @@ export default function ExtensionsPage() {
                   </div>
                   <Bar size="thin" value={r.attachPct} style={{ marginTop: 6, flex: 'none' }} />
                   <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
-                    {plural(r.installs, 'tenant')} · {r.attachPct}% attach
+                    {t('page.installedTenants', { count: r.installs })} · {t('page.attach', { pct: r.attachPct })}
                   </div>
                 </li>
               ))}

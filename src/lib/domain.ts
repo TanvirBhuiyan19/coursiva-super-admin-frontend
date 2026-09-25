@@ -22,13 +22,4 @@ export const LIMIT_KEYS = ['storageGb', 'staffSeats', 'apiPerMinute', 'students'
 export type LimitKey = (typeof LIMIT_KEYS)[number];
 export type Limits = Record<LimitKey, number>;
 
-export const LIMIT_LABELS: Record<LimitKey, string> = {
-  storageGb: 'Storage (GB)',
-  staffSeats: 'Staff seats',
-  apiPerMinute: 'API req/min',
-  students: 'Students',
-  courses: 'Courses',
-  liveRoomMinutes: 'Live room min/mo',
-};
-
 export type Tone = 'good' | 'warn' | 'bad' | 'info' | 'flat' | 'accent';

@@ -1,44 +1,48 @@
 import { Badge, Bar, Dot, Empty, ErrorState, KpiRow, Screen, Select, Skeleton, SkeletonRows, TRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import type { Region } from '@/lib/domain';
-import { num, plural, toneDot } from '@/lib/format';
+import { num, toneDot } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { toast } from '@/store/ui';
 import { useMoveTenantRegion, useRegions } from '../api';
 import { REGION_TONE } from '../components/format';
+import { useT } from '../i18n';
 import type { RegionInfo, TenantResidency } from '../types';
 
 const COLS = 'minmax(0,2fr) minmax(0,0.8fr) minmax(0,0.9fr) minmax(0,1.6fr)';
 
-function ResidencyRow({ t, regions }: { t: TenantResidency; regions: RegionInfo[] }) {
+function ResidencyRow({ tenant: tn, regions }: { tenant: TenantResidency; regions: RegionInfo[] }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
-  const move = useMoveTenantRegion(t.tenantId);
-  const value = move.pendingRegion ?? t.region;
+  const move = useMoveTenantRegion(tn.tenantId);
+  const value = move.pendingRegion ?? tn.region;
   return (
     <TRow cols={COLS} min={640} style={{ padding: '10px 0', fontSize: 12.5 }}>
       <div role="cell" className="hstack min0">
         <Dot color={toneDot(REGION_TONE[value])} size={8} />
-        <span className="ellipsis t-strong">{t.name}</span>
+        <span className="ellipsis t-strong">{tn.name}</span>
       </div>
       <div role="cell" className="muted">
-        {t.plan}
+        {tc(`enums.plan.${tn.plan}`)}
       </div>
-      <div role="cell">{num(t.students)}</div>
+      <div role="cell">{num(tn.students)}</div>
       <div role="cell" className="hstack wrap" style={{ gap: 8 }}>
         <Select<Region>
           value={value}
           options={regions.map((r) => [r.region, r.label] as const)}
-          label={`Data region for ${t.name}`}
+          label={t('regions.regionFor', { tenant: tn.name })}
           disabled={!can('tenants.manage') || move.isPending}
           style={{ width: 'auto', padding: '6px 8px', fontSize: 12 }}
           onChange={(region) => {
-            if (region === t.region) return;
+            if (region === tn.region) return;
             const label = regions.find((r) => r.region === region)?.label ?? region;
-            move.move(region, () => toast(`${t.name} scheduled to migrate to ${label} — read-only for ~20 minutes during cutover`));
+            move.move(region, () => toast(t('regions.migrateToast', { tenant: tn.name, region: label })));
           }}
         />
-        {t.migrating && !move.isPending && (
+        {tn.migrating && !move.isPending && (
           <Badge tone="warn" xs>
-            Migrating
+            {t('regions.migrating')}
           </Badge>
         )}
       </div>
@@ -47,12 +51,13 @@ function ResidencyRow({ t, regions }: { t: TenantResidency; regions: RegionInfo[
 }
 
 export default function RegionsPage() {
+  const t = useT();
   const q = useRegions();
   const d = q.data;
 
   if (q.error)
     return (
-      <Screen max={1250} label="Data residency">
+      <Screen max={1250} label={t('regions.title')}>
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />
       </Screen>
     );
@@ -61,14 +66,18 @@ export default function RegionsPage() {
   const eu = d?.regions.find((r) => r.region === 'EU')?.tenants ?? 0;
 
   return (
-    <Screen max={1250} label="Data residency">
+    <Screen max={1250} label={t('regions.title')}>
       {d ? (
         <KpiRow
           items={[
-            { label: 'Regions live', value: String(d.regions.length), sub: d.regions.map((r) => r.label.split(' · ')[1]).join(' · ') },
-            { label: 'EU-resident tenants', value: String(eu), sub: 'Data never leaves the EU' },
-            { label: 'Pending migrations', value: String(d.pendingMigrations), sub: 'Cutover ~20 min read-only' },
-            { label: 'Sub-processors', value: String(d.subProcessors), sub: 'Listed in the DPA' },
+            {
+              label: t('regions.kpi.live'),
+              value: String(d.regions.length),
+              sub: d.regions.map((r) => r.label.split(' · ')[1]).join(' · '),
+            },
+            { label: t('regions.kpi.eu'), value: String(eu), sub: t('regions.kpi.euSub') },
+            { label: t('regions.kpi.pending'), value: String(d.pendingMigrations), sub: t('regions.kpi.pendingSub') },
+            { label: t('regions.kpi.subProcessors'), value: String(d.subProcessors), sub: t('regions.kpi.listedInDpa') },
           ]}
         />
       ) : (
@@ -91,16 +100,16 @@ export default function RegionsPage() {
                   <h2 style={{ fontWeight: 700, fontSize: 13.5, flex: 1, margin: 0 }}>{r.label}</h2>
                 </div>
                 <div className="display" style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>
-                  {plural(r.tenants, 'tenant')}
+                  {t('regions.tenants', { count: r.tenants })}
                 </div>
                 <Bar
                   tone={REGION_TONE[r.region]}
                   value={Math.round((r.tenants / Math.max(1, total)) * 100)}
                   style={{ marginTop: 8 }}
-                  label={`${r.label}: ${plural(r.tenants, 'tenant')} of ${total}`}
+                  label={t('regions.barLabel', { region: r.label, tenants: t('regions.tenants', { count: r.tenants }), total })}
                 />
                 <div className="t-xs faint" style={{ marginTop: 8 }}>
-                  {r.framework} · {num(r.learners)} learners
+                  {t('regions.learners', { framework: r.framework, count: r.learners })}
                 </div>
               </li>
             ))
@@ -113,26 +122,25 @@ export default function RegionsPage() {
       </ul>
 
       <div className="card table-scroll" style={{ padding: '6px 18px 4px' }}>
-        <div role="table" aria-label="Tenant data regions" aria-busy={q.isFetching}>
+        <div role="table" aria-label={t('regions.table')} aria-busy={q.isFetching}>
           <TRow cols={COLS} min={640} head style={{ fontSize: 10.5, fontWeight: 700 }}>
-            <div role="columnheader">Tenant</div>
-            <div role="columnheader">Plan</div>
-            <div role="columnheader">Learners</div>
-            <div role="columnheader">Data region</div>
+            <div role="columnheader">{t('regions.tenant')}</div>
+            <div role="columnheader">{t('regions.plan')}</div>
+            <div role="columnheader">{t('regions.learnersCol')}</div>
+            <div role="columnheader">{t('regions.dataRegion')}</div>
           </TRow>
           {!d ? (
             <SkeletonRows rows={8} h={22} />
           ) : d.tenants.length === 0 ? (
-            <Empty>No tenants yet.</Empty>
+            <Empty>{t('regions.empty')}</Empty>
           ) : (
-            d.tenants.map((t) => <ResidencyRow key={t.tenantId} t={t} regions={d.regions} />)
+            d.tenants.map((tn) => <ResidencyRow key={tn.tenantId} tenant={tn} regions={d.regions} />)
           )}
         </div>
       </div>
 
       <div className="card note" style={{ padding: '16px 18px', fontSize: 12.5, lineHeight: 1.6 }}>
-        Region is chosen at signup and pinned for database, storage and backups. Video is served from the nearest CDN edge regardless of
-        region. Moving a tenant schedules a migration; the workspace is read-only for about 20 minutes during cutover.
+        {t('regions.note')}
       </div>
     </Screen>
   );

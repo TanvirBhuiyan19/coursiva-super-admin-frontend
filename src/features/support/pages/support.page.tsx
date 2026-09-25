@@ -7,7 +7,8 @@ import { useSupportSummary, useTicket, useTickets } from '../api';
 import { Conversation } from '../components/Conversation';
 import { TenantPanel } from '../components/TenantPanel';
 import { TicketList } from '../components/TicketList';
-import { TICKET_VIEWS, VIEW_LABELS, type TicketListParams, type TicketView } from '../types';
+import { useT } from '../i18n';
+import { TICKET_VIEWS, type TicketListParams, type TicketView } from '../types';
 
 const DEFAULTS = { view: 'open', q: '', ticket: '', page: '1' };
 
@@ -27,6 +28,7 @@ function DetailSkeleton() {
 }
 
 export default function SupportPage() {
+  const t = useT();
   const [f, setF] = useUrlState(DEFAULTS);
   const [search, setSearch] = useState(f.q);
   const debounced = useDebounced(search, 300);
@@ -50,27 +52,27 @@ export default function SupportPage() {
   const s = summary.data;
   const kpis = s
     ? [
-        { label: 'Open tickets', value: num(s.open), sub: `${num(s.unanswered)} still unanswered` },
+        { label: t('kpis.open'), value: num(s.open), sub: t('kpis.unanswered', { count: s.unanswered }) },
         {
-          label: 'Breaching SLA',
+          label: t('kpis.breaching'),
           value: num(s.breaching),
-          sub: s.oldestBreachAt ? `Oldest opened ${timeAgo(s.oldestBreachAt)}` : 'All within target',
+          sub: s.oldestBreachAt ? t('kpis.oldestBreach', { time: timeAgo(s.oldestBreachAt) }) : t('kpis.allWithinTarget'),
         },
         {
-          label: 'First response',
+          label: t('kpis.firstResponse'),
           value: s.medianFirstReplyMinutes != null ? shortDuration(s.medianFirstReplyMinutes) : '—',
-          sub: 'Median · target 60m on High',
+          sub: t('kpis.firstResponseSub'),
         },
         {
-          label: 'CSAT',
-          value: s.csat ? `${s.csat.score} / 5` : '—',
-          sub: s.csat ? `${num(s.csat.responses)} survey responses` : 'No responses yet',
+          label: t('kpis.csat'),
+          value: s.csat ? t('kpis.csatScore', { score: s.csat.score }) : '—',
+          sub: s.csat ? t('kpis.csatResponses', { count: s.csat.responses }) : t('kpis.noResponses'),
         },
       ]
     : null;
 
   return (
-    <Screen max={1400} gap={14} label="Support">
+    <Screen max={1400} gap={14} label={t('title')}>
       {summary.error ? (
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
       ) : kpis ? (
@@ -87,11 +89,10 @@ export default function SupportPage() {
       )}
 
       <div className="hstack wrap">
-        <div className="hstack wrap" style={{ gap: 6 }} role="group" aria-label="Inbox views">
+        <div className="hstack wrap" style={{ gap: 6 }} role="group" aria-label={t('views.label')}>
           {TICKET_VIEWS.map((v) => (
             <Chip key={v} size="sm" on={view === v} onClick={() => setF({ view: v, ticket: '' })}>
-              {VIEW_LABELS[v]}
-              {s ? ` · ${s.views.find((x) => x.view === v)?.count ?? 0}` : ''}
+              {s ? t('views.withCount', { view: t(`views.${v}`), count: s.views.find((x) => x.view === v)?.count ?? 0 }) : t(`views.${v}`)}
             </Chip>
           ))}
         </div>
@@ -102,8 +103,8 @@ export default function SupportPage() {
           style={{ width: 260, maxWidth: '100%', fontSize: 12.5, padding: '8px 11px' }}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search tenant, subject or contact…"
-          aria-label="Search tickets"
+          placeholder={t('search.placeholder')}
+          aria-label={t('search.label')}
         />
       </div>
 
@@ -131,7 +132,7 @@ export default function SupportPage() {
           <DetailSkeleton />
         ) : (
           <div className="card empty" style={{ flex: '3.2 1 440px', minWidth: 0 }}>
-            Select a ticket to read the conversation.
+            {t('selectTicket')}
           </div>
         )}
       </div>

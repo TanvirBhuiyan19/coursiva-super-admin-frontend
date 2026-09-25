@@ -1,29 +1,32 @@
 import { Card, QueryState, SkeletonRows } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
-import { PERMISSION_LABELS, PERMISSIONS, type Permission } from '@/features/auth/permissions';
-import { plural } from '@/lib/format';
+import { PERMISSIONS, type Permission } from '@/features/auth/permissions';
 import { toast } from '@/store/ui';
 import { useRolePermissions, useSetRolePermission } from '../api';
+import { t as tStaff, useT } from '../i18n';
 import type { RolePermissions } from '../types';
 
-const GROUP_LABELS: Record<string, string> = {
-  tenants: 'Tenants',
-  billing: 'Billing',
-  support: 'Support',
-  analytics: 'Analytics',
-  governance: 'Governance',
-  platform: 'Platform',
-  flags: 'Platform',
-  announcements: 'Platform',
-  staff: 'Staff & audit',
-  audit: 'Staff & audit',
+type Group = 'tenants' | 'billing' | 'support' | 'analytics' | 'governance' | 'platform' | 'staffAudit' | 'ungrouped';
+/** Permission prefix → matrix group. */
+const GROUPS: Record<string, Group> = {
+  tenants: 'tenants',
+  billing: 'billing',
+  support: 'support',
+  analytics: 'analytics',
+  governance: 'governance',
+  platform: 'platform',
+  flags: 'platform',
+  announcements: 'platform',
+  staff: 'staffAudit',
+  audit: 'staffAudit',
 };
-const groupOf = (p: Permission) => GROUP_LABELS[p.split('.')[0]!] ?? 'Other';
+const groupOf = (p: Permission): Group => GROUPS[p.split('.')[0]!] ?? 'ungrouped';
 
 function Cell({ role, permission, manage }: { role: RolePermissions; permission: Permission; manage: boolean }) {
+  const t = useT();
   const set = useSetRolePermission();
   const on = role.locked || role.permissions.includes(permission);
-  const label = PERMISSION_LABELS[permission];
+  const label = t(`permissions.labels.${permission}`);
   const disabled = role.locked || !manage;
   return (
     <div role="cell" style={{ display: 'flex', justifyContent: 'center' }}>
@@ -31,7 +34,10 @@ function Cell({ role, permission, manage }: { role: RolePermissions; permission:
         type="button"
         aria-pressed={on}
         disabled={disabled}
-        aria-label={`${label} — ${role.role}${role.locked ? ' (locked)' : ''}`}
+        aria-label={t(role.locked ? 'permissions.cellLabelLocked' : 'permissions.cellLabel', {
+          permission: label,
+          role: t(`roles.${role.role}`),
+        })}
         onClick={() => {
           const permissions = on ? role.permissions.filter((p) => p !== permission) : [...role.permissions, permission];
           set.mutate(
@@ -39,7 +45,11 @@ function Cell({ role, permission, manage }: { role: RolePermissions; permission:
             {
               onSuccess: () =>
                 toast(
-                  `${label} ${on ? 'removed from' : 'granted to'} ${role.role} — ${plural(role.members, 'member')} ${on ? 'lose' : 'get'} it on their next request`,
+                  tStaff(on ? 'permissions.toasts.removed' : 'permissions.toasts.granted', {
+                    permission: label,
+                    role: tStaff(`roles.${role.role}`),
+                    count: role.members,
+                  }),
                 ),
             },
           );
@@ -69,24 +79,24 @@ function Cell({ role, permission, manage }: { role: RolePermissions; permission:
 
 /** Edits the shared `rolePermissions` table. Owner is locked; changes apply to every member of the role. */
 export function PermissionMatrix() {
+  const t = useT();
   const can = useCan();
   const manage = can('staff.manage');
   const q = useRolePermissions();
   const cols = (n: number) => `minmax(170px,1.6fr) repeat(${n}, minmax(64px,1fr))`;
 
   return (
-    <Card title="Role permissions">
+    <Card title={t('permissions.title')}>
       <p className="t-sm muted" style={{ marginTop: -4 }}>
-        What each staff role can do. Owner is locked — {manage ? 'click any other cell to change it' : 'you can view the matrix'}. Changes
-        apply to everyone in the role immediately and are recorded in the audit log.
+        {manage ? t('permissions.introManage') : t('permissions.introView')}
       </p>
       <QueryState query={q} compact skeleton={<SkeletonRows rows={8} />}>
         {(roles) => (
           <div className="table-scroll" style={{ position: 'relative' }}>
-            <div role="table" aria-label="Role permissions" style={{ minWidth: 620 }}>
+            <div role="table" aria-label={t('permissions.title')} style={{ minWidth: 620 }}>
               <div role="row" style={{ display: 'grid', gridTemplateColumns: cols(roles.length), gap: 6, marginTop: 8 }}>
                 <div role="columnheader">
-                  <span className="sr-only">Permission</span>
+                  <span className="sr-only">{t('permissions.permission')}</span>
                 </div>
                 {roles.map((r) => (
                   <div
@@ -95,8 +105,10 @@ export function PermissionMatrix() {
                     className="faint"
                     style={{ textAlign: 'center', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}
                   >
-                    {r.role}
-                    <div style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>{plural(r.members, 'member')}</div>
+                    {t(`roles.${r.role}`)}
+                    <div style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>
+                      {t('permissions.members', { count: r.members })}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -124,10 +136,10 @@ export function PermissionMatrix() {
                           className="faint"
                           style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}
                         >
-                          {group}
+                          {t(`permissions.groups.${group}`)}
                         </div>
                       )}
-                      {PERMISSION_LABELS[p]}
+                      {t(`permissions.labels.${p}`)}
                     </div>
                     {roles.map((r) => (
                       <Cell key={r.role} role={r} permission={p} manage={manage} />

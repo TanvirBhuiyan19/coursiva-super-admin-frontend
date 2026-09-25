@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom';
 import Toasts from '@/components/shell/Toasts';
 import { routes } from '@/app/router';
+import { I18nBoundary } from '@/lib/i18n/I18nBoundary';
 import { createQueryClient, setActiveQueryClient } from '@/lib/queryClient';
 import { session, staff } from '@/mocks/collections';
 import type { Role } from '@/features/auth/permissions';
@@ -31,7 +32,9 @@ export function renderApp(path = '/') {
   const user = userEvent.setup();
   const utils = render(
     <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
+      <I18nBoundary>
+        <RouterProvider router={router} />
+      </I18nBoundary>
     </QueryClientProvider>,
   );
   return { ...utils, user, router, client };

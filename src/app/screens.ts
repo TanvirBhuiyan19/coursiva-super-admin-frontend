@@ -1,50 +1,59 @@
 // Screen registry: id, URL, title and the permission needed to open it.
 // The sidebar, router, command palette and document titles all read from here.
+// Titles and nav labels live in `./i18n` and are resolved when read (getters), so they follow the locale.
 import type { Permission } from '@/features/auth/permissions';
+import { t, type source } from './i18n';
 
 export interface ScreenDef {
   id: string;
   path: string;
-  title: string;
+  /** Localised title, resolved at read time. */
+  readonly title: string;
   permission?: Permission;
 }
 
-const S = <Id extends string>(id: Id, title: string, permission?: Permission, path = '/' + id) => ({
+type ScreenKey = keyof (typeof source)['screens'];
+
+const titleOf = (id: ScreenKey) => t(`screens.${id}`);
+
+const S = <Id extends ScreenKey>(id: Id, permission?: Permission, path = '/' + id) => ({
   id,
   path,
-  title,
+  get title() {
+    return titleOf(id);
+  },
   ...(permission ? { permission } : {}),
 });
 
 export const SCREENS = [
-  S('overview', 'Platform overview', undefined, '/'),
-  S('tenants', 'Tenants', 'tenants.view'),
-  S('support', 'Support', 'support.view'),
-  S('revenue', 'Revenue', 'billing.view'),
-  S('plans', 'Plans & pricing', 'billing.view'),
-  S('ext', 'Extensions & add-ons', 'billing.view', '/extensions'),
-  S('growth', 'Growth analytics', 'analytics.view', '/analytics/growth'),
-  S('usage', 'Usage & infrastructure', 'analytics.view', '/analytics/usage'),
-  S('health', 'System health', 'analytics.view', '/analytics/health'),
-  S('ai', 'AI usage & cost', 'analytics.view', '/analytics/ai'),
-  S('exp', 'Experiments', 'analytics.view', '/analytics/experiments'),
-  S('compliance', 'Compliance & privacy', 'governance.view', '/governance/compliance'),
-  S('moderation', 'Trust & moderation', 'governance.view', '/governance/moderation'),
-  S('policies', 'Policies & terms', 'governance.view', '/governance/policies'),
-  S('regions', 'Data residency', 'governance.view', '/governance/regions'),
-  S('abuse', 'Abuse & limits', 'governance.view', '/governance/abuse'),
-  S('audit', 'Audit log', 'audit.view'),
-  S('flags', 'Flags & system status', 'platform.view', '/platform/flags'),
-  S('media', 'Video & storage', 'platform.view', '/platform/media'),
-  S('deliver', 'Email deliverability', 'platform.view', '/platform/deliverability'),
-  S('credentials', 'Certificate authority', 'platform.view', '/platform/certificates'),
-  S('standards', 'Standards & conformance', 'platform.view', '/platform/standards'),
-  S('api', 'API & webhooks', 'platform.view', '/platform/api'),
-  S('entitlements', 'Plan entitlements', 'platform.view', '/platform/entitlements'),
-  S('backup', 'Backup & restore', 'platform.view', '/platform/backup'),
-  S('settings', 'Console settings', 'platform.view', '/settings'),
-  S('announce', 'Announcements', 'announcements.send', '/announcements'),
-  S('staff', 'Platform staff', 'staff.view'),
+  S('overview', undefined, '/'),
+  S('tenants', 'tenants.view'),
+  S('support', 'support.view'),
+  S('revenue', 'billing.view'),
+  S('plans', 'billing.view'),
+  S('ext', 'billing.view', '/extensions'),
+  S('growth', 'analytics.view', '/analytics/growth'),
+  S('usage', 'analytics.view', '/analytics/usage'),
+  S('health', 'analytics.view', '/analytics/health'),
+  S('ai', 'analytics.view', '/analytics/ai'),
+  S('exp', 'analytics.view', '/analytics/experiments'),
+  S('compliance', 'governance.view', '/governance/compliance'),
+  S('moderation', 'governance.view', '/governance/moderation'),
+  S('policies', 'governance.view', '/governance/policies'),
+  S('regions', 'governance.view', '/governance/regions'),
+  S('abuse', 'governance.view', '/governance/abuse'),
+  S('audit', 'audit.view'),
+  S('flags', 'platform.view', '/platform/flags'),
+  S('media', 'platform.view', '/platform/media'),
+  S('deliver', 'platform.view', '/platform/deliverability'),
+  S('credentials', 'platform.view', '/platform/certificates'),
+  S('standards', 'platform.view', '/platform/standards'),
+  S('api', 'platform.view', '/platform/api'),
+  S('entitlements', 'platform.view', '/platform/entitlements'),
+  S('backup', 'platform.view', '/platform/backup'),
+  S('settings', 'platform.view', '/settings'),
+  S('announce', 'announcements.send', '/announcements'),
+  S('staff', 'staff.view'),
 ] as const;
 
 export type ScreenId = (typeof SCREENS)[number]['id'];
@@ -61,108 +70,98 @@ export function screenForPath(pathname: string): ScreenDef | undefined {
     .sort((a, b) => b.path.length - a.path.length)[0];
 }
 
+/** Localised title of a screen. */
+export const screenTitle = (id: ScreenId) => screenById[id].title;
+
+type NavGroupId = keyof (typeof source)['nav']['groups'];
+type NavItemId = keyof (typeof source)['nav']['items'];
+type NavSubId = keyof (typeof source)['nav']['subs'];
+
+export interface NavSub {
+  screen: ScreenId;
+  readonly label: string;
+}
 export interface NavItem {
-  id: string;
-  label: string;
+  id: NavItemId;
+  readonly label: string;
   icon: string;
   screen?: ScreenId;
-  subs?: { screen: ScreenId; label: string }[];
+  subs?: NavSub[];
 }
 export interface NavGroup {
-  label: string;
+  id: NavGroupId;
+  readonly label: string;
   items: NavItem[];
 }
 
+const group = (id: NavGroupId, items: NavItem[]): NavGroup => ({
+  id,
+  items,
+  get label() {
+    return t(`nav.groups.${id}`);
+  },
+});
+const item = (id: NavItemId, icon: string, target: { screen: ScreenId } | { subs: NavSub[] }): NavItem => ({
+  id,
+  icon,
+  ...target,
+  get label() {
+    return t(`nav.items.${id}`);
+  },
+});
+const sub = (screen: NavSubId): NavSub => ({
+  screen,
+  get label() {
+    return t(`nav.subs.${screen}`);
+  },
+});
+
 export const NAV: NavGroup[] = [
-  {
-    label: 'Main',
-    items: [
-      { id: 'overview', screen: 'overview', label: 'Dashboard', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z' },
+  group('main', [
+    item('overview', 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z', { screen: 'overview' }),
+    item('tenants', 'M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16', {
+      screen: 'tenants',
+    }),
+    item(
+      'support',
+      'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z',
+      { screen: 'support' },
+    ),
+  ]),
+  group('business', [
+    item('revenue', 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6', { subs: [sub('revenue'), sub('plans'), sub('ext')] }),
+    item('analytics', 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6', {
+      subs: [sub('growth'), sub('usage'), sub('health'), sub('ai'), sub('exp')],
+    }),
+  ]),
+  group('trust', [
+    item('governance', 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4', {
+      subs: [sub('compliance'), sub('moderation'), sub('policies'), sub('regions'), sub('abuse'), sub('audit')],
+    }),
+  ]),
+  group('platform', [
+    item(
+      'platform',
+      'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 3v2M12 19v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M3 12h2M19 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
       {
-        id: 'tenants',
-        screen: 'tenants',
-        label: 'Tenants',
-        icon: 'M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16',
-      },
-      {
-        id: 'support',
-        screen: 'support',
-        label: 'Support',
-        icon: 'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z',
-      },
-    ],
-  },
-  {
-    label: 'Business',
-    items: [
-      {
-        id: 'revenue',
-        label: 'Revenue',
-        icon: 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
         subs: [
-          { screen: 'revenue', label: 'Billing & dunning' },
-          { screen: 'plans', label: 'Plans & pricing' },
-          { screen: 'ext', label: 'Extensions' },
+          sub('flags'),
+          sub('media'),
+          sub('deliver'),
+          sub('credentials'),
+          sub('standards'),
+          sub('api'),
+          sub('entitlements'),
+          sub('backup'),
+          sub('settings'),
         ],
       },
-      {
-        id: 'analytics',
-        label: 'Analytics',
-        icon: 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6',
-        subs: [
-          { screen: 'growth', label: 'Growth' },
-          { screen: 'usage', label: 'Usage & infra' },
-          { screen: 'health', label: 'System health' },
-          { screen: 'ai', label: 'AI usage & cost' },
-          { screen: 'exp', label: 'Experiments' },
-        ],
-      },
-    ],
-  },
-  {
-    label: 'Trust & safety',
-    items: [
-      {
-        id: 'governance',
-        label: 'Governance',
-        icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4',
-        subs: [
-          { screen: 'compliance', label: 'Compliance & privacy' },
-          { screen: 'moderation', label: 'Trust & moderation' },
-          { screen: 'policies', label: 'Policies & terms' },
-          { screen: 'regions', label: 'Data residency' },
-          { screen: 'abuse', label: 'Abuse & limits' },
-          { screen: 'audit', label: 'Audit log' },
-        ],
-      },
-    ],
-  },
-  {
-    label: 'Platform',
-    items: [
-      {
-        id: 'platform',
-        label: 'Platform settings',
-        icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 3v2M12 19v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M3 12h2M19 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
-        subs: [
-          { screen: 'flags', label: 'Flags & status' },
-          { screen: 'media', label: 'Video & storage' },
-          { screen: 'deliver', label: 'Email deliverability' },
-          { screen: 'credentials', label: 'Certificates' },
-          { screen: 'standards', label: 'Standards' },
-          { screen: 'api', label: 'API & webhooks' },
-          { screen: 'entitlements', label: 'Entitlements' },
-          { screen: 'backup', label: 'Backup & restore' },
-          { screen: 'settings', label: 'Console settings' },
-        ],
-      },
-      { id: 'announce', screen: 'announce', label: 'Announcements', icon: 'M3 11l18-5v12L3 13v-2zM11.6 16.8a3 3 0 1 1-5.8-1.6' },
-      {
-        id: 'staff',
-        screen: 'staff',
-        label: 'Platform staff',
-        icon: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
-      },
-    ],
-  },
+    ),
+    item('announce', 'M3 11l18-5v12L3 13v-2zM11.6 16.8a3 3 0 1 1-5.8-1.6', { screen: 'announce' }),
+    item(
+      'staff',
+      'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+      { screen: 'staff' },
+    ),
+  ]),
 ];

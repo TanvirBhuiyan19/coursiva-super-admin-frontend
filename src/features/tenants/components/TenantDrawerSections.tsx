@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { Badge, Bar, ConfirmButton, FormError, Toggle } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { ApiError, errorMessage } from '@/lib/api/errors';
-import { LIMIT_KEYS, LIMIT_LABELS, type LimitKey } from '@/lib/domain';
-import { num, scoreTone, toneFg } from '@/lib/format';
+import { LIMIT_KEYS, type LimitKey } from '@/lib/domain';
+import { money, num, scoreTone, toneFg } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { useUi, toast } from '@/store/ui';
 import {
   useCompExtension,
@@ -17,6 +18,7 @@ import {
   useUpdateTenant,
   useUpdateTenantLimits,
 } from '../api';
+import { t as msg, useT } from '../i18n';
 import type { TenantDetail } from '../types';
 
 export function Section({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
@@ -31,22 +33,23 @@ export function Section({ title, right, children }: { title: string; right?: Rea
   );
 }
 
-export function HealthCard({ t }: { t: TenantDetail }) {
-  const { score, churnRisk, drivers } = t.healthScore;
+export function HealthCard({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
+  const { score, churnRisk, drivers } = tn.healthScore;
   const tone = scoreTone(score);
   return (
     <div className="card" style={{ padding: 14, marginTop: 16, borderRadius: 11 }}>
       <div className="hstack">
-        <h3 style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>Health score</h3>
+        <h3 style={{ fontWeight: 700, fontSize: 13, flex: 1 }}>{t('health.title')}</h3>
         <Badge pill tone={tone} style={{ fontSize: 11 }}>
-          {churnRisk} churn risk
+          {t(`health.churnRisk.${churnRisk}`)}
         </Badge>
       </div>
       <div className="hstack" style={{ gap: 12, marginTop: 10 }}>
         <span className="display" style={{ fontSize: 26, fontWeight: 800, color: toneFg(tone) }}>
           {score}
         </span>
-        <Bar size="md" value={score} tone={tone} label={`Health score ${score} of 100`} />
+        <Bar size="md" value={score} tone={tone} label={t('health.scoreLabel', { score })} />
       </div>
       <dl className="stack" style={{ gap: 7, marginTop: 12, marginBottom: 0 }}>
         {drivers.map((d) => (
@@ -60,31 +63,26 @@ export function HealthCard({ t }: { t: TenantDetail }) {
         type="button"
         className="btn btn--sm btn--block"
         style={{ marginTop: 12 }}
-        onClick={() =>
-          toast(
-            churnRisk === 'Low'
-              ? 'Added to the advocacy playbook — review & case-study asks'
-              : 'Save playbook started — success manager assigned, check-in email scheduled',
-          )
-        }
+        onClick={() => toast(churnRisk === 'Low' ? t('health.advocacyPlaybook') : t('health.savePlaybook'))}
       >
-        Run the matching playbook
+        {t('health.runPlaybook')}
       </button>
     </div>
   );
 }
 
-export function DomainSection({ t }: { t: TenantDetail }) {
+export function DomainSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
   const can = useCan();
-  const action = useTenantAction(t.id);
+  const action = useTenantAction(tn.id);
   return (
-    <Section title="Domain">
+    <Section title={t('domain.title')}>
       <div className="hstack t-sm" style={{ gap: 10, border: '1px solid var(--bd2)', borderRadius: 10, padding: '11px 13px' }}>
         <span className="mono ellipsis" style={{ flex: 1 }}>
-          {t.domain}
+          {tn.domain}
         </span>
         <span className="fg-good" style={{ fontWeight: 700, fontSize: 11.5 }}>
-          ✓ DNS · SSL
+          {t('domain.verified')}
         </span>
         {can('tenants.manage') && (
           <button
@@ -92,9 +90,9 @@ export function DomainSection({ t }: { t: TenantDetail }) {
             className="link"
             style={{ fontSize: 12 }}
             disabled={action.isPending}
-            onClick={() => action.mutate('reissue-ssl', { onSuccess: () => toast(`SSL certificate reissued for ${t.domain}`) })}
+            onClick={() => action.mutate('reissue-ssl', { onSuccess: () => toast(t('domain.reissued', { domain: tn.domain })) })}
           >
-            Reissue
+            {t('domain.reissue')}
           </button>
         )}
       </div>
@@ -102,28 +100,28 @@ export function DomainSection({ t }: { t: TenantDetail }) {
   );
 }
 
-export function UsageSection({ t }: { t: TenantDetail }) {
-  const limitOf = (k: LimitKey) => t.limits.find((l) => l.key === k)?.value ?? 0;
-  const rows: [string, number, number, string][] = [
-    ['Students', t.students, limitOf('students'), ''],
-    ['Storage', t.storageUsedGb, limitOf('storageGb'), ' GB'],
-    ['Team seats', t.seatsUsed, limitOf('staffSeats'), ''],
+export function UsageSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
+  const limitOf = (k: LimitKey) => tn.limits.find((l) => l.key === k)?.value ?? 0;
+  const tc = useCommonT();
+  const gb = (n: number) => t('drawer.gb', { value: n });
+  const rows: [string, number, number, (n: number) => string][] = [
+    [t('usage.students'), tn.students, limitOf('students'), num],
+    [t('usage.storage'), tn.storageUsedGb, limitOf('storageGb'), gb],
+    [t('usage.teamSeats'), tn.seatsUsed, limitOf('staffSeats'), num],
   ];
   return (
-    <Section title="Usage">
+    <Section title={t('usage.title')}>
       <div className="stack" style={{ gap: 10 }}>
-        {rows.map(([label, used, cap, unit]) => {
+        {rows.map(([label, used, cap, fmt]) => {
           const pct = cap ? Math.min(100, Math.round((used / cap) * 100)) : 4;
           return (
             <div key={label}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: 4 }}>
                 <span style={{ fontWeight: 600 }}>{label}</span>
-                <span className="muted">
-                  {num(used)}
-                  {unit} / {cap ? num(cap) + unit : 'Unlimited'}
-                </span>
+                <span className="muted">{t('usage.usedOf', { used: fmt(used), cap: cap ? fmt(cap) : tc('states.unlimited') })}</span>
               </div>
-              <Bar value={pct} color={pct >= 90 ? 'var(--rFg)' : undefined} label={`${label} ${pct}% used`} />
+              <Bar value={pct} color={pct >= 90 ? 'var(--rFg)' : undefined} label={t('usage.barLabel', { label, pct })} />
             </div>
           );
         })}
@@ -134,14 +132,22 @@ export function UsageSection({ t }: { t: TenantDetail }) {
 
 const limitSchema = z.object(
   Object.fromEntries(
-    LIMIT_KEYS.map((k) => [k, z.coerce.number({ error: 'Enter a number' }).int('Whole numbers only').min(0, '0 or more (0 = unlimited)')]),
+    LIMIT_KEYS.map((k) => [
+      k,
+      z.coerce
+        .number({ error: () => msg('limits.errors.number') })
+        .int({ error: () => msg('limits.errors.integer') })
+        .min(0, { error: () => msg('limits.errors.min') }),
+    ]),
   ) as Record<LimitKey, z.ZodCoercedNumber>,
 );
 
-export function LimitsSection({ t }: { t: TenantDetail }) {
+export function LimitsSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
-  const save = useUpdateTenantLimits(t.id);
-  const initial = Object.fromEntries(t.limits.map((l) => [l.key, String(l.value)])) as Record<LimitKey, string>;
+  const save = useUpdateTenantLimits(tn.id);
+  const initial = Object.fromEntries(tn.limits.map((l) => [l.key, String(l.value)])) as Record<LimitKey, string>;
   const [draft, setDraft] = useState(initial);
   const [errors, setErrors] = useState<Partial<Record<LimitKey, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -158,7 +164,7 @@ export function LimitsSection({ t }: { t: TenantDetail }) {
     setFormError(null);
     const changed = Object.fromEntries(LIMIT_KEYS.filter((k) => draft[k] !== initial[k]).map((k) => [k, parsed.data[k]]));
     save.mutate(changed, {
-      onSuccess: () => toast(`Limits updated for ${t.name}`),
+      onSuccess: () => toast(t('limits.updated', { name: tn.name })),
       onError: (err) => {
         if (err instanceof ApiError && err.isValidation) {
           setErrors(Object.fromEntries(Object.entries(err.fieldErrors).map(([k, v]) => [k.replace('limits.', ''), v[0]])));
@@ -168,14 +174,14 @@ export function LimitsSection({ t }: { t: TenantDetail }) {
   };
 
   return (
-    <Section title="Limits & quotas" right={<span className="t-xs faint">0 = unlimited</span>}>
+    <Section title={t('limits.title')} right={<span className="t-xs faint">{t('limits.unlimitedHint')}</span>}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-        {t.limits.map((l) => (
+        {tn.limits.map((l) => (
           <label key={l.key}>
             <span className="faint" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
-              {LIMIT_LABELS[l.key]}
+              {tc(`enums.limit.${l.key}`)}
               {l.overridden && (
-                <span className="fg-warn" title={`Plan default: ${l.planDefault}`}>
+                <span className="fg-warn" title={t('limits.planDefault', { value: l.planDefault })}>
                   {' '}
                   •
                 </span>
@@ -205,9 +211,9 @@ export function LimitsSection({ t }: { t: TenantDetail }) {
       {!disabled && (
         <div className="hstack" style={{ marginTop: 8 }}>
           <button type="button" className="btn btn--sm" style={{ flex: 1 }} disabled={!dirty || save.isPending} onClick={apply}>
-            {save.isPending ? 'Saving…' : 'Apply limits'}
+            {save.isPending ? tc('actions.saving') : t('limits.apply')}
           </button>
-          {t.limits.some((l) => l.overridden) && (
+          {tn.limits.some((l) => l.overridden) && (
             <button
               type="button"
               className="btn btn--sm"
@@ -216,12 +222,12 @@ export function LimitsSection({ t }: { t: TenantDetail }) {
                 save.mutate(Object.fromEntries(LIMIT_KEYS.map((k) => [k, null])), {
                   onSuccess: (d) => {
                     setDraft(Object.fromEntries(d.limits.map((l) => [l.key, String(l.value)])) as Record<LimitKey, string>);
-                    toast(`Limits reset to the ${t.plan} plan`);
+                    toast(t('limits.reset', { plan: tc(`enums.plan.${tn.plan}`) }));
                   },
                 })
               }
             >
-              Reset to plan
+              {t('limits.resetToPlan')}
             </button>
           )}
         </div>
@@ -230,24 +236,29 @@ export function LimitsSection({ t }: { t: TenantDetail }) {
   );
 }
 
-export function ExtensionsSection({ t }: { t: TenantDetail }) {
+export function ExtensionsSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
   const can = useCan();
-  const comp = useCompExtension(t.id);
+  const comp = useCompExtension(tn.id);
   return (
     <div className="card" style={{ padding: 14, marginTop: 16, borderRadius: 11 }}>
-      <h3 style={{ fontWeight: 700, fontSize: 13 }}>Extensions</h3>
-      {t.extensions.map((x) => (
+      <h3 style={{ fontWeight: 700, fontSize: 13 }}>{t('extensions.title')}</h3>
+      {tn.extensions.map((x) => (
         <div key={x.key} className="row t-sm" style={{ gap: 10, padding: '9px 0' }}>
           <div className="min0" style={{ flex: 1 }}>
             <div className="ellipsis" style={{ fontWeight: 600 }}>
               {x.name}
             </div>
             <div className="faint" style={{ fontSize: 10.5 }}>
-              ${x.price}/mo list
+              {t('extensions.listPrice', { price: money(x.price) })}
             </div>
           </div>
           <Badge xs tone={x.state === 'comped' ? 'warn' : x.state === 'paying' ? 'good' : 'flat'}>
-            {x.state === 'comped' ? 'Comped by staff' : x.state === 'paying' ? `Paying $${x.price}/mo` : 'Not added'}
+            {x.state === 'comped'
+              ? t('extensions.comped')
+              : x.state === 'paying'
+                ? t('extensions.paying', { price: money(x.price) })
+                : t('extensions.notAdded')}
           </Badge>
           {can('billing.manage') && x.state !== 'paying' && (
             <button
@@ -262,47 +273,50 @@ export function ExtensionsSection({ t }: { t: TenantDetail }) {
                     onSuccess: () =>
                       toast(
                         x.state === 'comped'
-                          ? `${x.name} comp revoked — billing resumes next cycle`
-                          : `${x.name} granted to ${t.name} — free until revoked, logged in the audit trail`,
+                          ? t('extensions.compRevoked', { name: x.name })
+                          : t('extensions.compGranted', { name: x.name, tenant: tn.name }),
                       ),
                   },
                 )
               }
             >
-              {x.state === 'comped' ? 'Revoke' : 'Comp'}
+              {x.state === 'comped' ? t('extensions.revoke') : t('extensions.comp')}
             </button>
           )}
         </div>
       ))}
       <p className="faint" style={{ fontSize: 11, lineHeight: 1.5, margin: '9px 0 0' }}>
-        Granting an extension shows as “Comped by staff” on their invoice and survives plan changes until you revoke it.
+        {t('extensions.note')}
       </p>
     </div>
   );
 }
 
-export function ModulesSection({ t }: { t: TenantDetail }) {
+export function ModulesSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
-  const setModule = useSetTenantModule(t.id);
-  const reset = useResetTenantModules(t.id);
+  const setModule = useSetTenantModule(tn.id);
+  const reset = useResetTenantModules(tn.id);
   const [showAll, setShowAll] = useState(false);
-  const diffs = t.modules.filter((m) => m.overridden);
-  const rows = showAll ? t.modules : diffs;
+  const diffs = tn.modules.filter((m) => m.overridden);
+  const rows = showAll ? tn.modules : diffs;
   const disabled = !can('tenants.manage');
+  const planName = tc(`enums.plan.${tn.plan}`);
   return (
     <Section
-      title="Module access"
+      title={t('modules.title')}
       right={
         <button type="button" className="link" style={{ fontSize: 11.5 }} onClick={() => setShowAll((v) => !v)} aria-expanded={showAll}>
-          {showAll ? 'Show only overrides' : 'Show all modules'}
+          {showAll ? t('modules.showOverrides') : t('modules.showAll')}
         </button>
       }
     >
       <p className="t-xs muted" style={{ lineHeight: 1.5, margin: 0 }}>
-        Grants and revokes here win over the plan. Use them for pilots, contractual exceptions and trials.
+        {t('modules.intro')}
       </p>
       <div className="t-xs faint" style={{ fontWeight: 700, marginTop: 6 }}>
-        {diffs.length ? `${diffs.length} ${diffs.length === 1 ? 'module' : 'modules'} overridden` : `Exactly the ${t.plan} plan`}
+        {diffs.length ? t('modules.overridden', { count: diffs.length }) : t('modules.exactlyPlan', { plan: planName })}
       </div>
       <div className="stack" style={{ marginTop: 6 }}>
         {rows.map((m) => (
@@ -313,12 +327,12 @@ export function ModulesSection({ t }: { t: TenantDetail }) {
             </span>
             {m.overridden && (
               <Badge tag tone="warn">
-                {m.enabled ? 'Granted' : 'Revoked'}
+                {m.enabled ? t('modules.granted') : t('modules.revoked')}
               </Badge>
             )}
             <Toggle
               on={m.enabled}
-              label={`${m.label} access`}
+              label={t('modules.access', { module: m.label })}
               disabled={disabled}
               onChange={(next) =>
                 setModule.mutate(
@@ -326,7 +340,16 @@ export function ModulesSection({ t }: { t: TenantDetail }) {
                   {
                     onSuccess: () =>
                       toast(
-                        `${m.label}${next ? ' granted to ' : ' revoked for '}${t.name}${next === m.planDefault ? ` — back to the ${t.plan} default` : ` — overrides the ${t.plan} plan`}`,
+                        t(
+                          next
+                            ? next === m.planDefault
+                              ? 'modules.grantedDefault'
+                              : 'modules.grantedOverride'
+                            : next === m.planDefault
+                              ? 'modules.revokedDefault'
+                              : 'modules.revokedOverride',
+                          { module: m.label, tenant: tn.name, plan: planName },
+                        ),
                       ),
                   },
                 )
@@ -341,26 +364,27 @@ export function ModulesSection({ t }: { t: TenantDetail }) {
           className="btn btn--sm btn--block"
           style={{ marginTop: 8 }}
           disabled={reset.isPending}
-          onClick={() => reset.mutate(undefined, { onSuccess: () => toast(`${t.name} reset to the ${t.plan} plan`) })}
+          onClick={() => reset.mutate(undefined, { onSuccess: () => toast(t('modules.reset', { name: tn.name, plan: planName })) })}
         >
-          Reset to plan defaults
+          {t('modules.resetDefaults')}
         </button>
       )}
     </Section>
   );
 }
 
-export function FlagsSection({ t }: { t: TenantDetail }) {
+export function FlagsSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
   const can = useCan();
-  const setFlag = useSetTenantFlag(t.id);
+  const setFlag = useSetTenantFlag(tn.id);
   return (
-    <Section title="Feature overrides">
+    <Section title={t('flags.title')}>
       <div className="stack" style={{ gap: 10 }}>
-        {t.flags.map((f) => (
+        {tn.flags.map((f) => (
           <div key={f.key} className="t-sm" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
             <span>
               {f.name}
-              {f.overridden && <span className="faint"> · overridden</span>}
+              {f.overridden && <span className="faint"> · {t('flags.overridden')}</span>}
             </span>
             <Toggle
               on={f.enabled}
@@ -369,7 +393,7 @@ export function FlagsSection({ t }: { t: TenantDetail }) {
               onChange={(enabled) =>
                 setFlag.mutate(
                   { key: f.key, enabled },
-                  { onSuccess: () => toast(`${f.name}${enabled ? ' enabled' : ' disabled'} for ${t.name}`) },
+                  { onSuccess: () => toast(t(enabled ? 'flags.enabled' : 'flags.disabled', { flag: f.name, tenant: tn.name })) },
                 )
               }
             />
@@ -380,10 +404,11 @@ export function FlagsSection({ t }: { t: TenantDetail }) {
   );
 }
 
-export function AccessSection({ t }: { t: TenantDetail }) {
+export function AccessSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
   const can = useCan();
-  const action = useTenantAction(t.id);
-  const transfer = useTransferOwnership(t.id);
+  const action = useTenantAction(tn.id);
+  const transfer = useTransferOwnership(tn.id);
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   if (!can('tenants.manage')) return null;
@@ -391,32 +416,32 @@ export function AccessSection({ t }: { t: TenantDetail }) {
     setError(null);
     transfer.mutate(email.trim(), {
       onSuccess: () => {
-        toast(`Ownership transfer initiated — confirmation sent to ${email.trim()}`);
+        toast(t('access.transferInitiated', { email: email.trim() }));
         setEmail('');
       },
       onError: (err) => setError(err instanceof ApiError ? (err.field('email') ?? err.message) : errorMessage(err)),
     });
   };
   return (
-    <Section title="Security & access">
+    <Section title={t('access.title')}>
       <div className="hstack">
         <button
           type="button"
           className="btn"
           style={{ flex: 1, padding: '9px 6px', fontSize: 12 }}
           disabled={action.isPending}
-          onClick={() => action.mutate('reset-password', { onSuccess: () => toast(`Password reset email sent to ${t.ownerName}`) })}
+          onClick={() => action.mutate('reset-password', { onSuccess: () => toast(t('access.passwordResetSent', { name: tn.ownerName })) })}
         >
-          Force password reset
+          {t('access.forcePasswordReset')}
         </button>
         <ConfirmButton
           className="btn"
           style={{ flex: 1, padding: '9px 6px', fontSize: 12 }}
-          confirmLabel="Confirm revoke"
+          confirmLabel={t('access.confirmRevoke')}
           pending={action.isPending}
-          onConfirm={() => action.mutate('revoke-sessions', { onSuccess: () => toast(`All active sessions revoked for ${t.name}`) })}
+          onConfirm={() => action.mutate('revoke-sessions', { onSuccess: () => toast(t('access.sessionsRevoked', { name: tn.name })) })}
         >
-          Revoke all sessions
+          {t('access.revokeSessions')}
         </ConfirmButton>
       </div>
       <form
@@ -433,13 +458,13 @@ export function AccessSection({ t }: { t: TenantDetail }) {
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="New owner’s email…"
-          aria-label="New owner email"
+          placeholder={t('access.newOwnerPlaceholder')}
+          aria-label={t('access.newOwnerLabel')}
           aria-invalid={!!error}
           required
         />
         <button type="submit" className="btn btn--primary" disabled={transfer.isPending || !email.trim()}>
-          Transfer
+          {t('access.transfer')}
         </button>
       </form>
       {error && (
@@ -451,11 +476,13 @@ export function AccessSection({ t }: { t: TenantDetail }) {
   );
 }
 
-export function NotesSection({ t }: { t: TenantDetail }) {
+export function NotesSection({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
-  const update = useUpdateTenant(t.id);
+  const update = useUpdateTenant(tn.id);
   const [draft, setDraft] = useState('');
-  if (!can('tenants.manage') && !t.notes) return null;
+  if (!can('tenants.manage') && !tn.notes) return null;
   const save = () => {
     const d = draft.trim();
     if (!d) return;
@@ -464,16 +491,16 @@ export function NotesSection({ t }: { t: TenantDetail }) {
       {
         onSuccess: () => {
           setDraft('');
-          toast('Note saved');
+          toast(t('notes.saved'));
         },
       },
     );
   };
   return (
-    <Section title="Internal note">
-      {t.notes && (
+    <Section title={t('notes.title')}>
+      {tn.notes && (
         <div className="callout callout--warn" style={{ marginBottom: 10 }}>
-          {t.notes}
+          {tn.notes}
         </div>
       )}
       {can('tenants.manage') && (
@@ -490,11 +517,11 @@ export function NotesSection({ t }: { t: TenantDetail }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             maxLength={2000}
-            placeholder={t.notes ? 'Replace the note…' : 'Visible to platform staff only…'}
-            aria-label="Internal note"
+            placeholder={tn.notes ? t('notes.replacePlaceholder') : t('notes.newPlaceholder')}
+            aria-label={t('notes.label')}
           />
           <button type="submit" className="btn btn--primary" disabled={update.isPending || !draft.trim()}>
-            Save
+            {tc('actions.save')}
           </button>
         </form>
       )}
@@ -502,16 +529,17 @@ export function NotesSection({ t }: { t: TenantDetail }) {
   );
 }
 
-export function DangerZone({ t }: { t: TenantDetail }) {
+export function DangerZone({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
   const can = useCan();
-  const action = useTenantAction(t.id);
-  const impersonate = useImpersonate(t.id);
+  const action = useTenantAction(tn.id);
+  const impersonate = useImpersonate(tn.id);
   const setUi = useUi((s) => s.set);
-  const suspended = t.status === 'Suspended';
+  const suspended = tn.status === 'Suspended';
   return (
     <>
       {(can('tenants.manage') || can('tenants.purge')) && (
-        <Section title="Data">
+        <Section title={t('danger.data')}>
           <div className="hstack">
             {can('tenants.manage') && (
               <button
@@ -519,21 +547,19 @@ export function DangerZone({ t }: { t: TenantDetail }) {
                 className="btn"
                 style={{ flex: 1, padding: 9 }}
                 disabled={action.isPending}
-                onClick={() =>
-                  action.mutate('export', { onSuccess: () => toast(`Full data export queued — download link emailed to ${t.ownerName}`) })
-                }
+                onClick={() => action.mutate('export', { onSuccess: () => toast(t('danger.exportQueued', { name: tn.ownerName })) })}
               >
-                Export all data
+                {t('danger.exportAll')}
               </button>
             )}
             {can('tenants.purge') && (
               <ConfirmButton
                 style={{ flex: 1, padding: 9 }}
-                confirmLabel="Confirm purge?"
+                confirmLabel={t('danger.confirmPurge')}
                 pending={action.isPending}
-                onConfirm={() => action.mutate('purge', { onSuccess: () => toast(`Purge scheduled for ${t.name} — 30-day grace period`) })}
+                onConfirm={() => action.mutate('purge', { onSuccess: () => toast(t('danger.purgeScheduled', { name: tn.name })) })}
               >
-                Purge data
+                {t('danger.purge')}
               </ConfirmButton>
             )}
           </div>
@@ -546,9 +572,9 @@ export function DangerZone({ t }: { t: TenantDetail }) {
             className="btn btn--primary btn--lg"
             style={{ flex: 1 }}
             disabled={impersonate.isPending}
-            onClick={() => impersonate.mutate(undefined, { onSuccess: () => setUi({ impersonating: t.id }) })}
+            onClick={() => impersonate.mutate(undefined, { onSuccess: () => setUi({ impersonating: tn.id }) })}
           >
-            Sign in as owner
+            {t('danger.signInAsOwner')}
           </button>
         )}
         {can('tenants.suspend') &&
@@ -558,23 +584,23 @@ export function DangerZone({ t }: { t: TenantDetail }) {
               className="btn btn--lg"
               style={{ flex: 1 }}
               disabled={action.isPending}
-              onClick={() => action.mutate('reactivate', { onSuccess: () => toast(`${t.name} reactivated`) })}
+              onClick={() => action.mutate('reactivate', { onSuccess: () => toast(t('danger.reactivated', { name: tn.name })) })}
             >
-              Reactivate
+              {t('danger.reactivate')}
             </button>
           ) : (
             <ConfirmButton
               className="btn btn--danger btn--lg"
               style={{ flex: 1 }}
-              confirmLabel="Confirm suspend"
+              confirmLabel={t('danger.confirmSuspend')}
               pending={action.isPending}
               onConfirm={() =>
                 action.mutate('suspend', {
-                  onSuccess: () => toast(`${t.name} suspended — storefront offline, students keep their certificates`),
+                  onSuccess: () => toast(t('danger.suspended', { name: tn.name })),
                 })
               }
             >
-              Suspend
+              {t('danger.suspend')}
             </ConfirmButton>
           ))}
       </div>

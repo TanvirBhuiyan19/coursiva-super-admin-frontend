@@ -12,15 +12,6 @@ export type TicketChannel = 'Email' | 'In-app chat';
 export const TICKET_VIEWS = ['open', 'breaching', 'unanswered', 'pending', 'resolved', 'all'] as const;
 export type TicketView = (typeof TICKET_VIEWS)[number];
 
-export const VIEW_LABELS: Record<TicketView, string> = {
-  open: 'All open',
-  breaching: 'Breaching SLA',
-  unanswered: 'Unanswered',
-  pending: 'Pending',
-  resolved: 'Resolved',
-  all: 'Everything',
-};
-
 /**
  * SLA position, computed server-side from `created_at`, the first staff reply and the priority target
  * (first reply: High 60 min · Medium 240 min · Low 480 min; resolution: 24 h).

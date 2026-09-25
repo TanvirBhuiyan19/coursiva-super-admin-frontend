@@ -1,26 +1,27 @@
 // Display rules for the server-computed SLA fields (the server decides the state; the client only words it).
 import type { Tone } from '@/lib/domain';
 import { shortDuration, toneFg } from '@/lib/format';
+import { t } from './i18n';
 import type { Ticket, TicketPriority, TicketStatus } from './types';
 
 const minutesUntil = (iso: string, now: number) => (new Date(iso).getTime() - now) / 60_000;
 
-export function slaLabel(t: Pick<Ticket, 'slaState' | 'slaDueAt'>, now = Date.now()): string {
-  const left = t.slaDueAt ? minutesUntil(t.slaDueAt, now) : 0;
-  switch (t.slaState) {
+export function slaLabel(tk: Pick<Ticket, 'slaState' | 'slaDueAt'>, now = Date.now()): string {
+  const left = tk.slaDueAt ? minutesUntil(tk.slaDueAt, now) : 0;
+  switch (tk.slaState) {
     case 'on_track':
     case 'at_risk':
-      return `First reply due in ${shortDuration(left)}`;
+      return t('sla.dueIn', { duration: shortDuration(left) });
     case 'breached':
-      return `First reply ${shortDuration(left)} late`;
+      return t('sla.late', { duration: shortDuration(left) });
     case 'responded':
-      return `Responded · resolve in ${shortDuration(left)}`;
+      return t('sla.responded', { duration: shortDuration(left) });
     case 'overdue':
-      return 'Responded · resolution overdue';
+      return t('sla.overdue');
     case 'paused':
-      return 'Waiting on tenant · SLA paused';
+      return t('sla.paused');
     case 'resolved':
-      return 'Resolved';
+      return t('sla.resolved');
   }
 }
 

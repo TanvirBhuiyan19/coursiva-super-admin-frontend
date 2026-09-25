@@ -2,20 +2,30 @@ import { Badge, Bar, TRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { PLAN_RANK, PLANS, type Plan, type Tone } from '@/lib/domain';
 import { money } from '@/lib/format';
+import { t as tc, useT as useCommonT } from '@/lib/i18n/common';
 import { toast } from '@/store/ui';
 import { useSetExtensionPlans, useUpdateExtension } from '../api';
+import { t, useT } from '../i18n';
 import type { Extension, ExtensionStatus } from '../types';
 import { CommitNumberInput } from '@/components/ui';
 
 const COLS = 'minmax(0,2.2fr) minmax(0,0.9fr) minmax(0,1.5fr) minmax(0,0.9fr) minmax(0,1.1fr) minmax(0,1.1fr) minmax(0,1fr)';
 const MIN = 920;
+const COLUMNS = ['extension', 'category', 'freeForPlan', 'price', 'installs', 'attachMrr', 'status'] as const;
 const STATUS_TONE: Record<ExtensionStatus, Tone> = { Live: 'good', Beta: 'warn', Hidden: 'flat' };
 
+const planLabel = (p: Plan) => tc(`enums.plan.${p}`);
 const inclusionLabel = (plans: Plan[]) =>
-  plans.length === PLANS.length ? 'Free on every plan' : plans.length ? `Free on ${plans.join(', ')}` : 'Paid on every plan';
+  plans.length === PLANS.length
+    ? t('catalogue.freeOnEvery')
+    : plans.length
+      ? t('catalogue.freeOn', { plans: plans.map(planLabel).join(t('catalogue.planSeparator')) })
+      : t('catalogue.paidOnEvery');
 
 function PlanToggles({ row }: { row: Extension }) {
   const can = useCan();
+  const t = useT();
+  const tc = useCommonT();
   const setPlans = useSetExtensionPlans();
   const toggle = (p: Plan) => {
     const on = row.includedPlans.includes(p);
@@ -26,24 +36,25 @@ function PlanToggles({ row }: { row: Extension }) {
         onSuccess: () =>
           toast(
             on
-              ? `${row.name} is now charged on ${p} — existing installs keep it until their next renewal`
-              : `${row.name} is free for every ${p} tenant from now — anyone already paying stops being billed`,
+              ? t('catalogue.nowCharged', { name: row.name, plan: tc(`enums.plan.${p}`) })
+              : t('catalogue.nowFree', { name: row.name, plan: tc(`enums.plan.${p}`) }),
           ),
       },
     );
   };
   return (
     <div>
-      <div role="group" aria-label={`Plans that get ${row.name} free`} style={{ display: 'flex', gap: 4 }}>
+      <div role="group" aria-label={t('catalogue.plansGroup', { name: row.name })} style={{ display: 'flex', gap: 4 }}>
         {PLANS.map((p) => {
           const on = row.includedPlans.includes(p);
+          const plan = tc(`enums.plan.${p}`);
           return (
             <button
               key={p}
               type="button"
               aria-pressed={on}
-              aria-label={`Free on ${p}: ${row.name}`}
-              title={on ? `${row.name} is free for ${p} tenants` : `Charge ${p} tenants for ${row.name}`}
+              aria-label={t('catalogue.freeOnPlan', { plan, name: row.name })}
+              title={on ? t('catalogue.isFreeFor', { name: row.name, plan }) : t('catalogue.chargeFor', { plan, name: row.name })}
               disabled={!can('billing.manage') || setPlans.isPending}
               onClick={() => toggle(p)}
               style={{
@@ -62,7 +73,7 @@ function PlanToggles({ row }: { row: Extension }) {
                 color: on ? 'var(--gFg)' : 'var(--tx4)',
               }}
             >
-              <span aria-hidden="true">{p.charAt(0)}</span>
+              <span aria-hidden="true">{plan.charAt(0)}</span>
             </button>
           );
         })}
@@ -76,6 +87,7 @@ function PlanToggles({ row }: { row: Extension }) {
 
 function CatalogueRow({ row }: { row: Extension }) {
   const can = useCan();
+  const t = useT();
   const update = useUpdateExtension();
   const manage = can('billing.manage');
   return (
@@ -98,16 +110,16 @@ function CatalogueRow({ row }: { row: Extension }) {
         {manage ? (
           <CommitNumberInput
             key={row.price}
-            prefix="$"
+            prefix={t('catalogue.currencyPrefix')}
             value={row.price}
             min={1}
             max={999}
-            label={`${row.name} price per month`}
-            rangeMessage="Whole dollars, $1–$999"
+            label={t('catalogue.priceLabel', { name: row.name })}
+            rangeMessage={t('catalogue.priceRange')}
             onCommit={(price) =>
               update.mutate(
                 { key: row.key, price },
-                { onSuccess: () => toast(`${row.name} is now ${money(price)}/mo — new installs and renewals bill the new price`) },
+                { onSuccess: () => toast(t('catalogue.priceToast', { name: row.name, price: money(price) })) },
               )
             }
           />
@@ -118,40 +130,41 @@ function CatalogueRow({ row }: { row: Extension }) {
       <div role="cell">
         <div style={{ fontWeight: 700 }}>{row.installs}</div>
         <div className="faint" style={{ fontSize: 10.5, marginTop: 2 }}>
-          {row.payingInstalls} paying{row.freeInstalls ? ` · ${row.freeInstalls} free` : ''}
+          {t('catalogue.paying', { count: row.payingInstalls })}
+          {row.freeInstalls ? t('catalogue.free', { count: row.freeInstalls }) : ''}
         </div>
       </div>
       <div role="cell">
         <div style={{ fontWeight: 700 }}>{money(row.mrr)}</div>
-        <Bar value={row.attachPct} style={{ height: 4, marginTop: 5, flex: 'none' }} label={`${row.name} attach rate ${row.attachPct}%`} />
+        <Bar
+          value={row.attachPct}
+          style={{ height: 4, marginTop: 5, flex: 'none' }}
+          label={t('catalogue.attachLabel', { name: row.name, pct: row.attachPct })}
+        />
         <div className="faint" style={{ fontSize: 10.5, marginTop: 3 }}>
-          {row.attachPct}% attach
+          {t('catalogue.attach', { pct: row.attachPct })}
         </div>
       </div>
       <div role="cell" className="hstack wrap">
-        <Badge tone={STATUS_TONE[row.status]}>{row.status}</Badge>
+        <Badge tone={STATUS_TONE[row.status]}>{t(`enums.status.${row.status}`)}</Badge>
         {manage && (
           <button
             type="button"
             className={row.hidden ? 'link' : 'link link--muted'}
             style={{ fontSize: 11 }}
-            aria-label={`${row.hidden ? 'Publish' : 'Hide'} ${row.name}`}
+            aria-label={t(row.hidden ? 'catalogue.publishLabel' : 'catalogue.hideLabel', { name: row.name })}
             disabled={update.isPending}
             onClick={() =>
               update.mutate(
                 { key: row.key, hidden: !row.hidden },
                 {
                   onSuccess: () =>
-                    toast(
-                      row.hidden
-                        ? `${row.name} is back in the catalogue`
-                        : `${row.name} hidden — existing installs keep working, nobody new can add it`,
-                    ),
+                    toast(row.hidden ? t('catalogue.published', { name: row.name }) : t('catalogue.hidden', { name: row.name })),
                 },
               )
             }
           >
-            {row.hidden ? 'Publish' : 'Hide'}
+            {row.hidden ? t('catalogue.publish') : t('catalogue.hide')}
           </button>
         )}
       </div>
@@ -160,12 +173,13 @@ function CatalogueRow({ row }: { row: Extension }) {
 }
 
 export function ExtensionCatalogueTable({ rows }: { rows: Extension[] }) {
+  const t = useT();
   return (
-    <div role="table" aria-label="Extension catalogue">
+    <div role="table" aria-label={t('catalogue.table')}>
       <TRow cols={COLS} min={MIN} head style={{ gap: 10, padding: '9px 0' }}>
-        {['Extension', 'Category', 'Free for plan', 'Price / mo', 'Installs', 'Attach · MRR', 'Status'].map((h) => (
+        {COLUMNS.map((h) => (
           <div key={h} role="columnheader">
-            {h}
+            {t(`catalogue.cols.${h}`)}
           </div>
         ))}
       </TRow>

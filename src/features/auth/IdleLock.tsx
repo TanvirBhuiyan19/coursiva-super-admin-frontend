@@ -4,10 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { Field, FormError, Input, Modal, Spinner } from '@/components/ui';
 import { ApiError, errorMessage } from '@/lib/api/errors';
 import { useConfirmPassword, useLogout, useSession } from './api';
+import { useT } from './i18n';
 import { useIdleLock } from './useIdleLock';
 
 /** Renders the idle warning and the lock screen; tells the shell when the app must be inert. */
 export function IdleLock({ onLockedChange }: { onLockedChange: (locked: boolean) => void }) {
+  const t = useT();
   const { data: user } = useSession();
   const { state, secondsLeft, stayActive, unlock } = useIdleLock(user?.idleLockMinutes ?? 15, !!user);
 
@@ -16,13 +18,13 @@ export function IdleLock({ onLockedChange }: { onLockedChange: (locked: boolean)
   if (!user) return null;
   if (state === 'warning')
     return (
-      <Modal onClose={stayActive} label="Session about to lock" width={420}>
-        <h2 className="modal-title">Still there?</h2>
+      <Modal onClose={stayActive} label={t('idle.warningLabel')} width={420}>
+        <h2 className="modal-title">{t('idle.stillThere')}</h2>
         <p className="t-sm muted" style={{ margin: '6px 0 18px' }} aria-live="polite">
-          For security, the console locks in <strong>{secondsLeft}</strong> second{secondsLeft === 1 ? '' : 's'} without activity.
+          {t('idle.locksIn')} <strong>{secondsLeft}</strong> {t('idle.secondsLeft', { count: secondsLeft })}
         </p>
         <button type="button" className="btn btn--primary btn--lg btn--block" data-autofocus onClick={stayActive}>
-          Stay signed in
+          {t('idle.staySignedIn')}
         </button>
       </Modal>
     );
@@ -31,6 +33,7 @@ export function IdleLock({ onLockedChange }: { onLockedChange: (locked: boolean)
 }
 
 function LockScreen({ name, email, onUnlocked }: { name: string; email: string; onUnlocked: () => void }) {
+  const t = useT();
   const navigate = useNavigate();
   const confirm = useConfirmPassword();
   const logout = useLogout();
@@ -45,7 +48,7 @@ function LockScreen({ name, email, onUnlocked }: { name: string; email: string; 
     e.preventDefault();
     setFormError(null);
     if (!password) {
-      setError('Enter your password.');
+      setError(t('validation.password'));
       input.current?.focus();
       return;
     }
@@ -76,13 +79,13 @@ function LockScreen({ name, email, onUnlocked }: { name: string; email: string; 
           </div>
         </div>
         <h1 id="lock-title" className="modal-title">
-          Console locked
+          {t('idle.locked')}
         </h1>
         <p className="t-sm muted" style={{ margin: '4px 0 6px' }}>
-          You were inactive, so the console was locked. Enter your password to continue where you left off.
+          {t('idle.lockedIntro')}
         </p>
         <form onSubmit={submit} noValidate>
-          <Field label="Password" error={error ?? undefined}>
+          <Field label={t('idle.password')} error={error ?? undefined}>
             {(p) => (
               <Input
                 {...p}
@@ -100,7 +103,7 @@ function LockScreen({ name, email, onUnlocked }: { name: string; email: string; 
           </Field>
           <FormError>{formError}</FormError>
           <button type="submit" className="btn btn--primary btn--lg btn--block" style={{ marginTop: 18 }} disabled={confirm.isPending}>
-            {confirm.isPending && <Spinner />} Unlock
+            {confirm.isPending && <Spinner />} {t('idle.unlock')}
           </button>
         </form>
         <button
@@ -110,7 +113,7 @@ function LockScreen({ name, email, onUnlocked }: { name: string; email: string; 
           disabled={logout.isPending}
           onClick={() => logout.mutate(undefined, { onSuccess: () => void navigate('/login', { replace: true }) })}
         >
-          Not you? Sign out
+          {t('idle.notYou')}
         </button>
       </main>
     </div>,

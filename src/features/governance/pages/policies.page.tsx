@@ -3,22 +3,26 @@ import { useCan } from '@/features/auth/useCan';
 import type { Tone } from '@/lib/domain';
 import { daysUntil, formatDate, formatDateTime, formatMonth, pct, timeAgo } from '@/lib/format';
 import { useUrlState } from '@/lib/useUrlState';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { toast } from '@/store/ui';
 import { usePolicies, usePolicyAcceptance, usePublishPolicy, useRemindTenant } from '../api';
 import { withinDay } from '../components/format';
+import { t as tStatic, useT } from '../i18n';
 import type { PolicyAcceptance, PolicyDocument, PolicyState } from '../types';
 
 const STATE_TONE: Record<PolicyState, Tone> = { Live: 'good', Draft: 'warn', Superseded: 'flat' };
 
 function docMeta(d: PolicyDocument) {
   if (d.state === 'Draft') return d.note;
-  if (d.state === 'Superseded') return `${d.note} · published ${formatDate(d.publishedAt)}`;
+  if (d.state === 'Superseded') return tStatic('policies.meta.superseded', { note: d.note, date: formatDate(d.publishedAt) });
   const left = d.acceptanceDeadline ? daysUntil(d.acceptanceDeadline) : 0;
-  const window = left > 0 ? `acceptance window closes ${formatDate(d.acceptanceDeadline)}` : 'acceptance window closed';
-  return `${d.note} · published ${formatDate(d.publishedAt)} · ${window}`;
+  const window =
+    left > 0 ? tStatic('policies.meta.windowCloses', { date: formatDate(d.acceptanceDeadline) }) : tStatic('policies.meta.windowClosed');
+  return tStatic('policies.meta.live', { note: d.note, date: formatDate(d.publishedAt), window });
 }
 
 function DocumentRow({ d }: { d: PolicyDocument }) {
+  const t = useT();
   const can = useCan();
   const publish = usePublishPolicy();
   return (
@@ -35,25 +39,23 @@ function DocumentRow({ d }: { d: PolicyDocument }) {
         </div>
       </div>
       {d.acceptance && (
-        <span className="t-xs muted nowrap">
-          {d.acceptance.accepted}/{d.acceptance.total} accepted
-        </span>
+        <span className="t-xs muted nowrap">{t('policies.accepted', { accepted: d.acceptance.accepted, total: d.acceptance.total })}</span>
       )}
       <Badge tone={STATE_TONE[d.state]} style={{ fontSize: 11 }}>
-        {d.state}
+        {t(`enums.policyState.${d.state}`)}
       </Badge>
       {d.state === 'Draft' && can('governance.manage') && (
         <ConfirmButton
           className="btn btn--sm btn--primary"
-          confirmLabel="Confirm publish"
+          confirmLabel={t('policies.confirmPublish')}
           pending={publish.isPending}
           onConfirm={() =>
             publish.mutate(d.id, {
-              onSuccess: () => toast(`${d.name} ${d.version} published — tenants have 30 days to accept before publishing is blocked`),
+              onSuccess: () => toast(t('policies.published', { name: d.name, version: d.version })),
             })
           }
         >
-          Publish
+          {t('policies.publish')}
         </ConfirmButton>
       )}
     </li>
@@ -61,16 +63,22 @@ function DocumentRow({ d }: { d: PolicyDocument }) {
 }
 
 function AcceptanceRow({ a, doc }: { a: PolicyAcceptance; doc: PolicyDocument }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
   const remind = useRemindTenant(doc.id);
   const recentlyReminded = !!a.lastRemindedAt && withinDay(a.lastRemindedAt);
   const left = doc.acceptanceDeadline ? daysUntil(doc.acceptanceDeadline) : 0;
+  const plan = tc(`enums.plan.${a.plan}`);
   const sub = a.acceptedAt
-    ? `${a.plan} · accepted ${formatDate(a.acceptedAt)}`
+    ? t('policies.acceptedOn', { plan, date: formatDate(a.acceptedAt) })
     : [
-        a.plan,
-        left > 0 ? `${left} day${left === 1 ? '' : 's'} left to accept` : 'Window closed — course publishing blocked',
-        a.lastRemindedAt && `reminded ${timeAgo(a.lastRemindedAt)}${a.reminders > 1 ? ` (${a.reminders}×)` : ''}`,
+        plan,
+        left > 0 ? t('policies.daysLeft', { count: left }) : t('policies.windowClosedBlocked'),
+        a.lastRemindedAt &&
+          (a.reminders > 1
+            ? t('policies.remindedTimes', { when: timeAgo(a.lastRemindedAt), count: a.reminders })
+            : t('policies.reminded', { when: timeAgo(a.lastRemindedAt) })),
       ]
         .filter(Boolean)
         .join(' · ');
@@ -81,19 +89,19 @@ function AcceptanceRow({ a, doc }: { a: PolicyAcceptance; doc: PolicyDocument })
         <div
           className="faint"
           style={{ fontSize: 11 }}
-          title={a.lastRemindedAt ? `Last reminder ${formatDateTime(a.lastRemindedAt)}` : undefined}
+          title={a.lastRemindedAt ? t('policies.lastReminder', { when: formatDateTime(a.lastRemindedAt) }) : undefined}
         >
           {sub}
         </div>
       </div>
       <Badge tone={a.acceptedAt ? 'good' : 'warn'} style={{ fontSize: 11, padding: '3px 8px' }}>
-        {a.acceptedAt ? 'Accepted' : 'Pending'} {doc.version}
+        {t(a.acceptedAt ? 'policies.acceptedBadge' : 'policies.pendingBadge', { version: doc.version })}
       </Badge>
       {!a.acceptedAt &&
         can('governance.manage') &&
         (recentlyReminded ? (
           <span className="faint nowrap" style={{ fontSize: 11, fontWeight: 700 }}>
-            Reminder sent
+            {t('policies.reminderSent')}
           </span>
         ) : (
           <button
@@ -101,14 +109,14 @@ function AcceptanceRow({ a, doc }: { a: PolicyAcceptance; doc: PolicyDocument })
             className="link"
             style={{ fontSize: 11 }}
             disabled={remind.isPending}
-            aria-label={`Remind ${a.tenantName}`}
+            aria-label={t('policies.remindLabel', { tenant: a.tenantName })}
             onClick={() =>
               remind.mutate(a.tenantId, {
-                onSuccess: () => toast(`Reminder sent to ${a.tenantName} — a banner shows in their dashboard until they accept`),
+                onSuccess: () => toast(t('policies.remindToast', { tenant: a.tenantName })),
               })
             }
           >
-            Remind
+            {t('policies.remind')}
           </button>
         ))}
     </li>
@@ -116,18 +124,19 @@ function AcceptanceRow({ a, doc }: { a: PolicyAcceptance; doc: PolicyDocument })
 }
 
 function AcceptanceCard({ docs, doc, onDoc }: { docs: PolicyDocument[]; doc: PolicyDocument | undefined; onDoc: (key: string) => void }) {
+  const t = useT();
   const q = usePolicyAcceptance(doc?.id);
   const accepted = q.data?.filter((a) => a.acceptedAt).length ?? 0;
   return (
     <Card
-      title="Tenant acceptance"
+      title={t('policies.acceptance.title')}
       style={{ padding: '18px 20px' }}
       right={
         docs.length > 0 && doc ? (
           <Select
             value={doc.docKey}
-            options={docs.map((d) => [d.docKey, `${d.name} ${d.version}`] as const)}
-            label="Document"
+            options={docs.map((d) => [d.docKey, t('policies.acceptance.docOption', { name: d.name, version: d.version })] as const)}
+            label={t('policies.acceptance.document')}
             style={{ width: 'auto', maxWidth: '100%', padding: '5px 8px', fontSize: 12, marginLeft: 'auto' }}
             onChange={onDoc}
           />
@@ -135,15 +144,15 @@ function AcceptanceCard({ docs, doc, onDoc }: { docs: PolicyDocument[]; doc: Pol
       }
     >
       {!doc ? (
-        <Empty>No live documents.</Empty>
+        <Empty>{t('policies.acceptance.noLive')}</Empty>
       ) : (
         <QueryState query={q} skeleton={<SkeletonRows rows={6} h={26} />} compact>
           {(rows) => (
             <>
               <p className="t-sm muted" style={{ margin: '0 0 4px' }}>
-                {accepted} of {rows.length} tenants on {doc.name} {doc.version}
+                {t('policies.acceptance.summary', { accepted, total: rows.length, name: doc.name, version: doc.version })}
               </p>
-              <ul className="plain-list" aria-label={`Acceptance of ${doc.name} ${doc.version}`}>
+              <ul className="plain-list" aria-label={t('policies.acceptance.listLabel', { name: doc.name, version: doc.version })}>
                 {rows.map((a) => (
                   <AcceptanceRow key={a.tenantId} a={a} doc={doc} />
                 ))}
@@ -157,12 +166,13 @@ function AcceptanceCard({ docs, doc, onDoc }: { docs: PolicyDocument[]; doc: Pol
 }
 
 export default function PoliciesPage() {
+  const t = useT();
   const [f, setF] = useUrlState({ doc: 'tos' });
   const q = usePolicies();
 
   if (q.error)
     return (
-      <Screen max={1250} label="Policies and terms">
+      <Screen max={1250} label={t('policies.title')}>
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />
       </Screen>
     );
@@ -173,26 +183,33 @@ export default function PoliciesPage() {
   const selected = liveDocs.find((d) => d.docKey === f.doc) ?? liveDocs[0];
 
   return (
-    <Screen max={1250} label="Policies and terms">
+    <Screen max={1250} label={t('policies.title')}>
       {q.data ? (
         <KpiRow
           items={[
-            { label: 'Live documents', value: String(liveDocs.length), sub: 'ToS, DPA, AUP, student terms' },
+            { label: t('policies.kpi.live'), value: String(liveDocs.length), sub: t('policies.kpi.liveSub') },
             {
-              label: 'Pending drafts',
+              label: t('policies.kpi.drafts'),
               value: String(drafts.length),
               sub: drafts.length
-                ? `${drafts.map((d) => `${d.name} ${d.version}`).join(', ')} awaiting publish`
-                : 'Nothing awaiting publish',
+                ? t('policies.kpi.awaiting', {
+                    drafts: drafts.map((d) => t('policies.acceptance.docOption', { name: d.name, version: d.version })).join(', '),
+                  })
+                : t('policies.kpi.nothingAwaiting'),
             },
             {
-              label: 'Acceptance',
+              label: t('policies.kpi.acceptance'),
               value: selected?.acceptance ? pct(selected.acceptance.accepted, selected.acceptance.total) : '—',
               sub: selected?.acceptance
-                ? `${selected.acceptance.accepted} of ${selected.acceptance.total} tenants · ${selected.name} ${selected.version}`
-                : 'No live document',
+                ? t('policies.kpi.acceptanceSub', {
+                    accepted: selected.acceptance.accepted,
+                    total: selected.acceptance.total,
+                    name: selected.name,
+                    version: selected.version,
+                  })
+                : t('policies.kpi.noLive'),
             },
-            { label: 'Next review', value: formatMonth(q.data.nextReviewAt), sub: 'Annual legal review' },
+            { label: t('policies.kpi.nextReview'), value: formatMonth(q.data.nextReviewAt), sub: t('policies.kpi.annual') },
           ]}
         />
       ) : (
@@ -209,11 +226,11 @@ export default function PoliciesPage() {
       <div
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 16, alignItems: 'start' }}
       >
-        <Card title="Documents" style={{ padding: '14px 18px 4px' }}>
+        <Card title={t('policies.documents')} style={{ padding: '14px 18px 4px' }}>
           {q.isPending ? (
             <SkeletonRows rows={5} h={30} />
           ) : docs.length === 0 ? (
-            <Empty>No policy documents yet.</Empty>
+            <Empty>{t('policies.noDocuments')}</Empty>
           ) : (
             <ul className="plain-list">
               {docs.map((d) => (
@@ -232,8 +249,7 @@ export default function PoliciesPage() {
             <AcceptanceCard docs={liveDocs} doc={selected} onDoc={(doc) => setF({ doc })} />
           )}
           <div className="card note" style={{ padding: '16px 18px', fontSize: 12.5, lineHeight: 1.6 }}>
-            Publishing a new version supersedes the current one and starts a 30-day acceptance window. Tenants who haven’t accepted keep
-            serving students but can’t publish new courses. A reminder never counts as acceptance.
+            {t('policies.note')}
           </div>
         </div>
       </div>

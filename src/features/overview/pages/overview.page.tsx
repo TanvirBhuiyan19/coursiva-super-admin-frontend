@@ -5,9 +5,11 @@ import { useAuditLog } from '@/features/audit/api';
 import { useCan } from '@/features/auth/useCan';
 import { useTenants } from '@/features/tenants/api';
 import type { Tone } from '@/lib/domain';
-import { avatarColor, healthTone, initials, money, num, planTone, timeAgo } from '@/lib/format';
+import { avatarColor, healthTone, initials, money, monthName, num, planTone, timeAgo } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { useUrlState } from '@/lib/useUrlState';
 import { useOverview } from '../api';
+import { t as tPlain, useT } from '../i18n';
 import { OVERVIEW_RANGES, type Overview, type OverviewRange } from '../types';
 
 const FEED_TONE: Record<string, Tone> = { Billing: 'good', Security: 'bad', Tenants: 'accent', Auth: 'bad' };
@@ -15,47 +17,49 @@ const signed = (n: number, unit = '') => `${n >= 0 ? '+' : '−'}${num(Math.abs(
 
 function queueItems(q: Overview['queue']) {
   const privacyDetail = !q.privacy.dueSoon
-    ? 'Nothing pending'
+    ? tPlain('queue.privacyNothing')
     : q.privacy.overdue
-      ? `${q.privacy.overdue} ${q.privacy.overdue === 1 ? 'request' : 'requests'} overdue${q.privacy.soonestDays != null ? ` · next due in ${q.privacy.soonestDays} days` : ''}`
-      : `Earliest due in ${q.privacy.soonestDays ?? '—'} days`;
+      ? q.privacy.soonestDays != null
+        ? tPlain('queue.privacyOverdueNext', { count: q.privacy.overdue, days: q.privacy.soonestDays })
+        : tPlain('queue.privacyOverdue', { count: q.privacy.overdue })
+      : tPlain('queue.privacyEarliest', { days: q.privacy.soonestDays ?? '—' });
   return [
     {
       key: 'dunning',
       n: q.dunning.count,
-      label: 'Failed payments in dunning',
-      sub: q.dunning.count ? `${money(q.dunning.amount)} at stake` : 'All collected',
+      label: tPlain('queue.dunning'),
+      sub: q.dunning.count ? tPlain('queue.dunningAtStake', { amount: money(q.dunning.amount) }) : tPlain('queue.allCollected'),
       to: pathOf('revenue'),
       tone: q.dunning.count ? 'bad' : 'good',
     },
     {
       key: 'tickets',
       n: q.tickets.high,
-      label: 'High-priority tickets',
-      sub: `${q.tickets.open} open in total`,
+      label: tPlain('queue.tickets'),
+      sub: tPlain('queue.ticketsOpen', { count: q.tickets.open }),
       to: pathOf('support'),
       tone: q.tickets.high ? 'bad' : 'good',
     },
     {
       key: 'trials',
       n: q.trials.count,
-      label: 'Trials to convert',
-      sub: q.trials.count ? q.trials.names.join(', ') : 'No trials running',
+      label: tPlain('queue.trials'),
+      sub: q.trials.count ? q.trials.names.join(', ') : tPlain('queue.noTrials'),
       to: '/tenants?segment=trials_ending',
       tone: q.trials.count ? 'warn' : 'good',
     },
     {
       key: 'overages',
       n: q.overages.count,
-      label: 'Unbilled overages',
-      sub: q.overages.count ? `${money(q.overages.amount)} ready to invoice` : 'Everything billed',
+      label: tPlain('queue.overages'),
+      sub: q.overages.count ? tPlain('queue.overagesReady', { amount: money(q.overages.amount) }) : tPlain('queue.everythingBilled'),
       to: pathOf('revenue'),
       tone: q.overages.count ? 'warn' : 'good',
     },
     {
       key: 'privacy',
       n: q.privacy.dueSoon,
-      label: 'Privacy requests due soon',
+      label: tPlain('queue.privacy'),
       sub: privacyDetail,
       to: pathOf('compliance'),
       tone: q.privacy.overdue ? 'bad' : q.privacy.dueSoon ? 'warn' : 'good',
@@ -64,16 +68,17 @@ function queueItems(q: Overview['queue']) {
 }
 
 function MrrChart({ series }: { series: Overview['mrrSeries'] }) {
+  const t = useT();
   const max = Math.max(...series.map((p) => p.mrr), 1);
   return (
     <figure style={{ margin: 0 }}>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 160, marginTop: 20, minWidth: 0 }} aria-hidden="true">
         {series.map((p, i) => {
-          const label = new Date(p.month + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+          const label = monthName(p.month);
           return (
             <div key={p.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0 }}>
               <div
-                title={`${label}: ${money(p.mrr)} MRR`}
+                title={t('mrrChart.barTitle', { month: label, amount: money(p.mrr) })}
                 style={{
                   width: '100%',
                   borderRadius: '6px 6px 2px 2px',
@@ -91,7 +96,7 @@ function MrrChart({ series }: { series: Overview['mrrSeries'] }) {
       {/* Screen-reader equivalent of the chart (wrapped: tables ignore the 1px sr-only box). */}
       <div className="sr-only">
         <table>
-          <caption>Platform MRR by month</caption>
+          <caption>{t('mrrChart.caption')}</caption>
           <tbody>
             {series.map((p) => (
               <tr key={p.month}>
@@ -107,6 +112,8 @@ function MrrChart({ series }: { series: Overview['mrrSeries'] }) {
 }
 
 export default function OverviewPage() {
+  const t = useT();
+  const tc = useCommonT();
   const navigate = useNavigate();
   const can = useCan();
   const [f, setF] = useUrlState({ range: '30d' });
@@ -128,45 +135,53 @@ export default function OverviewPage() {
   const queueTotal = queue.reduce((s, r) => s + r.n, 0);
 
   return (
-    <Screen max={1200} gap={20} label="Overview">
+    <Screen max={1200} gap={20} label={t('title')}>
       <div className="hstack wrap" style={{ gap: 10 }}>
         {o && can('platform.view') && (
           <Link className="t-sm muted" to={pathOf('entitlements')} style={{ fontSize: 12 }}>
-            {o.entitlementOverrides
-              ? `${o.entitlementOverrides} entitlement override${o.entitlementOverrides === 1 ? '' : 's'} active`
-              : 'Plans match defaults'}
+            {o.entitlementOverrides ? t('entitlementOverrides', { count: o.entitlementOverrides }) : t('plansMatchDefaults')}
           </Link>
         )}
         <div className="hstack wrap" style={{ gap: 10, marginLeft: 'auto' }}>
           {can('announcements.send') && (
             <Link className="btn btn--sm" to={pathOf('announce')}>
-              Announcement
+              {t('actions.announcement')}
             </Link>
           )}
           {can('billing.view') && (
             <Link className="btn btn--sm" to={pathOf('revenue')}>
-              Run payout
+              {t('actions.runPayout')}
             </Link>
           )}
           {can('analytics.view') && (
             <Link className="btn btn--sm" to={pathOf('health')}>
-              System health
+              {t('actions.systemHealth')}
             </Link>
           )}
         </div>
       </div>
 
       <div className="hstack" style={{ justifyContent: 'flex-end', marginBottom: -8 }}>
-        <ChipGroup label="Comparison period" options={OVERVIEW_RANGES} value={range} onChange={(r) => setF({ range: r })} size="sm" />
+        <ChipGroup
+          label={t('range.label')}
+          options={OVERVIEW_RANGES.map((r) => [r, t(`range.${r}`)] as const)}
+          value={range}
+          onChange={(r) => setF({ range: r })}
+          size="sm"
+        />
       </div>
 
       <div className="grid-kpi">
         {o ? (
           <>
-            <Kpi label="Platform MRR" value={money(o.mrr.value)} delta={signed(o.mrr.deltaPct, '%')} />
-            <Kpi label="Active tenants" value={num(o.tenants.value)} delta={signed(o.tenants.delta)} />
-            <Kpi label="Total students" value={num(o.students.value)} delta={signed(o.students.delta)} />
-            <Kpi label="Revenue churn" value={`${o.revenueChurn.valuePct}%`} delta={`${signed(o.revenueChurn.deltaPts)}pt`} />
+            <Kpi label={t('kpis.mrr')} value={money(o.mrr.value)} delta={signed(o.mrr.deltaPct, '%')} />
+            <Kpi label={t('kpis.activeTenants')} value={num(o.tenants.value)} delta={signed(o.tenants.delta)} />
+            <Kpi label={t('kpis.totalStudents')} value={num(o.students.value)} delta={signed(o.students.delta)} />
+            <Kpi
+              label={t('kpis.revenueChurn')}
+              value={`${o.revenueChurn.valuePct}%`}
+              delta={t('kpis.pt', { value: signed(o.revenueChurn.deltaPts) })}
+            />
           </>
         ) : (
           Array.from({ length: 4 }, (_, i) => (
@@ -180,27 +195,27 @@ export default function OverviewPage() {
       </div>
 
       <div className="grid-2">
-        <Card title="Platform MRR" right={<span className="card-sub">Last 12 months</span>}>
+        <Card title={t('mrrChart.title')} right={<span className="card-sub">{t('mrrChart.sub')}</span>}>
           {o ? <MrrChart series={o.mrrSeries} /> : <Skeleton h={180} style={{ marginTop: 20 }} />}
         </Card>
         {can('tenants.view') && (
-          <Card title="Recent signups">
+          <Card title={t('recentSignups')}>
             {signups.isPending ? (
               <SkeletonRows rows={5} h={26} />
             ) : (
               <ul className="stack plain-list">
-                {signups.data?.data.map((t) => (
-                  <li key={t.id}>
-                    <Link to={`/tenants/${t.id}`} className="row row--click row-link-block">
-                      <Avatar text={initials(t.name)} color={avatarColor(t.id)} size={30} radius={8} />
+                {signups.data?.data.map((tn) => (
+                  <li key={tn.id}>
+                    <Link to={`/tenants/${tn.id}`} className="row row--click row-link-block">
+                      <Avatar text={initials(tn.name)} color={avatarColor(tn.id)} size={30} radius={8} />
                       <div className="min0" style={{ flex: 1 }}>
                         <div className="ellipsis" style={{ fontWeight: 600 }}>
-                          {t.name}
+                          {tn.name}
                         </div>
-                        <div className="t-xs muted">{timeAgo(t.createdAt)}</div>
+                        <div className="t-xs muted">{timeAgo(tn.createdAt)}</div>
                       </div>
-                      <Badge tone={planTone(t.plan)} style={{ fontSize: 11 }}>
-                        {t.plan}
+                      <Badge tone={planTone(tn.plan)} style={{ fontSize: 11 }}>
+                        {tc(`enums.plan.${tn.plan}`)}
                       </Badge>
                     </Link>
                   </li>
@@ -211,18 +226,20 @@ export default function OverviewPage() {
         )}
       </div>
 
-      <Card title="Tenants by plan">
+      <Card title={t('plans.title')}>
         <div className="stack" style={{ gap: 12, marginTop: 6 }}>
           {o ? (
             o.planDistribution.map((p) => (
               <div key={p.plan}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
-                  <span style={{ fontWeight: 600 }}>{p.plan}</span>
-                  <span className="muted">
-                    {p.tenants} tenants · {money(p.mrr)} MRR
-                  </span>
+                  <span style={{ fontWeight: 600 }}>{tc(`enums.plan.${p.plan}`)}</span>
+                  <span className="muted">{t('plans.row', { count: p.tenants, mrr: money(p.mrr) })}</span>
                 </div>
-                <Bar size="lg" value={Math.round((p.tenants / maxPlan) * 100)} label={`${p.plan}: ${p.tenants} tenants`} />
+                <Bar
+                  size="lg"
+                  value={Math.round((p.tenants / maxPlan) * 100)}
+                  label={t('plans.barLabel', { plan: tc(`enums.plan.${p.plan}`), count: p.tenants })}
+                />
               </div>
             ))
           ) : (
@@ -233,11 +250,11 @@ export default function OverviewPage() {
 
       <div className="grid-2" style={{ alignItems: 'stretch' }}>
         <Card
-          title="Needs you today"
+          title={t('queue.title')}
           right={
             o && (
               <span className="faint" style={{ fontSize: 12 }}>
-                {queueTotal ? `${queueTotal} ${queueTotal === 1 ? 'item needs' : 'items need'} you` : 'Nothing needs you right now'}
+                {t('queue.total', { count: queueTotal })}
               </span>
             )
           }
@@ -258,7 +275,7 @@ export default function OverviewPage() {
                         </div>
                       </div>
                       <span className="faint" aria-hidden="true" style={{ fontSize: 14 }}>
-                        ›
+                        {t('queue.chevron')}
                       </span>
                     </Link>
                   </li>
@@ -266,19 +283,21 @@ export default function OverviewPage() {
               </ul>
               <div className="hstack" style={{ gap: 12, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--bd2)' }}>
                 <div style={{ flex: 1 }}>
-                  <div className="t-xs faint">MRR at risk</div>
+                  <div className="t-xs faint">{t('queue.mrrAtRisk')}</div>
                   <div className="hstack" style={{ alignItems: 'baseline' }}>
                     <span className="display fg-bad" style={{ fontSize: 20, fontWeight: 800 }}>
                       {money(o.mrrAtRisk.amount)}
                     </span>
                     <span className="t-xs muted">
-                      {o.mrr.value ? `${Math.round((o.mrrAtRisk.amount / o.mrr.value) * 100)}% of MRR` : '0%'} · {o.mrrAtRisk.tenants}{' '}
-                      {o.mrrAtRisk.tenants === 1 ? 'tenant' : 'tenants'}
+                      {t('queue.atRiskTenants', {
+                        share: o.mrr.value ? t('queue.ofMrr', { pct: Math.round((o.mrrAtRisk.amount / o.mrr.value) * 100) }) : '0%',
+                        count: o.mrrAtRisk.tenants,
+                      })}
                     </span>
                   </div>
                 </div>
                 <button type="button" className="btn btn--sm" onClick={() => void navigate('/tenants?segment=at_risk')}>
-                  Review
+                  {t('queue.review')}
                 </button>
               </div>
             </>
@@ -288,10 +307,10 @@ export default function OverviewPage() {
         </Card>
         {can('audit.view') && (
           <Card
-            title="Platform activity"
+            title={t('activity.title')}
             right={
               <Link className="link" style={{ fontSize: 12 }} to={pathOf('audit')}>
-                Audit log →
+                {t('activity.auditLog')}
               </Link>
             }
           >
@@ -307,7 +326,8 @@ export default function OverviewPage() {
                         {a.action}
                       </div>
                       <div className="faint" style={{ fontSize: 11, marginTop: 2 }}>
-                        {a.actorName} · <time dateTime={a.createdAt}>{timeAgo(a.createdAt)}</time> · {a.category}
+                        {a.actorName} · <time dateTime={a.createdAt}>{timeAgo(a.createdAt)}</time> ·{' '}
+                        {tc(`enums.auditCategory.${a.category}`)}
                       </div>
                     </div>
                   </li>
@@ -318,14 +338,14 @@ export default function OverviewPage() {
         )}
       </div>
 
-      <Card title="Needs attention" right={<span className="card-sub">Health checks run hourly</span>}>
+      <Card title={t('watchlist.title')} right={<span className="card-sub">{t('watchlist.sub')}</span>}>
         {o ? (
           o.watchlist.length ? (
             <ul className="stack plain-list">
               {o.watchlist.map((w) => (
                 <li key={w.tenantId} className="row wrap">
                   <Badge tone={healthTone(w.health)} style={{ width: 64, textAlign: 'center' }}>
-                    {w.health}
+                    {tc(`enums.tenantHealth.${w.health}`)}
                   </Badge>
                   <span style={{ fontWeight: 600 }}>{w.name}</span>
                   <span className="muted" style={{ flex: 1, minWidth: 160 }}>
@@ -333,14 +353,14 @@ export default function OverviewPage() {
                   </span>
                   {can('tenants.view') && (
                     <Link className="link" to={`/tenants/${w.tenantId}`}>
-                      Review →
+                      {t('watchlist.review')}
                     </Link>
                   )}
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="empty">Every tenant is healthy.</div>
+            <div className="empty">{t('watchlist.empty')}</div>
           )
         ) : (
           <SkeletonRows rows={3} h={22} />

@@ -4,9 +4,11 @@ import { useCan } from '@/features/auth/useCan';
 import { cx } from '@/lib/cx';
 import type { Tone } from '@/lib/domain';
 import { avatarColor, initials, timeAgo } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { toast } from '@/store/ui';
 import { useElevateStaff, useStaffAction, useUpdateStaff } from '../api';
-import { ASSIGNABLE_ROLES, SCOPE_LABELS, STAFF_SCOPES, type AssignableRole, type StaffMember, type StaffStatus } from '../types';
+import { useT } from '../i18n';
+import { ASSIGNABLE_ROLES, STAFF_SCOPES, type AssignableRole, type StaffMember, type StaffStatus } from '../types';
 
 const COLS = 'minmax(0,1.5fr) minmax(0,1.3fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,0.45fr) minmax(0,1fr) minmax(0,0.7fr) minmax(0,1.9fr)';
 const MIN_W = 1180;
@@ -16,6 +18,8 @@ const STATUS_TONE: Record<StaffStatus, Tone> = { Active: 'good', Invited: 'warn'
 const minutesLeft = (iso: string) => Math.max(1, Math.ceil((new Date(iso).getTime() - Date.now()) / 60_000));
 
 function RowActions({ m }: { m: StaffMember }) {
+  const t = useT();
+  const tc = useCommonT();
   const action = useStaffAction();
   const elevate = useElevateStaff();
   const busy = action.isPending || elevate.isPending;
@@ -29,10 +33,10 @@ function RowActions({ m }: { m: StaffMember }) {
         className="link"
         style={{ fontSize: 12 }}
         disabled={busy}
-        aria-label={`Resend invite to ${m.name}`}
-        onClick={() => run('resend-invite', `Invite re-sent to ${m.email} — expires in 7 days`)}
+        aria-label={t('actions.resendInviteFor', { name: m.name })}
+        onClick={() => run('resend-invite', t('toasts.inviteResent', { email: m.email }))}
       >
-        Resend invite
+        {t('actions.resendInvite')}
       </button>
     );
 
@@ -43,10 +47,10 @@ function RowActions({ m }: { m: StaffMember }) {
         className="link"
         style={{ fontSize: 12 }}
         disabled={busy}
-        aria-label={`Reinstate ${m.name}`}
-        onClick={() => run('reinstate', `${m.name} reinstated — they can sign in again`)}
+        aria-label={t('actions.reinstateFor', { name: m.name })}
+        onClick={() => run('reinstate', t('toasts.reinstated', { name: m.name }))}
       >
-        Reinstate
+        {t('actions.reinstate')}
       </button>
     );
 
@@ -56,49 +60,47 @@ function RowActions({ m }: { m: StaffMember }) {
         type="button"
         className={m.elevatedUntil ? 'badge tone-warn' : 'link link--muted'}
         style={{ fontSize: 11.5, fontWeight: 700, border: 'none', cursor: 'pointer' }}
-        title="Just-in-time Owner access for 60 minutes"
+        title={t('actions.elevateTitle')}
         disabled={busy}
-        aria-label={m.elevatedUntil ? `Revoke elevation for ${m.name}` : `Elevate ${m.name} to Owner for 60 minutes`}
+        aria-label={m.elevatedUntil ? t('actions.revokeElevationFor', { name: m.name }) : t('actions.elevateFor', { name: m.name })}
         onClick={() =>
           elevate.mutate(
             { id: m.id, elevate: !m.elevatedUntil },
             {
               onSuccess: () =>
-                toast(
-                  m.elevatedUntil
-                    ? `Elevation revoked for ${m.name}`
-                    : `${m.name} elevated to Owner for 60 minutes — logged and auto-expiring`,
-                ),
+                toast(m.elevatedUntil ? t('toasts.elevationRevoked', { name: m.name }) : t('toasts.elevated', { name: m.name })),
             },
           )
         }
       >
-        {m.elevatedUntil ? `Elevated · ${minutesLeft(m.elevatedUntil)}m left` : 'Elevate'}
+        {m.elevatedUntil ? t('actions.elevatedLeft', { minutes: minutesLeft(m.elevatedUntil) }) : t('actions.elevate')}
       </button>
       <button
         type="button"
         className="link link--muted"
         style={{ fontSize: 12 }}
         disabled={busy}
-        aria-label={`Sign ${m.name} out of all sessions`}
-        onClick={() => run('revoke-sessions', `${m.name} signed out of every session — they’ll need to sign in again`)}
+        aria-label={t('actions.signOutFor', { name: m.name })}
+        onClick={() => run('revoke-sessions', t('toasts.signedOut', { name: m.name }))}
       >
-        Sign out
+        {tc('actions.signOut')}
       </button>
       <ConfirmButton
         className="link link--muted"
         style={{ fontSize: 12 }}
-        confirmLabel="Confirm suspend"
+        confirmLabel={t('actions.confirmSuspend')}
         pending={action.isPending && action.variables.action === 'suspend'}
-        onConfirm={() => run('suspend', `${m.name} suspended — sessions revoked immediately, sign-in blocked`)}
+        onConfirm={() => run('suspend', t('toasts.suspended', { name: m.name }))}
       >
-        Suspend <span className="sr-only">{m.name}</span>
+        {t('actions.suspend')} <span className="sr-only">{m.name}</span>
       </ConfirmButton>
     </div>
   );
 }
 
 function StaffRowView({ m, highlighted }: { m: StaffMember; highlighted: boolean }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
   const update = useUpdateStaff();
   const editable = can('staff.manage') && !m.isSelf && m.role !== 'Owner';
@@ -119,12 +121,12 @@ function StaffRowView({ m, highlighted }: { m: StaffMember; highlighted: boolean
             {m.name}{' '}
             {m.isSelf && (
               <Badge xs tone="accent">
-                You
+                {t('table.you')}
               </Badge>
             )}
           </div>
           <div className="faint ellipsis" style={{ fontSize: 11 }}>
-            {m.actions30d} actions · 30d
+            {t('table.actions30d', { count: m.actions30d })}
           </div>
         </div>
       </div>
@@ -134,55 +136,65 @@ function StaffRowView({ m, highlighted }: { m: StaffMember; highlighted: boolean
       <div role="cell">
         {editable ? (
           <Select<AssignableRole>
-            label={`Role for ${m.name}`}
+            label={t('table.roleFor', { name: m.name })}
             value={m.role as AssignableRole}
-            options={ASSIGNABLE_ROLES}
+            options={ASSIGNABLE_ROLES.map((r) => [r, t(`roles.${r}`)] as const)}
             disabled={update.isPending}
             style={{ fontSize: 12, padding: '6px 8px' }}
-            onChange={(role) => update.mutate({ id: m.id, role }, { onSuccess: () => toast(`${m.name} is now ${role}`) })}
+            onChange={(role) =>
+              update.mutate(
+                { id: m.id, role },
+                { onSuccess: () => toast(t('toasts.roleChanged', { name: m.name, role: t(`roles.${role}`) })) },
+              )
+            }
           />
         ) : (
-          <span style={{ fontSize: 12, fontWeight: 700 }}>{m.role}</span>
+          <span style={{ fontSize: 12, fontWeight: 700 }}>{t(`roles.${m.role}`)}</span>
         )}
       </div>
       <div role="cell">
         {editable ? (
           <Select
-            label={`Tenant scope for ${m.name}`}
+            label={t('table.scopeFor', { name: m.name })}
             value={m.scope}
-            options={STAFF_SCOPES.map((s) => [s, SCOPE_LABELS[s]] as const)}
+            options={STAFF_SCOPES.map((s) => [s, t(`scopes.${s}`)] as const)}
             disabled={update.isPending}
             style={{ fontSize: 12, padding: '6px 8px' }}
             onChange={(scope) =>
-              update.mutate({ id: m.id, scope }, { onSuccess: () => toast(`${m.name} scoped to ${SCOPE_LABELS[scope].toLowerCase()}`) })
+              update.mutate({ id: m.id, scope }, { onSuccess: () => toast(t(`toasts.scoped.${scope}`, { name: m.name })) })
             }
           />
         ) : (
           <span className="muted" style={{ fontSize: 12 }}>
-            {SCOPE_LABELS[m.scope]}
+            {t(`scopes.${m.scope}`)}
           </span>
         )}
       </div>
       <div role="cell">
-        <Badge tone={m.twoFactorEnabled ? 'good' : m.status === 'Invited' ? 'flat' : 'bad'}>{m.twoFactorEnabled ? 'On' : 'Off'}</Badge>
+        <Badge tone={m.twoFactorEnabled ? 'good' : m.status === 'Invited' ? 'flat' : 'bad'}>
+          {m.twoFactorEnabled ? tc('states.on') : tc('states.off')}
+        </Badge>
       </div>
       <div role="cell" className="min0">
-        <div className="nowrap">{m.lastSeenAt ? timeAgo(m.lastSeenAt) : m.inviteSentAt ? `Invited ${timeAgo(m.inviteSentAt)}` : '—'}</div>
+        <div className="nowrap">
+          {m.lastSeenAt ? timeAgo(m.lastSeenAt) : m.inviteSentAt ? t('table.invitedAgo', { ago: timeAgo(m.inviteSentAt) }) : '—'}
+        </div>
         <div className="faint ellipsis" style={{ fontSize: 11 }}>
           {m.location}
         </div>
       </div>
       <div role="cell">
-        <Badge tone={STATUS_TONE[m.status]}>{m.status}</Badge>
+        <Badge tone={STATUS_TONE[m.status]}>{t(`status.${m.status}`)}</Badge>
       </div>
       <div role="cell" className="min0">
-        {editable ? <RowActions m={m} /> : m.isSelf ? <span className="t-xs faint">Your account</span> : null}
+        {editable ? <RowActions m={m} /> : m.isSelf ? <span className="t-xs faint">{t('table.yourAccount')}</span> : null}
       </div>
     </div>
   );
 }
 
 export function StaffTable({ rows, loading, highlight }: { rows: StaffMember[] | undefined; loading: boolean; highlight: string }) {
+  const t = useT();
   // Deep link (/staff?member=<id>, used by global search): bring the member into view.
   const found = !!rows?.some((m) => m.id === highlight);
   useEffect(() => {
@@ -190,22 +202,22 @@ export function StaffTable({ rows, loading, highlight }: { rows: StaffMember[] |
   }, [highlight, found]);
 
   return (
-    <div role="table" aria-label="Platform staff">
+    <div role="table" aria-label={t('page.title')}>
       <TRow cols={COLS} min={MIN_W} head>
-        <div role="columnheader">Member</div>
-        <div role="columnheader">Email</div>
-        <div role="columnheader">Role</div>
-        <div role="columnheader">Tenant scope</div>
-        <div role="columnheader">2FA</div>
-        <div role="columnheader">Last active</div>
-        <div role="columnheader">Status</div>
-        <div role="columnheader">Actions</div>
+        <div role="columnheader">{t('table.columns.member')}</div>
+        <div role="columnheader">{t('table.columns.email')}</div>
+        <div role="columnheader">{t('table.columns.role')}</div>
+        <div role="columnheader">{t('table.columns.scope')}</div>
+        <div role="columnheader">{t('table.columns.twoFactor')}</div>
+        <div role="columnheader">{t('table.columns.lastActive')}</div>
+        <div role="columnheader">{t('table.columns.status')}</div>
+        <div role="columnheader">{t('table.columns.actions')}</div>
       </TRow>
       {loading && <SkeletonRows rows={5} h={22} />}
       {rows?.map((m) => (
         <StaffRowView key={m.id} m={m} highlighted={m.id === highlight} />
       ))}
-      {rows?.length === 0 && <Empty>No staff match these filters.</Empty>}
+      {rows?.length === 0 && <Empty>{t('table.empty')}</Empty>}
     </div>
   );
 }

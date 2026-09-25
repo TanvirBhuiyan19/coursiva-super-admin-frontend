@@ -6,6 +6,7 @@ import { ApiError, errorMessage } from '@/lib/api/errors';
 import { timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useConnect, useDisconnect, type ConnectionKind } from '../api';
+import { useT } from '../i18n';
 import type { Connection } from '../types';
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
  * configured fields show the last four characters, and typing a value replaces it on save.
  */
 export function ConnectionCard({ kind, connection: c, badge, connectedToast, disconnectedToast }: Props) {
+  const t = useT();
   const can = useCan();
   const manage = can('platform.manage');
   const connect = useConnect(kind);
@@ -40,7 +42,7 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
         onSuccess: () => {
           setDrafts({});
           setShown([]);
-          toast(c.connected ? `${c.name} credentials updated and re-verified` : connectedToast);
+          toast(c.connected ? t('connection.updated', { name: c.name }) : connectedToast);
         },
       },
     );
@@ -97,12 +99,12 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
           style={{ gap: 5, fontSize: 10.5, fontWeight: 700, color: c.connected ? 'var(--gFg)' : 'var(--tx3)' }}
         >
           {c.connected && <Dot tone="good" size={6} />}
-          {c.connected ? 'Connected' : 'Not connected'}
+          {c.connected ? t('connection.connected') : t('connection.notConnected')}
         </span>
       </div>
       <div className="faint" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.45 }}>
         {c.description}
-        {c.verifiedAt && ` · verified ${timeAgo(c.verifiedAt)}`}
+        {c.verifiedAt && t('connection.verified', { ago: timeAgo(c.verifiedAt) })}
       </div>
       <div className="stack" style={{ gap: 7, marginTop: 10 }}>
         {c.fields.map((fd) => {
@@ -117,8 +119,14 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
                   type={vis ? 'text' : 'password'}
                   autoComplete="off"
                   value={drafts[fd.key] ?? ''}
-                  placeholder={fd.value ? `${fd.label} · ${fd.value}` : fd.configured ? `${fd.label} · •••• ${fd.last4 ?? ''}` : fd.label}
-                  aria-label={`${c.name} ${fd.label}`}
+                  placeholder={
+                    fd.value
+                      ? t('connection.valuePlaceholder', { label: fd.label, value: fd.value })
+                      : fd.configured
+                        ? t('connection.configuredPlaceholder', { label: fd.label, last4: fd.last4 ?? '' })
+                        : fd.label
+                  }
+                  aria-label={t('connection.fieldLabel', { name: c.name, label: fd.label })}
                   aria-invalid={err ? true : undefined}
                   aria-describedby={err ? errId : undefined}
                   disabled={!manage}
@@ -130,11 +138,11 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
                     type="button"
                     className="link link--muted"
                     style={{ fontSize: 10.5 }}
-                    aria-label={`${vis ? 'Hide' : 'Show'} ${c.name} ${fd.label}`}
+                    aria-label={t(vis ? 'connection.hideLabel' : 'connection.showLabel', { name: c.name, label: fd.label })}
                     aria-pressed={vis}
                     onClick={() => setShown((s) => (vis ? s.filter((k) => k !== fd.key) : [...s, fd.key]))}
                   >
-                    {vis ? 'Hide' : 'Show'}
+                    {vis ? t('connection.hide') : t('connection.show')}
                   </button>
                 )}
               </div>
@@ -152,14 +160,14 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
         <div className="hstack" style={{ gap: 8, marginTop: 'auto', paddingTop: 10 }}>
           {(!c.connected || typed) && (
             <button type="button" className="btn btn--sm" style={{ flex: 1 }} disabled={connect.isPending} onClick={save}>
-              {connect.isPending ? 'Verifying…' : c.connected ? 'Save & re-verify' : 'Connect & verify'}
+              {connect.isPending ? t('connection.verifying') : c.connected ? t('connection.reverify') : t('connection.connect')}
             </button>
           )}
           {c.connected && (
             <ConfirmButton
               className="btn btn--sm"
               style={{ flex: 1 }}
-              confirmLabel="Confirm disconnect"
+              confirmLabel={t('connection.confirmDisconnect')}
               pending={disconnect.isPending}
               onConfirm={() =>
                 disconnect.mutate(c.key, {
@@ -170,7 +178,7 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
                 })
               }
             >
-              Disconnect
+              {t('connection.disconnect')}
             </ConfirmButton>
           )}
         </div>

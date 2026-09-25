@@ -1,4 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { t } from '@/features/shell/i18n';
+import { t as tc } from '@/lib/i18n/common';
 import { reportError } from '@/lib/reportError';
 
 interface Props {
@@ -32,16 +34,16 @@ export class RouteErrorBoundary extends Component<Props, State> {
     return (
       <div className="screen" style={{ maxWidth: 640 }}>
         <div className="card" role="alert">
-          <h2 className="card-title">This screen hit a problem</h2>
+          <h2 className="card-title">{t('errorBoundary.title')}</h2>
           <p className="note" style={{ margin: '8px 0 14px' }}>
-            The error has been reported. You can try again, or use the navigation to go somewhere else.
+            {t('errorBoundary.body')}
           </p>
           <div className="hstack">
             <button type="button" className="btn btn--primary" onClick={() => this.setState({ error: null })}>
-              Try again
+              {tc('actions.retry')}
             </button>
             <button type="button" className="btn" onClick={() => window.location.reload()}>
-              Reload page
+              {tc('actions.reloadPage')}
             </button>
           </div>
         </div>

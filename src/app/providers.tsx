@@ -7,6 +7,7 @@ import { onUnauthenticated } from '@/lib/api/client';
 import { setReportingUser } from '@/lib/reportError';
 import { useSession } from '@/features/auth/api';
 import { useUi } from '@/store/ui';
+import { t } from './i18n';
 import { applyTokens } from '@/theme/themes';
 
 const Devtools = env.isDev ? lazy(() => import('@tanstack/react-query-devtools').then((m) => ({ default: m.ReactQueryDevtools }))) : null;
@@ -24,7 +25,7 @@ function SessionExpiry() {
   useEffect(
     () =>
       onUnauthenticated(() => {
-        if (qc.getQueryData(authKeys.me)) useUi.getState().toast('Your session expired. Sign in again to continue.', 'error');
+        if (qc.getQueryData(authKeys.me)) useUi.getState().toast(t('sessionExpired'), 'error');
         qc.setQueryData(authKeys.me, null);
       }),
     [qc],

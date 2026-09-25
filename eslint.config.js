@@ -4,6 +4,7 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import globals from 'globals';
+import i18next from 'eslint-plugin-i18next';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -45,6 +46,36 @@ export default tseslint.config(
             },
             { group: ['@/mocks', '@/mocks/*'], message: 'App code must not import the mock backend (only mock.ts files and tests may).' },
           ],
+        },
+      ],
+    },
+  },
+  {
+    // i18n: user-facing text in JSX must come from a message catalogue (`t()` from lib/i18n or a feature's i18n.ts).
+    files: ['src/**/*.tsx'],
+    ignores: ['**/*.test.tsx', '**/*.stories.tsx', 'src/test/**', 'src/mocks/**'],
+    plugins: { i18next },
+    rules: {
+      'i18next/no-literal-string': [
+        'error',
+        {
+          mode: 'jsx-only',
+          'jsx-attributes': {
+            include: [
+              'title',
+              'label',
+              'sub',
+              'hint',
+              'placeholder',
+              'alt',
+              'aria-label',
+              'aria-description',
+              'noun',
+              'description',
+              'message',
+            ],
+          },
+          words: { exclude: ['[0-9!-/:-@[-`{-~\s·—–…×→←↑↓✓•]+', '[A-Z_-]+'] },
         },
       ],
     },

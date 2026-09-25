@@ -12,19 +12,23 @@ import { InviteForm } from '../components/InviteForm';
 import { PermissionMatrix } from '../components/PermissionMatrix';
 import { AccessReviewCard, StaffActivityCard } from '../components/StaffCards';
 import { StaffTable } from '../components/StaffTable';
+import { useT } from '../i18n';
 import type { StaffListParams, StaffSummary } from '../types';
 
+const WARN_ICON = '⚠';
+
 function Kpis({ s }: { s: StaffSummary | undefined }) {
+  const t = useT();
   const items: [string, string, string][] | null = s
     ? [
-        ['Staff', num(s.total), `${s.invited} invited · ${s.suspended} suspended`],
+        [t('kpis.staff'), num(s.total), t('kpis.staffSub', { invited: s.invited, suspended: s.suspended })],
         [
-          '2FA coverage',
-          `${s.twoFactorCoverage}%`,
-          s.withoutTwoFactor.length ? `${s.withoutTwoFactor.length} without 2FA` : 'Everyone enrolled',
+          t('kpis.twoFactor'),
+          t('kpis.twoFactorValue', { pct: s.twoFactorCoverage }),
+          s.withoutTwoFactor.length ? t('kpis.withoutTwoFactor', { count: s.withoutTwoFactor.length }) : t('kpis.everyoneEnrolled'),
         ],
-        ['Elevated now', num(s.elevatedNow), 'Just-in-time Owner access'],
-        ['Impersonations · 7d', num(s.impersonations7d), 'All recorded in the audit log'],
+        [t('kpis.elevated'), num(s.elevatedNow), t('kpis.elevatedSub')],
+        [t('kpis.impersonations'), num(s.impersonations7d), t('kpis.impersonationsSub')],
       ]
     : null;
   return (
@@ -50,6 +54,7 @@ function Kpis({ s }: { s: StaffSummary | undefined }) {
 }
 
 export default function StaffPage() {
+  const t = useT();
   const can = useCan();
   const [f, setF] = useUrlState({ q: '', role: 'all', member: '' });
   const [search, setSearch] = useState(f.q);
@@ -70,19 +75,20 @@ export default function StaffPage() {
   const s = summary.data;
 
   return (
-    <Screen max={1250} label="Platform staff">
+    <Screen max={1250} label={t('page.title')}>
       {summary.error ? <ErrorState error={summary.error} onRetry={() => void summary.refetch()} /> : <Kpis s={s} />}
 
       {s && s.withoutTwoFactor.length > 0 && (
         <div className="callout callout--warn" role="status" style={{ alignItems: 'center' }}>
-          <span aria-hidden="true">⚠</span>
+          <span aria-hidden="true">{WARN_ICON}</span>
           <span className="fg-warn" style={{ fontWeight: 600, flex: 1 }}>
-            {s.withoutTwoFactor.map((x) => x.name).join(', ')} can sign in without 2FA —{' '}
-            {s.requireStaffTwoFactor ? 'they must enroll at their next sign-in.' : 'require it in Console settings.'}
+            {t(s.requireStaffTwoFactor ? 'page.twoFactorWarning.mustEnroll' : 'page.twoFactorWarning.requireIt', {
+              names: s.withoutTwoFactor.map((x) => x.name).join(', '),
+            })}
           </span>
           {!s.requireStaffTwoFactor && can('platform.view') && (
             <Link className="btn btn--sm" to="/settings">
-              Open settings
+              {t('page.openSettings')}
             </Link>
           )}
         </div>
@@ -100,22 +106,22 @@ export default function StaffPage() {
               className="input"
               type="search"
               style={{ width: 220 }}
-              placeholder="Search name or email…"
-              aria-label="Search staff"
+              placeholder={t('page.searchPlaceholder')}
+              aria-label={t('page.searchLabel')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <ChipGroup
               size="sm"
-              label="Filter by role"
-              options={['all', ...ROLES].map((r) => [r, r === 'all' ? 'All roles' : r] as const)}
+              label={t('page.filterLabel')}
+              options={[['all', t('page.allRoles')] as const, ...ROLES.map((r) => [r, t(`roles.${r}`)] as const)]}
               value={f.role}
               onChange={(role) => setF({ role })}
             />
           </div>
           {can('audit.view') && (
             <Link className="btn btn--sm" to="/audit" style={{ marginLeft: 'auto' }}>
-              Open audit log →
+              {t('page.openAuditLog')}
             </Link>
           )}
         </div>

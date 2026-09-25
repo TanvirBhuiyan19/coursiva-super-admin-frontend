@@ -6,19 +6,20 @@ import { errorMessage } from '@/lib/api/errors';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useUpdateBackupSettings } from '../api';
-import { BACKUP_FREQUENCIES, FREQUENCY_LABELS, type BackupSettings, type BackupSummary } from '../types';
+import { t as tStatic, useT } from '../i18n';
+import { BACKUP_FREQUENCIES, type BackupSettings, type BackupSummary } from '../types';
 
 const policySchema = z.object({
   frequency: z.enum(BACKUP_FREQUENCIES),
   nightlyWindow: z
     .string()
     .trim()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Enter the window as HH:MM (24-hour UTC).'),
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, { error: () => tStatic('policy.windowFormat') }),
   retentionDays: z.coerce
-    .number({ error: 'Enter a number of days.' })
-    .int('Whole days only.')
-    .min(7, 'Keep nightly backups for 7 to 365 days.')
-    .max(365, 'Keep nightly backups for 7 to 365 days.'),
+    .number({ error: () => tStatic('policy.daysNumber') })
+    .int({ error: () => tStatic('policy.wholeDays') })
+    .min(7, { error: () => tStatic('policy.daysRange') })
+    .max(365, { error: () => tStatic('policy.daysRange') }),
 });
 type PolicyIn = z.input<typeof policySchema>;
 
@@ -29,6 +30,7 @@ const valuesOf = (s: BackupSettings): PolicyIn => ({
 });
 
 export function BackupPolicy({ settings, summary }: { settings: BackupSettings; summary: BackupSummary }) {
+  const t = useT();
   const can = useCan();
   const manage = can('platform.manage');
   const update = useUpdateBackupSettings();
@@ -47,7 +49,7 @@ export function BackupPolicy({ settings, summary }: { settings: BackupSettings; 
     update.mutate(v, {
       onSuccess: (next) => {
         form.reset(valuesOf(next));
-        toast(`Backup policy saved — ${FREQUENCY_LABELS[next.frequency].toLowerCase()}, nightly backups kept ${next.retentionDays} days`);
+        toast(t('policy.saved', { frequency: t(`enums.frequencyInline.${next.frequency}`), days: next.retentionDays }));
       },
       onError: (err) => {
         if (!applyServerErrors(form, err)) setFormError(errorMessage(err));
@@ -59,24 +61,24 @@ export function BackupPolicy({ settings, summary }: { settings: BackupSettings; 
     update.mutate(patch, { onSuccess: () => toast(message), onError: (err) => toast(errorMessage(err), 'error') });
 
   return (
-    <Card title="Policy & destinations">
-      <form onSubmit={(e) => void onSubmit(e)} noValidate aria-label="Backup policy">
+    <Card title={t('policy.title')}>
+      <form onSubmit={(e) => void onSubmit(e)} noValidate aria-label={t('policy.formLabel')}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 14 }}>
-          <Field label="Schedule" error={errs.frequency?.message} style={{ gridColumn: '1 / -1' }}>
+          <Field label={t('policy.schedule')} error={errs.frequency?.message} style={{ gridColumn: '1 / -1' }}>
             {(p) => (
               <select {...p} {...form.register('frequency')} className="select" disabled={!manage}>
                 {BACKUP_FREQUENCIES.map((f) => (
                   <option key={f} value={f}>
-                    {FREQUENCY_LABELS[f]}
+                    {t(`enums.frequency.${f}`)}
                   </option>
                 ))}
               </select>
             )}
           </Field>
-          <Field label="Nightly window (UTC)" error={errs.nightlyWindow?.message}>
+          <Field label={t('policy.nightlyWindow')} error={errs.nightlyWindow?.message}>
             {(p) => <Input {...p} {...form.register('nightlyWindow')} placeholder="03:00" disabled={!manage} autoComplete="off" />}
           </Field>
-          <Field label="Keep nightly backups (days)" error={errs.retentionDays?.message} hint="Then weekly copies for 12 months.">
+          <Field label={t('policy.keepDays')} error={errs.retentionDays?.message} hint={t('policy.keepHint')}>
             {(p) => <Input {...p} {...form.register('retentionDays')} type="number" min={7} max={365} disabled={!manage} />}
           </Field>
         </div>
@@ -84,10 +86,10 @@ export function BackupPolicy({ settings, summary }: { settings: BackupSettings; 
         {manage && form.formState.isDirty && (
           <div className="hstack" style={{ gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
             <button type="button" className="btn btn--sm" onClick={() => form.reset(valuesOf(settings))}>
-              Discard
+              {t('policy.discard')}
             </button>
             <button type="submit" className="btn btn--sm btn--primary" disabled={update.isPending}>
-              {update.isPending && <Spinner />} Save policy
+              {update.isPending && <Spinner />} {t('policy.save')}
             </button>
           </div>
         )}
@@ -95,56 +97,49 @@ export function BackupPolicy({ settings, summary }: { settings: BackupSettings; 
 
       <div style={{ marginTop: 10 }}>
         <ToggleRow
-          label="Cross-region replication"
-          sub="Every backup copies to a second region within minutes."
+          label={t('policy.replication')}
+          sub={t('policy.replicationSub')}
           on={settings.replication}
           disabled={!manage || update.isPending}
-          onChange={(v) =>
-            toggle(
-              { replication: v },
-              v
-                ? 'Cross-region replication on — the replica syncs within minutes'
-                : 'Cross-region replication off — backups stay in one region',
-            )
-          }
+          onChange={(v) => toggle({ replication: v }, v ? t('policy.replicationOn') : t('policy.replicationOff'))}
         />
         <div className="row" style={{ alignItems: 'center' }}>
           <div className="min0" style={{ flex: 1 }}>
             <div style={{ fontWeight: 600, fontSize: 13 }}>
-              Immutability lock (WORM){' '}
+              {t('policy.worm')}{' '}
               <Badge xs tone={settings.worm ? 'good' : 'bad'}>
-                {settings.worm ? 'Locked' : 'Off'}
+                {settings.worm ? t('policy.locked') : t('policy.off')}
               </Badge>
             </div>
             <div className="t-xs muted" style={{ marginTop: 2, lineHeight: 1.45 }}>
-              Backups can’t be altered or deleted for 30 days — ransomware protection.
+              {t('policy.wormSub')}
             </div>
           </div>
           {manage &&
             (settings.worm ? (
               <ConfirmButton
                 className="btn btn--sm btn--danger"
-                confirmLabel="Confirm — remove lock"
+                confirmLabel={t('policy.confirmRemoveLock')}
                 pending={update.isPending}
-                onConfirm={() => toggle({ worm: false }, 'Immutability lock disabled — backups can now be altered or deleted')}
+                onConfirm={() => toggle({ worm: false }, t('policy.wormDisabled'))}
               >
-                Turn off WORM
+                {t('policy.turnOffWorm')}
               </ConfirmButton>
             ) : (
               <button
                 type="button"
                 className="btn btn--sm btn--primary"
                 disabled={update.isPending}
-                onClick={() => toggle({ worm: true }, 'Backups locked immutable for 30 days — ransomware cannot alter them')}
+                onClick={() => toggle({ worm: true }, t('policy.wormEnabled'))}
               >
-                Turn on WORM
+                {t('policy.turnOnWorm')}
               </button>
             ))}
         </div>
       </div>
 
       <h3 className="eyebrow" style={{ marginTop: 14, marginBottom: 2 }}>
-        Destinations
+        {t('policy.destinations')}
       </h3>
       <ul className="plain-list">
         {summary.destinations.map((d) => (
@@ -160,7 +155,7 @@ export function BackupPolicy({ settings, summary }: { settings: BackupSettings; 
         ))}
       </ul>
       <p className="note" style={{ marginTop: 8, marginBottom: 0 }}>
-        AES-256 encrypted at rest · keys in the platform KMS · integrity checksums on every snapshot.
+        {t('policy.encryption')}
       </p>
     </Card>
   );

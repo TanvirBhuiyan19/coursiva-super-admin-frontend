@@ -82,6 +82,19 @@ docs/openapi.yaml generated OpenAPI 3.1 spec (`npm run openapi`) — never edit 
 - Responsive: `grid-kpi`, `grid-2`, `grid-3`; wide tables in `.card.table-scroll` with a `min` width.
 - Dates via `timeAgo`, `formatDate`, `formatDateTime`; numbers via `num`, `money`, `moneyFine`, `moneyCompact`.
 
+### Internationalisation (lint-enforced)
+
+- No user-facing literals in JSX (`i18next/no-literal-string`). Each feature owns `features/<f>/i18n.ts`:
+  `export const { t, useT } = defineMessages('<f>', { … })` (core: `lib/i18n/index.ts`, ~1 KB, no i18next). Shared words and
+  **enum labels** live in `lib/i18n/common.ts` (``tc(`enums.tenantStatus.${s}`)``).
+- Components call `const t = useT()`; non-component code (toasts, zod messages) calls `t()` **at call time**, never at
+  module load. Plurals are `{ one, other }` messages with `count` — `plural()` from lib/format is deprecated.
+- Keys and `{placeholders}` are type-checked. Numbers in placeholders and every `lib/format` helper follow the active locale;
+  never pass `'en-US'` to `toLocale*`. API data and server messages are not translated (the API gets `Accept-Language`).
+- Locales: `en-US`, `en-GB`, and the pseudo-locale `en-XA` (dev only; accented + 35% longer text to spot hard-coded or
+  truncated strings). Add a language by adding a lazy loader per namespace: `defineMessages(ns, en, { bn: () => import('./i18n.bn') })`
+  — missing keys fall back to English. Changing locale remounts the app (`I18nBoundary`).
+
 ### Performance
 
 - **Critical path is budgeted** (`scripts/check-bundle.ts`, initial JS ≤ 125 KB brotli). Anything not needed to render the first screen is lazy: overlays via `lazyWithPreload` (`@/lib/lazy`) + `whenIdle` preload; heavy feature UI exported lazily from the feature's `index.ts`.

@@ -5,12 +5,16 @@ import { NAV, pathOf, screenById, type ScreenDef, type ScreenId } from '@/app/sc
 import { useSession } from '@/features/auth/api';
 import { useCan } from '@/features/auth/useCan';
 import { useNavBadges } from '@/features/shell/api';
+import { useT } from '@/features/shell/i18n';
 import { avatarColor, initials } from '@/lib/format';
 import { cx } from '@/lib/cx';
 import { useUi } from '@/store/ui';
 import { Avatar, Icon } from '../ui';
 
+const CHEVRON = '▶';
+
 export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
+  const t = useT();
   const can = useCan();
   const { data: user } = useSession();
   const { data: badges } = useNavBadges();
@@ -29,16 +33,16 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return undefined;
-    let t: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout>;
     const onScroll = () => {
       el.setAttribute('data-scrolling', '');
-      clearTimeout(t);
-      t = setTimeout(() => el.removeAttribute('data-scrolling'), 700);
+      clearTimeout(timer);
+      timer = setTimeout(() => el.removeAttribute('data-scrolling'), 700);
     };
     el.addEventListener('scroll', onScroll, true);
     return () => {
       el.removeEventListener('scroll', onScroll, true);
-      clearTimeout(t);
+      clearTimeout(timer);
     };
   }, []);
 
@@ -47,14 +51,14 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
   const intent = (id: ScreenId) => ({ onMouseEnter: () => preloadScreen(id), onFocus: () => preloadScreen(id) });
 
   return (
-    <aside className="sidebar" ref={ref} aria-label="Console navigation">
-      <Link to="/" className="sb-brand" onClick={closeMobile} aria-label="Coursiva platform console — home">
+    <aside className="sidebar" ref={ref} aria-label={t('sidebar.label')}>
+      <Link to="/" className="sb-brand" onClick={closeMobile} aria-label={t('sidebar.homeLabel')}>
         <div className="sb-logo" aria-hidden="true">
           C
         </div>
         <div className="min0">
-          <div className="sb-name">Coursiva</div>
-          <div className="sb-tag">Platform console</div>
+          <div className="sb-name">{t('brand')}</div>
+          <div className="sb-tag">{t('sidebar.tagline')}</div>
         </div>
       </Link>
       <nav className="sb-nav">
@@ -64,11 +68,11 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
             .filter((it) => (it.screen ? visible(it.screen) : (it.subs?.length ?? 0) > 0));
           if (!items.length) return null;
           return (
-            <div key={grp.label}>
-              <div className="sb-group-label" id={`nav-${grp.label}`}>
+            <div key={grp.id}>
+              <div className="sb-group-label" id={`nav-${grp.id}`}>
                 {grp.label}
               </div>
-              <ul className="sb-items" aria-labelledby={`nav-${grp.label}`}>
+              <ul className="sb-items" aria-labelledby={`nav-${grp.id}`}>
                 {items.map((it) => {
                   if (it.screen) {
                     const badge = it.id === 'support' ? (badges?.support ?? 0) : 0;
@@ -84,7 +88,7 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
                           <Icon d={it.icon} />
                           <span className="sb-item-label">{it.label}</span>
                           {badge > 0 && (
-                            <span className="sb-badge" aria-label={`${badge} open tickets`}>
+                            <span className="sb-badge" aria-label={t('sidebar.openTickets', { count: badge })}>
                               {badge}
                             </span>
                           )}
@@ -107,7 +111,7 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
                         <Icon d={it.icon} />
                         <span className="sb-item-label">{it.label}</span>
                         <span className={cx('sb-chev', open && 'is-open')} aria-hidden="true">
-                          ▶
+                          {CHEVRON}
                         </span>
                       </button>
                       {open && (
@@ -140,7 +144,7 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
           <Avatar text={initials(user.name)} color={avatarColor(user.id)} size={30} round fontSize={12} />
           <div className="min0">
             <div className="sb-user-name ellipsis">{user.name}</div>
-            <div className="sb-user-role">{user.role === 'Owner' ? 'Platform owner' : user.role}</div>
+            <div className="sb-user-role">{user.role === 'Owner' ? t('sidebar.platformOwner') : user.role}</div>
           </div>
         </div>
       )}

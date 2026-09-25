@@ -4,35 +4,45 @@ import { Card, Field, FormError, Input, Seg, Spinner, ToggleRow, UnsavedChangesG
 import { useCan } from '@/features/auth/useCan';
 import { errorMessage } from '@/lib/api/errors';
 import { PLANS } from '@/lib/domain';
-import { plural } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useUpdatePlatformSettings } from '../api';
+import { t as translate, useT } from '../i18n';
 import { IDLE_LOCK_MINUTES, SESSION_HOURS, type PlatformSettings } from '../types';
 
-const num = (msg: string) => z.number({ error: msg });
+type ValidationKey = Extract<Parameters<typeof translate>[0], `validation.${string}`>;
+// Messages resolve when validation runs, so they follow the current locale.
+const msg = (key: ValidationKey) => ({ error: () => translate(key) });
+const num = (key: ValidationKey) => z.number(msg(key));
 
 const schema = z.object({
-  supportEmail: z.string().trim().pipe(z.email('Enter a valid support email address.')),
+  supportEmail: z
+    .string()
+    .trim()
+    .pipe(z.email(msg('validation.supportEmail'))),
   primaryDomain: z
     .string()
     .trim()
     .toLowerCase()
-    .regex(/^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/, 'Enter a domain like coursiva.io.'),
-  trialDays: num('Enter the trial length in days.')
-    .int('Whole days only.')
-    .min(7, 'The trial length must be between 7 and 60 days.')
-    .max(60, 'The trial length must be between 7 and 60 days.'),
+    .regex(/^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/, msg('validation.domain')),
+  trialDays: num('validation.trialRequired')
+    .int(msg('validation.wholeDays'))
+    .min(7, msg('validation.trialRange'))
+    .max(60, msg('validation.trialRange')),
   defaultPlan: z.enum(PLANS),
-  dunningRetries: num('Choose how many retries.').int().min(1).max(5),
+  dunningRetries: num('validation.retries').int().min(1).max(5),
   autoSuspend: z.boolean(),
   requireStaffTwoFactor: z.boolean(),
   enforceSso: z.boolean(),
-  sessionHours: num('Choose a session timeout.').refine(
+  sessionHours: num('validation.sessionTimeout').refine(
     (v) => (SESSION_HOURS as readonly number[]).includes(v),
-    'Choose a session timeout.',
+    msg('validation.sessionTimeout'),
   ),
-  idleLockMinutes: num('Choose an idle lock.').refine((v) => (IDLE_LOCK_MINUTES as readonly number[]).includes(v), 'Choose an idle lock.'),
+  idleLockMinutes: num('validation.idleLock').refine(
+    (v) => (IDLE_LOCK_MINUTES as readonly number[]).includes(v),
+    msg('validation.idleLock'),
+  ),
   weeklyDigest: z.boolean(),
   billingAlerts: z.boolean(),
   incidentAlerts: z.boolean(),
@@ -59,6 +69,8 @@ const pick = (s: PlatformSettings): Values => ({
 
 /** Shared platform settings (`GET/PATCH /settings`): one form with dirty tracking, Save / Discard and inline 422s. */
 export function PlatformSettingsForm({ settings }: { settings: PlatformSettings }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
   const manage = can('platform.manage');
   const save = useUpdatePlatformSettings();
@@ -80,7 +92,7 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
     save.mutate(patch, {
       onSuccess: (next) => {
         form.reset(pick(next));
-        toast(`Platform settings saved — ${plural(changed.length, 'change')} applied for every staff member and new tenant`);
+        toast(t('platform.saved', { count: changed.length }));
       },
       onError: (err) => {
         if (!applyServerErrors(form, err)) setFormError(errorMessage(err));
@@ -93,24 +105,24 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
   );
 
   return (
-    <form onSubmit={(e) => void onSubmit(e)} noValidate aria-label="Platform settings" className="stack" style={{ gap: 16 }}>
+    <form onSubmit={(e) => void onSubmit(e)} noValidate aria-label={t('platform.label')} className="stack" style={{ gap: 16 }}>
       <fieldset disabled={!manage} className="stack" style={{ gap: 16, border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-        <legend className="sr-only">Platform settings</legend>
-        <Card title="Platform identity">
+        <legend className="sr-only">{t('platform.label')}</legend>
+        <Card title={t('platform.identity')}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 14 }}>
-            <Field label="Support email" error={errors.supportEmail?.message}>
+            <Field label={t('platform.supportEmail')} error={errors.supportEmail?.message}>
               {(p) => <Input {...p} {...form.register('supportEmail')} type="email" autoComplete="off" />}
             </Field>
-            <Field label="Primary domain" error={errors.primaryDomain?.message}>
+            <Field label={t('platform.primaryDomain')} error={errors.primaryDomain?.message}>
               {(p) => <Input {...p} {...form.register('primaryDomain')} autoComplete="off" spellCheck={false} />}
             </Field>
           </div>
           <p className="note" style={{ marginTop: 10, marginBottom: 0 }}>
-            New tenants get a subdomain under the primary domain until they connect a custom one.
+            {t('platform.domainNote')}
           </p>
         </Card>
 
-        <Card title="New tenant defaults">
+        <Card title={t('platform.defaults')}>
           <div
             style={{
               display: 'grid',
@@ -121,61 +133,55 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
           >
             <div>
               <div className="field-label" id="default-plan-label">
-                Default plan
+                {t('platform.defaultPlan')}
               </div>
               <Seg
-                label="Default plan"
-                options={PLANS}
+                label={t('platform.defaultPlan')}
+                options={PLANS.map((p) => [p, tc(`enums.plan.${p}`)] as const)}
                 value={values.defaultPlan}
                 disabled={!manage}
                 onChange={(v) => form.setValue('defaultPlan', v, { shouldDirty: true })}
               />
             </div>
-            <Field label="Trial length (days)" error={errors.trialDays?.message} hint="7–60 days">
+            <Field label={t('platform.trialLength')} error={errors.trialDays?.message} hint={t('platform.trialHint')}>
               {(p) => <Input {...p} {...form.register('trialDays', { valueAsNumber: true })} type="number" min={7} max={60} />}
             </Field>
-            <Field label="Payment retries before suspension" error={errors.dunningRetries?.message}>
+            <Field label={t('platform.retries')} error={errors.dunningRetries?.message}>
               {(p) => (
                 <select {...p} {...form.register('dunningRetries', { valueAsNumber: true })} className="select">
                   {[1, 2, 3, 4, 5].map((n) => (
                     <option key={n} value={n}>
-                      {plural(n, 'retry', 'retries')}
+                      {t('platform.retryCount', { count: n })}
                     </option>
                   ))}
                 </select>
               )}
             </Field>
           </div>
-          <div style={{ marginTop: 6 }}>
-            {toggle('autoSuspend', 'Auto-suspend after failed dunning', 'Suspend tenant access once all payment retries are exhausted.')}
-          </div>
+          <div style={{ marginTop: 6 }}>{toggle('autoSuspend', t('platform.autoSuspend'), t('platform.autoSuspendSub'))}</div>
         </Card>
 
-        <Card title="Security">
+        <Card title={t('platform.security')}>
           <div>
-            {toggle(
-              'requireStaffTwoFactor',
-              'Require 2FA for platform staff',
-              'All staff accounts must enroll a second factor to sign in.',
-            )}
-            {toggle('enforceSso', 'Enforce SSO', 'Staff sign-in is only allowed through the identity provider.')}
+            {toggle('requireStaffTwoFactor', t('platform.require2fa'), t('platform.require2faSub'))}
+            {toggle('enforceSso', t('platform.enforceSso'), t('platform.enforceSsoSub'))}
           </div>
           <div className="hstack wrap" style={{ gap: 14, paddingTop: 12 }}>
             <div className="min0" style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Session timeout</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{t('platform.sessionTimeout')}</div>
               <div className="t-xs muted" style={{ marginTop: 2 }}>
-                Staff must sign in again after this long, however active they are.
+                {t('platform.sessionTimeoutSub')}
               </div>
             </div>
             <select
               {...form.register('sessionHours', { valueAsNumber: true })}
               className="select"
-              aria-label="Session timeout"
+              aria-label={t('platform.sessionTimeout')}
               style={{ width: 'auto' }}
             >
               {SESSION_HOURS.map((h) => (
                 <option key={h} value={h}>
-                  {h} hours
+                  {t('platform.hours', { count: h })}
                 </option>
               ))}
             </select>
@@ -187,20 +193,20 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
           )}
           <div className="hstack wrap" style={{ gap: 14, paddingTop: 12 }}>
             <div className="min0" style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>Idle lock</div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{t('platform.idleLock')}</div>
               <div className="t-xs muted" style={{ marginTop: 2 }}>
-                The console locks after this long without activity; staff re-enter their password to continue.
+                {t('platform.idleLockSub')}
               </div>
             </div>
             <select
               {...form.register('idleLockMinutes', { valueAsNumber: true })}
               className="select"
-              aria-label="Idle lock"
+              aria-label={t('platform.idleLock')}
               style={{ width: 'auto' }}
             >
               {IDLE_LOCK_MINUTES.map((m) => (
                 <option key={m} value={m}>
-                  {m} minutes
+                  {t('platform.minutes', { count: m })}
                 </option>
               ))}
             </select>
@@ -212,10 +218,10 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
           )}
         </Card>
 
-        <Card title="Notifications">
-          {toggle('weeklyDigest', 'Weekly platform digest', 'MRR, signups and churn summary every Monday.')}
-          {toggle('billingAlerts', 'Billing alerts', 'Failed charges, disputes and dunning outcomes.')}
-          {toggle('incidentAlerts', 'Incident alerts', 'Status page incidents and degraded-performance events.')}
+        <Card title={t('platform.notifications')}>
+          {toggle('weeklyDigest', t('platform.weeklyDigest'), t('platform.weeklyDigestSub'))}
+          {toggle('billingAlerts', t('platform.billingAlerts'), t('platform.billingAlertsSub'))}
+          {toggle('incidentAlerts', t('platform.incidentAlerts'), t('platform.incidentAlertsSub'))}
         </Card>
       </fieldset>
 
@@ -229,10 +235,10 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
             boxShadow: isDirty ? 'var(--shPop)' : undefined,
           }}
           role="region"
-          aria-label="Save platform settings"
+          aria-label={t('platform.saveRegion')}
         >
           <span className="t-sm" style={{ flex: 1, minWidth: 160, fontWeight: isDirty ? 700 : 400 }} aria-live="polite">
-            {isDirty ? plural(dirtyCount, 'unsaved change') : 'All changes saved'}
+            {isDirty ? t('platform.unsaved', { count: dirtyCount }) : t('platform.allSaved')}
           </span>
           <button
             type="button"
@@ -243,15 +249,15 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
               setFormError(null);
             }}
           >
-            Discard
+            {t('platform.discard')}
           </button>
           <button type="submit" className="btn btn--primary" disabled={!isDirty || save.isPending}>
-            {save.isPending && <Spinner />} Save changes
+            {save.isPending && <Spinner />} {tc('actions.saveChanges')}
           </button>
         </div>
       ) : (
         <p className="note" style={{ margin: 0 }}>
-          You can view platform settings. Changing them needs the “Manage platform settings” permission.
+          {t('platform.readOnly')}
         </p>
       )}
       <UnsavedChangesGuard when={manage && isDirty && !save.isPending} />

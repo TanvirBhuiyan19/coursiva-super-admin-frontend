@@ -3,8 +3,10 @@ import { Badge, Card, Empty, ErrorState, Pagination, SkeletonRows } from '@/comp
 import { useCan } from '@/features/auth/useCan';
 import { cx } from '@/lib/cx';
 import { formatDate, money } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { toast } from '@/store/ui';
 import { useInvoices, useSettleInvoice } from '../api';
+import { useT } from '../i18n';
 import type { Invoice, InvoiceListParams } from '../types';
 
 const COLS = 'minmax(0,1.8fr) minmax(0,0.8fr) minmax(0,0.7fr) minmax(0,0.8fr) minmax(0,1.1fr)';
@@ -22,6 +24,8 @@ interface Props {
 }
 
 export function InvoicesCard({ focusId, page, onPage, style }: Props) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
   const canManage = can('billing.manage');
   const params: InvoiceListParams = { perPage: PER_PAGE, ...(page ? { page } : focusId ? { focus: focusId } : {}) };
@@ -41,21 +45,21 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
   const retry = (v: Invoice) =>
     settle.mutate(
       { id: v.id, action: 'retry' },
-      { onSuccess: () => toast(`Charge retried — ${money(v.amount)} collected from ${v.tenantName}`) },
+      { onSuccess: () => toast(t('invoices.toasts.retried', { amount: money(v.amount), tenant: v.tenantName })) },
     );
 
   return (
-    <Card title="Latest invoices" className="table-scroll" style={style}>
+    <Card title={t('invoices.title')} className="table-scroll" style={style}>
       {list.error ? (
         <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />
       ) : (
-        <div role="table" aria-label="Latest invoices" aria-busy={list.isFetching}>
+        <div role="table" aria-label={t('invoices.title')} aria-busy={list.isFetching}>
           <div role="row" className="trow trow--head" style={{ gridTemplateColumns: COLS, minWidth: MIN, gap: 10, padding: '9px 0' }}>
-            <div role="columnheader">Tenant</div>
-            <div role="columnheader">Plan</div>
-            <div role="columnheader">Amount</div>
-            <div role="columnheader">Date</div>
-            <div role="columnheader">Status</div>
+            <div role="columnheader">{t('columns.tenant')}</div>
+            <div role="columnheader">{t('columns.plan')}</div>
+            <div role="columnheader">{t('columns.amount')}</div>
+            <div role="columnheader">{t('columns.date')}</div>
+            <div role="columnheader">{t('columns.status')}</div>
           </div>
           {list.isPending && <SkeletonRows rows={6} h={20} />}
           {rows.map((v) => {
@@ -81,7 +85,7 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
                   </div>
                 </div>
                 <div role="cell" className="muted">
-                  {v.plan}
+                  {tc(`enums.plan.${v.plan}`)}
                 </div>
                 <div role="cell" style={{ fontWeight: 700 }}>
                   {money(v.amount)}
@@ -96,21 +100,21 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
                       className="btn btn--sm btn--danger-solid"
                       disabled={pending}
                       onClick={() => retry(v)}
-                      aria-label={`Retry charge for ${v.tenantName}`}
+                      aria-label={t('invoices.retryChargeFor', { tenant: v.tenantName })}
                     >
-                      {pending ? 'Retrying…' : 'Retry charge'}
+                      {pending ? t('invoices.retrying') : t('invoices.retryCharge')}
                     </button>
                   ) : (
-                    <Badge tone={STATUS_TONE[v.status]}>{v.status}</Badge>
+                    <Badge tone={STATUS_TONE[v.status]}>{t(`invoiceStatus.${v.status}`)}</Badge>
                   )}
                 </div>
               </div>
             );
           })}
-          {list.isSuccess && rows.length === 0 && <Empty>No invoices issued yet.</Empty>}
+          {list.isSuccess && rows.length === 0 && <Empty>{t('invoices.empty')}</Empty>}
         </div>
       )}
-      {list.data && list.data.meta.lastPage > 1 && <Pagination meta={list.data.meta} noun="invoices" onPage={onPage} />}
+      {list.data && list.data.meta.lastPage > 1 && <Pagination meta={list.data.meta} noun={t('invoices.noun')} onPage={onPage} />}
     </Card>
   );
 }

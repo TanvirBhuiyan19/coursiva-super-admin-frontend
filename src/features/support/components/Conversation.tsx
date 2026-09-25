@@ -5,6 +5,7 @@ import { ApiError, errorMessage } from '@/lib/api/errors';
 import { formatDateTime, shortDuration, timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { usePostTicketMessage, useSupportOptions, useTicketAction, useUpdateTicket } from '../api';
+import { useT } from '../i18n';
 import { slaFg, slaLabel, slaTone } from '../sla';
 import { TICKET_STATUSES, type TicketDetail, type TicketMessage, type TicketStatus } from '../types';
 
@@ -23,6 +24,7 @@ const submitOnModEnter = (send: () => void) => (e: KeyboardEvent<HTMLTextAreaEle
 };
 
 function Message({ m }: { m: TicketMessage }) {
+  const t = useT();
   const meta = (
     <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
       {m.authorName} · <time dateTime={m.createdAt}>{timeAgo(m.createdAt)}</time>
@@ -30,9 +32,9 @@ function Message({ m }: { m: TicketMessage }) {
   );
   if (m.internal)
     return (
-      <li data-internal="true" aria-label={`Internal note by ${m.authorName}`}>
+      <li data-internal="true" aria-label={t('conversation.internalNoteBy', { name: m.authorName })}>
         <div className="callout callout--warn" style={{ display: 'block', padding: '9px 12px', fontSize: 12.5, lineHeight: 1.5 }}>
-          <b>Internal note</b> · <span style={{ whiteSpace: 'pre-wrap' }}>{m.body}</span>
+          <b>{t('conversation.internalNote')}</b> · <span style={{ whiteSpace: 'pre-wrap' }}>{m.body}</span>
           {meta}
         </div>
       </li>
@@ -60,23 +62,24 @@ function Message({ m }: { m: TicketMessage }) {
   );
 }
 
-export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
+export function Conversation({ ticket: tk }: { ticket: TicketDetail }) {
+  const t = useT();
   const can = useCan();
   const manage = can('support.manage');
   const options = useSupportOptions();
-  const update = useUpdateTicket(t.id);
-  const action = useTicketAction(t.id);
-  const reply = usePostTicketMessage(t.id);
-  const note = usePostTicketMessage(t.id);
+  const update = useUpdateTicket(tk.id);
+  const action = useTicketAction(tk.id);
+  const reply = usePostTicketMessage(tk.id);
+  const note = usePostTicketMessage(tk.id);
   const [draft, setDraft] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
   const [replyError, setReplyError] = useState<string | null>(null);
   const [noteError, setNoteError] = useState<string | null>(null);
-  const tone = slaTone(t.slaState);
+  const tone = slaTone(tk.slaState);
   const busy = update.isPending || action.isPending;
 
-  const assignees = options.data?.assignees ?? (t.assignee ? [t.assignee] : []);
-  const assigneeOptions = [['', 'Unassigned'] as const, ...assignees.map((a) => [a.id, a.name] as const)];
+  const assignees = options.data?.assignees ?? (tk.assignee ? [tk.assignee] : []);
+  const assigneeOptions = [['', t('conversation.unassigned')] as const, ...assignees.map((a) => [a.id, a.name] as const)];
 
   const setStatus = (status: TicketStatus, message: string) => update.mutate({ status }, { onSuccess: () => toast(message) });
 
@@ -89,7 +92,7 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
       {
         onSuccess: () => {
           setDraft('');
-          toast(`Reply sent to ${t.requesterName}`);
+          toast(t('conversation.replySent', { name: tk.requesterName }));
         },
         onError: (err) => setReplyError(fieldError(err)),
       },
@@ -105,7 +108,7 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
       {
         onSuccess: () => {
           setNoteDraft('');
-          toast('Internal note saved — only staff can see it');
+          toast(t('conversation.noteSaved'));
         },
         onError: (err) => setNoteError(fieldError(err)),
       },
@@ -121,16 +124,17 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
       <div className="hstack wrap" style={{ gap: 12, padding: '14px 18px', borderBottom: '1px solid var(--bd2)' }}>
         <div className="min0" style={{ flex: '1 1 200px' }}>
           <h2 id="ticket-subject" style={{ fontWeight: 700, fontSize: 14.5, margin: 0 }}>
-            {t.subject}
+            {tk.subject}
           </h2>
           <div className="muted" style={{ fontSize: 12, marginTop: 1 }}>
-            #{t.number} · {t.tenant.name} · {t.requesterName} · {t.channel} · opened{' '}
-            <time dateTime={t.createdAt}>{formatDateTime(t.createdAt)}</time> · first-reply target {shortDuration(t.slaTargetMinutes)}
+            #{tk.number} · {tk.tenant.name} · {tk.requesterName} · {t(`channel.${tk.channel}`)} · {t('conversation.opened')}{' '}
+            <time dateTime={tk.createdAt}>{formatDateTime(tk.createdAt)}</time> ·{' '}
+            {t('conversation.firstReplyTarget', { duration: shortDuration(tk.slaTargetMinutes) })}
           </div>
         </div>
         <Select
-          label="Assignee"
-          value={t.assignee?.id ?? ''}
+          label={t('conversation.assignee')}
+          value={tk.assignee?.id ?? ''}
           options={assigneeOptions}
           style={selectStyle}
           disabled={!manage || busy}
@@ -139,74 +143,80 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
               { assigneeId: assigneeId || null },
               {
                 onSuccess: (d) =>
-                  toast(d.assignee ? `Ticket #${d.number} assigned to ${d.assignee.name}` : `Ticket #${d.number} unassigned`),
+                  toast(
+                    d.assignee
+                      ? t('conversation.assigned', { number: String(d.number), name: d.assignee.name })
+                      : t('conversation.unassignedToast', { number: String(d.number) }),
+                  ),
               },
             )
           }
         />
         <Select
-          label="Ticket status"
-          value={t.status}
-          options={TICKET_STATUSES}
+          label={t('conversation.ticketStatus')}
+          value={tk.status}
+          options={TICKET_STATUSES.map((s) => [s, t(`status.${s}`)] as const)}
           style={selectStyle}
           disabled={!manage || busy}
-          onChange={(v) => setStatus(v, `Ticket #${t.number} marked ${v.toLowerCase()}`)}
+          onChange={(v) => setStatus(v, t(`conversation.marked.${v}`, { number: String(tk.number) }))}
         />
       </div>
 
       <div className="hstack wrap" style={{ gap: 10, padding: '9px 18px', borderBottom: '1px solid var(--bd2)' }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: slaFg(tone) }}>
-          <span aria-hidden="true">⏱ </span>
-          {slaLabel(t)}
+          <span aria-hidden="true">{t('conversation.clockIcon')} </span>
+          {slaLabel(tk)}
         </span>
         <div className="spacer" />
-        {t.escalated && (
+        {tk.escalated && (
           <Badge tone="bad" pill>
-            Escalated to engineering
+            {t('conversation.escalatedBadge')}
           </Badge>
         )}
         {manage && (
           <>
-            {t.status === 'Open' && (
+            {tk.status === 'Open' && (
               <button
                 type="button"
                 className="btn btn--sm"
                 disabled={busy}
-                onClick={() => setStatus('Pending', `Snoozed ticket #${t.number} — moved to Pending, the SLA clock pauses`)}
+                onClick={() => setStatus('Pending', t('conversation.snoozed', { number: String(tk.number) }))}
               >
-                Snooze
+                {t('conversation.snooze')}
               </button>
             )}
-            {!t.escalated && (
+            {!tk.escalated && (
               <button
                 type="button"
                 className="btn btn--sm"
                 disabled={busy}
                 onClick={() =>
                   action.mutate('escalate', {
-                    onSuccess: () => toast(`Escalated ticket #${t.number} to engineering — the on-call engineer is paged`),
+                    onSuccess: () => toast(t('conversation.escalatedToast', { number: String(tk.number) })),
                   })
                 }
               >
-                Escalate
+                {t('conversation.escalate')}
               </button>
             )}
-            {t.status !== 'Resolved' && (
+            {tk.status !== 'Resolved' && (
               <button
                 type="button"
                 className="btn btn--sm btn--outline-accent"
                 disabled={busy}
-                onClick={() => action.mutate('resolve', { onSuccess: () => toast(`Resolved — CSAT survey sent to ${t.requesterName}`) })}
+                onClick={() =>
+                  action.mutate('resolve', { onSuccess: () => toast(t('conversation.resolvedToast', { name: tk.requesterName })) })
+                }
               >
-                Resolve &amp; send CSAT
+                {t('conversation.resolve')}
               </button>
             )}
           </>
         )}
       </div>
 
-      <ol className="stack plain-list" aria-label="Conversation" style={{ flex: 1, padding: 18, gap: 12 }}>
-        {t.messages.map((m) => (
+      <ol className="stack plain-list" aria-label={t('conversation.thread')} style={{ flex: 1, padding: 18, gap: 12 }}>
+        {tk.messages.map((m) => (
           <Message key={m.id} m={m} />
         ))}
       </ol>
@@ -219,8 +229,8 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
                 className="input"
                 style={{ flex: 1, minWidth: 0, fontSize: 12.5, borderStyle: 'dashed', background: 'var(--pg2)' }}
                 value={noteDraft}
-                placeholder="Internal note — never visible to the tenant…"
-                aria-label="Internal note"
+                placeholder={t('conversation.notePlaceholder')}
+                aria-label={t('conversation.internalNote')}
                 aria-invalid={noteError ? true : undefined}
                 maxLength={5000}
                 onChange={(e) => setNoteDraft(e.target.value)}
@@ -238,7 +248,7 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
                 disabled={!noteDraft.trim() || note.isPending}
                 onClick={saveNote}
               >
-                {note.isPending && <Spinner />} Add note
+                {note.isPending && <Spinner />} {t('conversation.addNote')}
               </button>
             </div>
             {noteError && (
@@ -252,8 +262,8 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
               rows={3}
               style={{ width: '100%', resize: 'vertical' }}
               value={draft}
-              placeholder="Reply as Coursiva support…"
-              aria-label="Reply"
+              placeholder={t('conversation.replyPlaceholder')}
+              aria-label={t('conversation.reply')}
               aria-invalid={replyError ? true : undefined}
               maxLength={5000}
               onChange={(e) => setDraft(e.target.value)}
@@ -266,10 +276,10 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
             )}
             <div className="hstack wrap" style={{ gap: 10, marginTop: 10 }}>
               <Select
-                label="Canned replies"
+                label={t('conversation.cannedReplies')}
                 value={CANNED_PLACEHOLDER}
                 options={[
-                  [CANNED_PLACEHOLDER, 'Canned replies…'] as const,
+                  [CANNED_PLACEHOLDER, t('conversation.cannedPlaceholder')] as const,
                   ...(options.data?.cannedReplies ?? []).map((c) => [c.id, c.title] as const),
                 ]}
                 style={{ width: 'auto', maxWidth: 190, fontSize: 12.5, fontWeight: 600, padding: '8px 11px' }}
@@ -278,17 +288,17 @@ export function Conversation({ ticket: t }: { ticket: TicketDetail }) {
                   if (c) setDraft(c.body);
                 }}
               />
-              <span className="t-xs faint">Ctrl + Enter to send · the tenant sees this reply</span>
+              <span className="t-xs faint">{t('conversation.sendHint')}</span>
               <div className="spacer" />
               <button type="button" className="btn btn--primary" disabled={!draft.trim() || reply.isPending} onClick={send}>
-                {reply.isPending && <Spinner />} Send
+                {reply.isPending && <Spinner />} {t('conversation.send')}
               </button>
             </div>
           </div>
         </>
       ) : (
         <div className="note" style={{ padding: '14px 18px', borderTop: '1px solid var(--bd2)' }}>
-          You have read-only access to support. Ask a platform owner for “Handle tickets” to reply.
+          {t('conversation.readOnly')}
         </div>
       )}
     </section>

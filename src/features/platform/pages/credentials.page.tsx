@@ -7,19 +7,21 @@ import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
 import { useCertificateAction, useCertificates, useCertificateSummary, useRegistryPolicies, useSetRegistryPolicy } from '../api';
 import { Tiles } from '../components/Tiles';
+import { useT } from '../i18n';
 import type { Certificate, CertificateParams } from '../types';
 
 const COLS = 'minmax(0,1.3fr) minmax(0,1.1fr) minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1.5fr)';
 const shortUrl = (url: string) => url.replace(/^https?:\/\//, '');
 
 function CertificateRow({ c, canManage }: { c: Certificate; canManage: boolean }) {
+  const t = useT();
   const act = useCertificateAction();
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(c.verifyUrl);
-      toast(`${shortUrl(c.verifyUrl)} copied`);
+      toast(t('credentials.copied', { url: shortUrl(c.verifyUrl) }));
     } catch {
-      toast('Couldn’t copy — select the link and copy it manually', 'error');
+      toast(t('credentials.copyFailed'), 'error');
     }
   };
   return (
@@ -46,16 +48,16 @@ function CertificateRow({ c, canManage }: { c: Certificate; canManage: boolean }
       </div>
       <div role="cell" className="hstack wrap" style={{ gap: 8 }}>
         <Badge tone={c.status === 'Revoked' ? 'bad' : 'good'} style={{ fontSize: 11, padding: '3px 8px' }}>
-          {c.status}
+          {t(`enums.certificateStatus.${c.status}`)}
         </Badge>
         <button
           type="button"
           className="link link--muted"
           style={{ fontSize: 11 }}
-          aria-label={`Copy verify link for ${c.id}`}
+          aria-label={t('credentials.copyLinkLabel', { id: c.id })}
           onClick={() => void copy()}
         >
-          Copy link
+          {t('credentials.copyLink')}
         </button>
         {canManage &&
           (c.status === 'Revoked' ? (
@@ -65,25 +67,22 @@ function CertificateRow({ c, canManage }: { c: Certificate; canManage: boolean }
               style={{ fontSize: 11 }}
               disabled={act.isPending}
               onClick={() =>
-                act.mutate({ id: c.id, action: 'reinstate' }, { onSuccess: () => toast(`${c.id} reinstated — verifies as valid again`) })
+                act.mutate({ id: c.id, action: 'reinstate' }, { onSuccess: () => toast(t('credentials.reinstated', { id: c.id })) })
               }
             >
-              Reinstate
+              {t('credentials.reinstate')}
             </button>
           ) : (
             <ConfirmButton
               className="link"
               style={{ fontSize: 11, color: 'var(--rFg)' }}
-              confirmLabel="Confirm revoke"
+              confirmLabel={t('credentials.confirmRevoke')}
               pending={act.isPending}
               onConfirm={() =>
-                act.mutate(
-                  { id: c.id, action: 'revoke' },
-                  { onSuccess: () => toast(`${c.id} revoked — the public verify page now reads “revoked”; holder and tenant notified`) },
-                )
+                act.mutate({ id: c.id, action: 'revoke' }, { onSuccess: () => toast(t('credentials.revokedToast', { id: c.id })) })
               }
             >
-              Revoke
+              {t('credentials.revoke')}
             </ConfirmButton>
           ))}
       </div>
@@ -92,10 +91,11 @@ function CertificateRow({ c, canManage }: { c: Certificate; canManage: boolean }
 }
 
 function PolicyCard({ canManage }: { canManage: boolean }) {
+  const t = useT();
   const policies = useRegistryPolicies();
   const set = useSetRegistryPolicy();
   return (
-    <Card title="Registry policy" style={{ padding: '18px 20px' }}>
+    <Card title={t('credentials.policyTitle')} style={{ padding: '18px 20px' }}>
       {policies.isPending ? (
         <SkeletonRows rows={4} h={22} />
       ) : policies.error ? (
@@ -110,7 +110,10 @@ function PolicyCard({ canManage }: { canManage: boolean }) {
                 on={p.enabled}
                 disabled={!canManage}
                 onChange={(enabled) =>
-                  set.mutate({ key: p.key, enabled }, { onSuccess: () => toast(`${p.label} — ${enabled ? 'on' : 'off'} for every tenant`) })
+                  set.mutate(
+                    { key: p.key, enabled },
+                    { onSuccess: () => toast(t(enabled ? 'credentials.policyOn' : 'credentials.policyOff', { label: p.label })) },
+                  )
                 }
               />
             </li>
@@ -122,6 +125,7 @@ function PolicyCard({ canManage }: { canManage: boolean }) {
 }
 
 export default function CredentialsPage() {
+  const t = useT();
   const can = useCan();
   const canManage = can('platform.manage');
   const [f, setF] = useUrlState({ q: '', page: '1' });
@@ -138,14 +142,14 @@ export default function CredentialsPage() {
   const rows = list.data?.data ?? [];
 
   return (
-    <Screen max={1250} label="Certificate authority">
+    <Screen max={1250} label={t('credentials.screenLabel')}>
       <Tiles
         items={
           s && [
-            { label: 'Certificates issued', value: num(s.issued), sub: 'Across every tenant, all time' },
-            { label: 'Verified · 30d', value: num(s.verified30d), sub: 'Public verify-page lookups' },
-            { label: 'Revoked', value: num(s.revoked), sub: 'Fraud, error or course withdrawal' },
-            { label: 'Orphaned', value: num(s.orphaned), sub: 'From closed tenants — still verifiable' },
+            { label: t('credentials.tiles.issued'), value: num(s.issued), sub: t('credentials.tiles.issuedSub') },
+            { label: t('credentials.tiles.verified'), value: num(s.verified30d), sub: t('credentials.tiles.verifiedSub') },
+            { label: t('credentials.tiles.revoked'), value: num(s.revoked), sub: t('credentials.tiles.revokedSub') },
+            { label: t('credentials.tiles.orphaned'), value: num(s.orphaned), sub: t('credentials.tiles.orphanedSub') },
           ]
         }
       />
@@ -157,21 +161,21 @@ export default function CredentialsPage() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search certificates"
-            placeholder="Search a certificate ID, learner, school or course…"
+            aria-label={t('credentials.searchLabel')}
+            placeholder={t('credentials.searchPlaceholder')}
             style={{ fontSize: 12.5, padding: '8px 11px' }}
           />
           {list.error ? (
             <ErrorState error={list.error} onRetry={() => void list.refetch()} />
           ) : (
             <div className="card table-scroll" style={{ padding: '6px 18px 4px' }} aria-busy={list.isFetching}>
-              <div role="table" aria-label="Certificates">
+              <div role="table" aria-label={t('credentials.table')}>
                 <TRow cols={COLS} min={720} head style={{ gap: 10, fontSize: 10.5 }}>
-                  <div role="columnheader">Certificate</div>
-                  <div role="columnheader">Learner</div>
-                  <div role="columnheader">Course · school</div>
-                  <div role="columnheader">Issued</div>
-                  <div role="columnheader">Status</div>
+                  <div role="columnheader">{t('credentials.cols.certificate')}</div>
+                  <div role="columnheader">{t('credentials.cols.learner')}</div>
+                  <div role="columnheader">{t('credentials.cols.courseSchool')}</div>
+                  <div role="columnheader">{t('credentials.cols.issued')}</div>
+                  <div role="columnheader">{t('credentials.cols.status')}</div>
                 </TRow>
                 {list.isPending && <SkeletonRows rows={5} h={22} />}
                 {rows.map((c) => (
@@ -182,17 +186,17 @@ export default function CredentialsPage() {
                     action={
                       f.q ? (
                         <button type="button" className="btn btn--sm" onClick={() => setSearch('')}>
-                          Clear search
+                          {t('credentials.clearSearch')}
                         </button>
                       ) : undefined
                     }
                   >
-                    {f.q ? 'No certificate matches that search.' : 'No certificates issued yet.'}
+                    {f.q ? t('credentials.noMatch') : t('credentials.empty')}
                   </Empty>
                 )}
               </div>
               {list.data && list.data.meta.lastPage > 1 && (
-                <Pagination meta={list.data.meta} noun="certificates" onPage={(p) => setF({ page: String(p) })} />
+                <Pagination meta={list.data.meta} noun={t('credentials.noun')} onPage={(p) => setF({ page: String(p) })} />
               )}
             </div>
           )}
@@ -201,8 +205,7 @@ export default function CredentialsPage() {
         <div className="stack min0" style={{ gap: 16, flex: '1 1 300px' }}>
           <PolicyCard canManage={canManage} />
           <div className="card note" style={{ padding: '16px 18px', fontSize: 12.5, lineHeight: 1.6 }}>
-            Certificates are issued under the platform registry at verify.coursiva.io, so a learner’s credential survives a tenant closing,
-            rebranding or being suspended.
+            {t('credentials.note')}
           </div>
         </div>
       </div>

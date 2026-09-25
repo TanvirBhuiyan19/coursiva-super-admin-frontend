@@ -1,17 +1,19 @@
 import { Badge, Bar, Card, ErrorState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
 import type { Tone } from '@/lib/domain';
-import { formatDate, money, moneyCompact, num, toneDot, toneFg } from '@/lib/format';
+import { formatDate, money, moneyCompact, monthName, num, toneDot, toneFg } from '@/lib/format';
 import { useUrlState } from '@/lib/useUrlState';
 import { useRevenue } from '../api';
 import { DunningCard } from '../components/DunningCard';
 import { InvoicesCard } from '../components/InvoicesCard';
 import { OveragesCard } from '../components/OveragesCard';
-import { monthName, signedMoney } from '../format';
+import { signedMoney } from '../format';
+import { useT } from '../i18n';
 import type { MovementKind, RevenueSummary } from '../types';
 
 const MOVEMENT_TONE: Record<MovementKind, Tone> = { new: 'good', expansion: 'good', contraction: 'warn', churn: 'bad' };
 
 function Kpis({ r }: { r: RevenueSummary | undefined }) {
+  const t = useT();
   if (!r)
     return (
       <div className="grid-kpi">
@@ -24,10 +26,10 @@ function Kpis({ r }: { r: RevenueSummary | undefined }) {
       </div>
     );
   const items: [string, string, Tone?][] = [
-    ['MRR', money(r.mrr)],
-    ['ARR run rate', moneyCompact(r.arr)],
-    [`Net MRR change · ${monthName(r.movementMonth, true)}`, signedMoney(r.netChange), r.netChange >= 0 ? 'good' : 'bad'],
-    ['Past-due tenants', num(r.pastDueTenants), r.pastDueTenants ? 'bad' : undefined],
+    [t('revenue.kpis.mrr'), money(r.mrr)],
+    [t('revenue.kpis.arr'), moneyCompact(r.arr)],
+    [t('revenue.kpis.netChange', { month: monthName(r.movementMonth) }), signedMoney(r.netChange), r.netChange >= 0 ? 'good' : 'bad'],
+    [t('revenue.kpis.pastDue'), num(r.pastDueTenants), r.pastDueTenants ? 'bad' : undefined],
   ];
   return (
     <div className="grid-kpi">
@@ -44,6 +46,7 @@ function Kpis({ r }: { r: RevenueSummary | undefined }) {
 }
 
 function Movement({ r }: { r: RevenueSummary }) {
+  const t = useT();
   const max = Math.max(...r.movements.map((m) => Math.abs(m.amount)), 1);
   return (
     <figure style={{ margin: 0 }}>
@@ -62,7 +65,7 @@ function Movement({ r }: { r: RevenueSummary }) {
         ))}
       </ul>
       <table className="sr-only">
-        <caption>MRR movement for {monthName(r.movementMonth)}</caption>
+        <caption>{t('revenue.movement.caption', { month: monthName(r.movementMonth, 'long') })}</caption>
         <tbody>
           {r.movements.map((m) => (
             <tr key={m.kind}>
@@ -72,7 +75,7 @@ function Movement({ r }: { r: RevenueSummary }) {
             </tr>
           ))}
           <tr>
-            <th scope="row">Net change</th>
+            <th scope="row">{t('revenue.movement.netChange')}</th>
             <td>{signedMoney(r.netChange)}</td>
             <td />
           </tr>
@@ -83,16 +86,20 @@ function Movement({ r }: { r: RevenueSummary }) {
 }
 
 export default function RevenuePage() {
+  const t = useT();
   const [f, setF] = useUrlState({ invoice: '', page: '' });
   const revenue = useRevenue();
   const r = revenue.data;
 
   return (
-    <Screen max={1150} label="Revenue">
+    <Screen max={1150} label={t('revenue.title')}>
       {revenue.error ? <ErrorState error={revenue.error} onRetry={() => void revenue.refetch()} /> : <Kpis r={r} />}
 
       <div className="hstack wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
-        <Card title={r ? `MRR movement · ${monthName(r.movementMonth)}` : 'MRR movement'} style={{ flex: '1 1 320px', minWidth: 0 }}>
+        <Card
+          title={r ? t('revenue.movement.titleMonth', { month: monthName(r.movementMonth, 'long') }) : t('revenue.movement.title')}
+          style={{ flex: '1 1 320px', minWidth: 0 }}
+        >
           {r ? <Movement r={r} /> : <SkeletonRows rows={4} h={22} />}
         </Card>
         <InvoicesCard
@@ -104,7 +111,7 @@ export default function RevenuePage() {
       </div>
 
       <div className="grid-2">
-        <Card title="Churn reasons · last 90 days">
+        <Card title={t('revenue.churn.title')}>
           {r ? (
             <ul className="stack plain-list" style={{ gap: 12, marginTop: 6 }}>
               {r.churnReasons.map((c) => (
@@ -113,7 +120,7 @@ export default function RevenuePage() {
                     <span style={{ fontWeight: 600 }}>{c.reason}</span>
                     <span className="muted">{c.pct}%</span>
                   </div>
-                  <Bar size="md" value={c.pct} color="var(--rDot)" label={`${c.reason}: ${c.pct}% of churned tenants`} />
+                  <Bar size="md" value={c.pct} color="var(--rDot)" label={t('revenue.churn.barLabel', { reason: c.reason, pct: c.pct })} />
                 </li>
               ))}
             </ul>
@@ -121,7 +128,7 @@ export default function RevenuePage() {
             <SkeletonRows rows={4} h={20} />
           )}
         </Card>
-        <Card title="Platform payouts">
+        <Card title={t('revenue.payouts.title')}>
           {r ? (
             <>
               <ul className="plain-list">
@@ -131,12 +138,12 @@ export default function RevenuePage() {
                       {formatDate(p.date)}
                     </time>
                     <span style={{ fontWeight: 700, flex: 1 }}>{money(p.amount)}</span>
-                    <Badge tone={p.status === 'Paid' ? 'good' : 'warn'}>{p.status}</Badge>
+                    <Badge tone={p.status === 'Paid' ? 'good' : 'warn'}>{t(`payoutStatus.${p.status}`)}</Badge>
                   </li>
                 ))}
               </ul>
               <div className="note" style={{ paddingTop: 10 }}>
-                Stripe payouts of platform subscription revenue, twice monthly, net of processing fees.
+                {t('revenue.payouts.note')}
               </div>
             </>
           ) : (

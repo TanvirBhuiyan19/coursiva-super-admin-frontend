@@ -3,29 +3,31 @@ import type { UseFormReturn } from 'react-hook-form';
 import { z } from 'zod';
 import { ApiError } from '@/lib/api/errors';
 import { PLANS, type Plan } from '@/lib/domain';
+import { t } from '../i18n';
 import { ROLLOUTS, type PricingConfig, type PricingUpdate } from '../types';
 
-const price = (what: string) =>
+// Messages are functions so they're read in the active locale when validation runs.
+const price = () =>
   z
     .string()
     .trim()
-    .regex(/^\d{1,6}(\.\d{1,2})?$/, `Enter ${what} like 99 or 99.50.`)
+    .regex(/^\d{1,6}(\.\d{1,2})?$/, { error: () => t('plans.validation.priceFormat') })
     .transform(Number)
-    .refine((n) => n <= 100_000, 'Keep prices at $100,000 or less.');
+    .refine((n) => n <= 100_000, { error: () => t('plans.validation.priceMax') });
 
-const whole = (min: number, max: number, message: string) =>
+const whole = (min: number, max: number, message: () => string) =>
   z
     .string()
     .trim()
-    .regex(/^\d+$/, message)
+    .regex(/^\d+$/, { error: message })
     .transform(Number)
-    .refine((n) => n >= min && n <= max, message);
+    .refine((n) => n >= min && n <= max, { error: message });
 
 export const pricingSchema = z.object({
-  prices: z.object({ Launch: price('a price'), Growth: price('a price'), Scale: price('a price') }),
-  addons: z.array(z.object({ key: z.string(), price: price('a price') })),
-  annualDiscountPct: whole(0, 60, 'Use a whole number from 0 to 60.'),
-  trialDays: whole(0, 90, 'Use a whole number of days from 0 to 90.'),
+  prices: z.object({ Launch: price(), Growth: price(), Scale: price() }),
+  addons: z.array(z.object({ key: z.string(), price: price() })),
+  annualDiscountPct: whole(0, 60, () => t('plans.validation.annualDiscount')),
+  trialDays: whole(0, 90, () => t('plans.validation.trialDays')),
   rollout: z.enum(ROLLOUTS),
 });
 

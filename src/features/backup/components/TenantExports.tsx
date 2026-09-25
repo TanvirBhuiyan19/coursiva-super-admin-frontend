@@ -5,11 +5,13 @@ import { useTenants } from '@/features/tenants/api';
 import { timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useQueueExport, useTenantExports } from '../api';
-import { EXPORT_FORMAT_LABELS, EXPORT_FORMATS, type ExportFormat } from '../types';
+import { useT } from '../i18n';
+import { EXPORT_FORMATS, type ExportFormat } from '../types';
 
 const SHOWN = 6;
 
 function TenantExportList({ format, includeMedia }: { format: ExportFormat; includeMedia: boolean }) {
+  const t = useT();
   const can = useCan();
   const tenants = useTenants({ perPage: 100, sort: 'name' });
   const exportsQ = useTenantExports();
@@ -19,24 +21,28 @@ function TenantExportList({ format, includeMedia }: { format: ExportFormat; incl
   if (tenants.error) return <ErrorState compact error={tenants.error} onRetry={() => void tenants.refetch()} />;
   if (tenants.isPending) return <SkeletonRows rows={4} />;
   const rows = tenants.data.data;
-  if (!rows.length) return <Empty>No tenants to export.</Empty>;
+  if (!rows.length) return <Empty>{t('exports.noTenants')}</Empty>;
   const latest = (tenantId: string) => exportsQ.data?.find((e) => e.tenantId === tenantId);
 
   return (
     <>
-      <ul className="plain-list" aria-label="Tenants">
-        {(all ? rows : rows.slice(0, SHOWN)).map((t) => {
-          const job = latest(t.id);
+      <ul className="plain-list" aria-label={t('exports.tenants')}>
+        {(all ? rows : rows.slice(0, SHOWN)).map((tn) => {
+          const job = latest(tn.id);
           return (
-            <li key={t.id} className="row" style={{ padding: '10px 0' }}>
+            <li key={tn.id} className="row" style={{ padding: '10px 0' }}>
               <span className="min0" style={{ flex: 1 }}>
                 <span className="ellipsis" style={{ fontWeight: 600, display: 'block' }}>
-                  {t.name}
+                  {tn.name}
                 </span>
                 {job && (
                   <span className="t-xs faint">
-                    {job.status === 'ready' ? '✓ Ready' : 'Queued'} · {EXPORT_FORMAT_LABELS[job.format]} · {timeAgo(job.requestedAt)} by{' '}
-                    {job.requestedByName}
+                    {t('exports.jobLine', {
+                      status: job.status === 'ready' ? t('exports.ready') : t('exports.queued'),
+                      format: t(`enums.exportFormat.${job.format}`),
+                      when: timeAgo(job.requestedAt),
+                      name: job.requestedByName,
+                    })}
                   </span>
                 )}
               </span>
@@ -45,21 +51,24 @@ function TenantExportList({ format, includeMedia }: { format: ExportFormat; incl
                   type="button"
                   className="link"
                   style={{ fontSize: 12 }}
-                  disabled={queue.isPending && queue.variables.tenantId === t.id}
-                  aria-label={`Export data for ${t.name}`}
+                  disabled={queue.isPending && queue.variables.tenantId === tn.id}
+                  aria-label={t('exports.exportFor', { tenant: tn.name })}
                   onClick={() =>
                     queue.mutate(
-                      { tenantId: t.id, format, includeMedia },
+                      { tenantId: tn.id, format, includeMedia },
                       {
                         onSuccess: () =>
                           toast(
-                            `Export queued for ${t.name} (${EXPORT_FORMAT_LABELS[format]}${includeMedia ? ' + media manifests' : ''}) — the link emails to you and expires in 7 days`,
+                            t(includeMedia ? 'exports.queuedToastMedia' : 'exports.queuedToast', {
+                              tenant: tn.name,
+                              format: t(`enums.exportFormat.${format}`),
+                            }),
                           ),
                       },
                     )
                   }
                 >
-                  {job ? 'Export again' : 'Export data'}
+                  {job ? t('exports.exportAgain') : t('exports.exportData')}
                 </button>
               )}
             </li>
@@ -68,7 +77,7 @@ function TenantExportList({ format, includeMedia }: { format: ExportFormat; incl
       </ul>
       {rows.length > SHOWN && (
         <button type="button" className="link" style={{ fontSize: 12, marginTop: 6 }} onClick={() => setAll((v) => !v)}>
-          {all ? 'Show fewer' : `Show all ${rows.length} tenants`}
+          {all ? t('exports.showFewer') : t('exports.showAll', { count: rows.length })}
         </button>
       )}
     </>
@@ -76,27 +85,28 @@ function TenantExportList({ format, includeMedia }: { format: ExportFormat; incl
 }
 
 export function TenantExports() {
+  const t = useT();
   const can = useCan();
   const [format, setFormat] = useState<ExportFormat>('json');
   const [includeMedia, setIncludeMedia] = useState(true);
   return (
-    <Card title="Per-tenant exports">
+    <Card title={t('exports.title')}>
       <p className="t-sm muted" style={{ marginTop: -4, marginBottom: 0 }}>
-        Full data export for offboarding or GDPR portability.
+        {t('exports.intro')}
       </p>
       {can('platform.manage') && (
         <div className="hstack wrap" style={{ gap: 12, marginTop: 10 }}>
           <Select
-            label="Export format"
+            label={t('exports.format')}
             value={format}
             onChange={setFormat}
-            options={EXPORT_FORMATS.map((f) => [f, EXPORT_FORMAT_LABELS[f]] as const)}
+            options={EXPORT_FORMATS.map((f) => [f, t(`enums.exportFormat.${f}`)] as const)}
             style={{ width: 'auto' }}
           />
           <div className="hstack">
-            <Toggle on={includeMedia} onChange={setIncludeMedia} label="Include media manifests" />
+            <Toggle on={includeMedia} onChange={setIncludeMedia} label={t('exports.includeMedia')} />
             <span className="muted" style={{ fontSize: 12 }} aria-hidden="true">
-              Include media manifests
+              {t('exports.includeMedia')}
             </span>
           </div>
         </div>
@@ -104,10 +114,10 @@ export function TenantExports() {
       {can('tenants.view') ? (
         <TenantExportList format={format} includeMedia={includeMedia} />
       ) : (
-        <Empty>Tenant access is needed to list tenants for export.</Empty>
+        <Empty>{t('exports.needsTenantAccess')}</Empty>
       )}
       <p className="note" style={{ marginTop: 8, marginBottom: 0 }}>
-        Download links email to you and expire after 7 days.
+        {t('exports.linkNote')}
       </p>
     </Card>
   );

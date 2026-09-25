@@ -1,24 +1,42 @@
 import { Card, Empty, ErrorState, QueryState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
-import { formatDate, formatDateTime, num, timeAgo } from '@/lib/format';
+import { formatDate, formatDateTime, timeAgo } from '@/lib/format';
 import { useBackupActivity, useBackupSettings, useBackupSummary, useRestores } from '../api';
 import { BackupPolicy } from '../components/BackupPolicy';
 import { RestoreBanner } from '../components/RestoreBanner';
 import { RestorePoints } from '../components/RestorePoints';
 import { TenantExports } from '../components/TenantExports';
+import { t as tStatic, useT } from '../i18n';
 import type { BackupSummary } from '../types';
 
-const duration = (min: number) => (min >= 60 ? `${Math.round(min / 60)} h` : `${min} min`);
+const duration = (min: number) =>
+  min >= 60 ? tStatic('duration.hours', { count: Math.round(min / 60) }) : tStatic('duration.minutes', { count: min });
 
 function Kpis({ s }: { s: BackupSummary | undefined }) {
+  const t = useT();
   const items: [string, string, string, boolean][] | null = s
     ? [
-        ['Last backup', s.lastBackupAt ? timeAgo(s.lastBackupAt) : '—', s.lastBackupVerified ? 'Verified ✓' : 'Verification pending', true],
-        ['Protected data', `${num(s.protectedGb)} GB`, `${s.tenants} tenants · ${s.historyTb} TB with history`, true],
-        ['RPO / RTO', `${duration(s.rpoMinutes)} / ${duration(s.rtoMinutes)}`, `${s.walWindowDays}-day point-in-time window`, true],
         [
-          'Restore drills',
-          `${s.drillsPassed} / ${s.drillsTotal} passed`,
-          s.lastDrillAt ? `last drill ${formatDate(s.lastDrillAt)}` : 'No drills yet',
+          t('kpi.lastBackup'),
+          s.lastBackupAt ? timeAgo(s.lastBackupAt) : '—',
+          s.lastBackupVerified ? t('kpi.verified') : t('kpi.verificationPending'),
+          true,
+        ],
+        [
+          t('kpi.protectedData'),
+          t('kpi.protectedValue', { count: s.protectedGb }),
+          t('kpi.protectedSub', { tenants: s.tenants, history: s.historyTb }),
+          true,
+        ],
+        [
+          t('kpi.rpoRto'),
+          t('kpi.rpoRtoValue', { rpo: duration(s.rpoMinutes), rto: duration(s.rtoMinutes) }),
+          t('kpi.pitrWindow', { days: s.walWindowDays }),
+          true,
+        ],
+        [
+          t('kpi.drills'),
+          t('kpi.drillsValue', { passed: s.drillsPassed, total: s.drillsTotal }),
+          s.lastDrillAt ? t('kpi.lastDrill', { date: formatDate(s.lastDrillAt) }) : t('kpi.noDrills'),
           s.drillsPassed === s.drillsTotal,
         ],
       ]
@@ -46,13 +64,14 @@ function Kpis({ s }: { s: BackupSummary | undefined }) {
 }
 
 function Activity() {
+  const t = useT();
   const q = useBackupActivity();
   return (
-    <Card title="Recent activity">
+    <Card title={t('activity.title')}>
       <QueryState query={q} compact skeleton={<SkeletonRows rows={4} />}>
         {(rows) =>
           rows.length === 0 ? (
-            <Empty>No backup activity yet.</Empty>
+            <Empty>{t('activity.empty')}</Empty>
           ) : (
             <ol className="plain-list">
               {rows.map((a) => (
@@ -72,6 +91,7 @@ function Activity() {
 }
 
 export default function BackupPage() {
+  const t = useT();
   const summary = useBackupSummary();
   const settings = useBackupSettings();
   const restores = useRestores();
@@ -79,7 +99,7 @@ export default function BackupPage() {
   const active = list.find((r) => ['staged', 'approved', 'running'].includes(r.status));
 
   return (
-    <Screen max={1000} label="Backup and restore">
+    <Screen max={1000} label={t('title')}>
       {summary.error ? <ErrorState error={summary.error} onRetry={() => void summary.refetch()} /> : <Kpis s={summary.data} />}
 
       {active && <RestoreBanner restore={active} />}
@@ -93,7 +113,7 @@ export default function BackupPage() {
         ) : settings.data && summary.data ? (
           <BackupPolicy settings={settings.data} summary={summary.data} />
         ) : (
-          <Card title="Policy & destinations">
+          <Card title={t('policy.title')}>
             <SkeletonRows rows={6} />
           </Card>
         )}

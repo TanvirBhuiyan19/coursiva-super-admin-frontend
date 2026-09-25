@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorState, FormError, Screen, Seg, Skeleton, SkeletonRows, Spinner, UnsavedChangesGuard } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { errorMessage } from '@/lib/api/errors';
-import { num } from '@/lib/format';
 import { useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { usePricing, useSavePricing } from '../api';
@@ -19,8 +18,11 @@ import {
   type PricingFormIn,
 } from '../components/pricingForm';
 import { signedMoney } from '../format';
-import { ROLLOUT_LABELS, ROLLOUTS, type PricingConfig } from '../types';
+import { useT } from '../i18n';
+import { ROLLOUTS, type PricingConfig } from '../types';
 
+const DISCOUNT_ERROR_ID = 'annual-discount-error';
+const TRIAL_ERROR_ID = 'trial-days-error';
 const numInput = { padding: '7px 10px', fontWeight: 700, textAlign: 'center' } as const;
 
 /** Live MRR-impact preview from the tenant counts the API returned per plan. */
@@ -36,6 +38,7 @@ function computeImpact(config: PricingConfig | undefined, draft: PricingFormIn['
 }
 
 function ImpactBanner({ config, form, canManage }: { config: PricingConfig; form: PricingForm; canManage: boolean }) {
+  const t = useT();
   const [prices, rollout] = form.watch(['prices', 'rollout']);
   const { changed, delta } = computeImpact(config, prices, rollout);
   if (!changed) return null;
@@ -43,17 +46,16 @@ function ImpactBanner({ config, form, canManage }: { config: PricingConfig; form
   return (
     <div className="callout callout--accent hstack wrap" style={{ gap: 12, alignItems: 'center' }} role="status">
       <span className="fg-accent" style={{ fontSize: 13, fontWeight: 700 }}>
-        MRR impact: <span className={delta >= 0 ? 'fg-good' : 'fg-bad'}>{signedMoney(delta)}/mo</span>
+        {t('plans.impact.label')}{' '}
+        <span className={delta >= 0 ? 'fg-good' : 'fg-bad'}>{t('signedPerMonth', { amount: signedMoney(delta) })}</span>
       </span>
       <span className="muted" style={{ fontSize: 12, flex: 1, minWidth: 200 }}>
-        {rollout === 'new_signups'
-          ? 'Projected at current tenant counts — existing tenants keep their price.'
-          : `Applies to all ${num(tenants)} tenants on the changed plans at their next billing cycle.`}
+        {rollout === 'new_signups' ? t('plans.impact.newSignups') : t('plans.impact.migrateAll', { tenants })}
       </span>
       <div style={{ flex: '0 1 300px', minWidth: 240 }}>
         <Seg
-          label="Price rollout"
-          options={ROLLOUTS.map((r) => [r, ROLLOUT_LABELS[r]] as const)}
+          label={t('plans.impact.rolloutLabel')}
+          options={ROLLOUTS.map((r) => [r, t(`plans.rollouts.${r}`)] as const)}
           value={rollout}
           disabled={!canManage}
           onChange={(v) => form.setValue('rollout', v, { shouldDirty: true })}
@@ -64,15 +66,16 @@ function ImpactBanner({ config, form, canManage }: { config: PricingConfig; form
 }
 
 function AddonsCard({ config, form, canManage }: { config: PricingConfig; form: PricingForm; canManage: boolean }) {
+  const t = useT();
   const errors = form.formState.errors;
   const discountErr = errors.annualDiscountPct?.message;
   return (
     <section className="card" style={{ flex: '1 1 320px', minWidth: 0 }} aria-labelledby="addons-title">
       <h2 id="addons-title" className="card-title">
-        Add-ons
+        {t('plans.addons.title')}
       </h2>
       <p className="muted" style={{ fontSize: 12.5, margin: '3px 0 0' }}>
-        Priced per month. These raise a plan’s limits — feature modules are sold in Extensions.
+        {t('plans.addons.intro')}
       </p>
       <ul className="stack plain-list" style={{ marginTop: 8 }}>
         {config.addons.map((a, i) => {
@@ -97,13 +100,13 @@ function AddonsCard({ config, form, canManage }: { config: PricingConfig; form: 
                 className="input"
                 inputMode="decimal"
                 style={{ ...numInput, width: 72 }}
-                aria-label={`${a.label} price`}
+                aria-label={t('plans.addons.priceLabel', { addon: a.label })}
                 readOnly={!canManage}
                 {...(err ? { 'aria-invalid': true, 'aria-describedby': `addon-${a.key}-error` } : {})}
                 {...form.register(`addons.${i}.price`)}
               />
               <span className="faint" style={{ fontSize: 12 }}>
-                /mo
+                {t('perMonth')}
               </span>
             </li>
           );
@@ -111,7 +114,7 @@ function AddonsCard({ config, form, canManage }: { config: PricingConfig; form: 
       </ul>
       <div className="hstack wrap" style={{ gap: 10, marginTop: 16 }}>
         <label htmlFor="annual-discount" style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>
-          Annual billing discount
+          {t('plans.addons.annualDiscount')}
         </label>
         <input
           id="annual-discount"
@@ -119,15 +122,15 @@ function AddonsCard({ config, form, canManage }: { config: PricingConfig; form: 
           inputMode="numeric"
           style={{ ...numInput, width: 60 }}
           readOnly={!canManage}
-          {...(discountErr ? { 'aria-invalid': true, 'aria-describedby': 'annual-discount-error' } : {})}
+          {...(discountErr ? { 'aria-invalid': true, 'aria-describedby': DISCOUNT_ERROR_ID } : {})}
           {...form.register('annualDiscountPct')}
         />
         <span className="muted" style={{ fontSize: 12.5 }}>
-          % off
+          {t('plans.addons.percentOff')}
         </span>
       </div>
       {discountErr && (
-        <div id="annual-discount-error" className="field-error" role="alert">
+        <div id={DISCOUNT_ERROR_ID} className="field-error" role="alert">
           {discountErr}
         </div>
       )}
@@ -155,6 +158,7 @@ function PlansSkeleton() {
 }
 
 export default function PlansPage() {
+  const t = useT();
   const can = useCan();
   const canManage = can('billing.manage');
   const pricing = usePricing();
@@ -184,11 +188,7 @@ export default function PlansPage() {
     save.mutate(toUpdate(v), {
       onSuccess: (res) => {
         form.reset(toFormValues(res.pricing));
-        toast(
-          res.migratedTenants
-            ? `Pricing saved — ${num(res.migratedTenants)} tenants move to the new price at their next billing cycle`
-            : 'Pricing saved — applies to new signups',
-        );
+        toast(res.migratedTenants ? t('plans.toasts.savedMigrated', { count: res.migratedTenants }) : t('plans.toasts.savedNewSignups'));
       },
       onError: (err) => {
         if (!applyPricingErrors(form, err)) setFormError(errorMessage(err));
@@ -198,13 +198,13 @@ export default function PlansPage() {
 
   if (pricing.error)
     return (
-      <Screen max={1150} label="Plans and pricing">
+      <Screen max={1150} label={t('plans.title')}>
         <ErrorState error={pricing.error} onRetry={() => void pricing.refetch()} />
       </Screen>
     );
 
   return (
-    <Screen max={1150} label="Plans and pricing">
+    <Screen max={1150} label={t('plans.title')}>
       {!config ? (
         <PlansSkeleton />
       ) : (
@@ -220,13 +220,13 @@ export default function PlansPage() {
           <div className="card hstack wrap" style={{ padding: 18, gap: 14 }}>
             <div style={{ flex: 1, minWidth: 220 }}>
               <label htmlFor="trial-days" style={{ fontWeight: 700, fontSize: 13.5 }}>
-                Free trial length
+                {t('plans.trial.label')}
               </label>
               <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                Applies to all new tenant signups.
+                {t('plans.trial.hint')}
               </div>
               {trialErr && (
-                <div id="trial-days-error" className="field-error" role="alert">
+                <div id={TRIAL_ERROR_ID} className="field-error" role="alert">
                   {trialErr}
                 </div>
               )}
@@ -238,25 +238,25 @@ export default function PlansPage() {
                 inputMode="numeric"
                 style={{ ...numInput, width: 64, fontSize: 14 }}
                 readOnly={!canManage}
-                {...(trialErr ? { 'aria-invalid': true, 'aria-describedby': 'trial-days-error' } : {})}
+                {...(trialErr ? { 'aria-invalid': true, 'aria-describedby': TRIAL_ERROR_ID } : {})}
                 {...form.register('trialDays')}
               />
               <span className="muted" style={{ fontSize: 13 }}>
-                days
+                {t('plans.trial.days')}
               </span>
             </div>
             {canManage && (
               <div className="hstack" style={{ gap: 8 }}>
                 {dirty && (
                   <span className="t-xs fg-warn" role="status">
-                    Unsaved changes
+                    {t('plans.unsaved')}
                   </span>
                 )}
                 <button type="button" className="btn" disabled={!dirty || save.isPending} onClick={() => values && form.reset(values)}>
-                  Discard
+                  {t('plans.discard')}
                 </button>
                 <button type="button" className="btn btn--primary" disabled={!dirty || save.isPending} onClick={() => void onSubmit()}>
-                  {save.isPending && <Spinner />} Save pricing
+                  {save.isPending && <Spinner />} {t('plans.save')}
                 </button>
               </div>
             )}

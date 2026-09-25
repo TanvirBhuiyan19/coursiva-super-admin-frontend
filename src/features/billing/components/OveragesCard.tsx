@@ -2,16 +2,17 @@ import { Link } from 'react-router-dom';
 import { Badge, Card, Empty, ErrorState, SkeletonRows } from '@/components/ui';
 import { pathOf } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
-import { money } from '@/lib/format';
+import { money, monthName } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useBillOverage, useOverages } from '../api';
-import { monthName } from '../format';
+import { useT } from '../i18n';
 import type { Overage } from '../types';
 
 const COLS = 'minmax(0,1.6fr) minmax(0,1fr) minmax(0,1.3fr) minmax(0,0.9fr) minmax(0,0.6fr) minmax(0,1fr)';
 const MIN = 720;
 
 export function OveragesCard() {
+  const t = useT();
   const can = useCan();
   const canManage = can('billing.manage');
   const list = useOverages();
@@ -19,16 +20,16 @@ export function OveragesCard() {
   const d = list.data;
 
   const addToInvoice = (o: Overage) =>
-    bill.mutate(o.id, { onSuccess: () => toast(`${money(o.amount)} overage added to ${o.tenantName}’s next invoice`) });
+    bill.mutate(o.id, { onSuccess: () => toast(t('overages.toasts.added', { amount: money(o.amount), tenant: o.tenantName })) });
 
   return (
     <Card
-      title={d ? `Metered overages · ${monthName(d.period)}` : 'Metered overages'}
+      title={d ? t('overages.titlePeriod', { month: monthName(d.period, 'long') }) : t('overages.title')}
       className="table-scroll"
       right={
         d && (
           <span className="muted" style={{ fontSize: 12.5, marginLeft: 'auto' }}>
-            Unbilled: <b style={{ color: 'var(--tx)' }}>{money(d.unbilledTotal)}</b>
+            {t('overages.unbilledTotal')} <b style={{ color: 'var(--tx)' }}>{money(d.unbilledTotal)}</b>
           </span>
         )
       }
@@ -38,17 +39,17 @@ export function OveragesCard() {
       ) : list.error ? (
         <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />
       ) : !list.data.items.length ? (
-        <Empty>No usage above plan limits this month.</Empty>
+        <Empty>{t('overages.empty')}</Empty>
       ) : (
-        <div role="table" aria-label="Metered overages">
+        <div role="table" aria-label={t('overages.title')}>
           <div role="row" className="trow trow--head" style={{ gridTemplateColumns: COLS, minWidth: MIN, gap: 10, padding: '9px 0' }}>
-            <div role="columnheader">Tenant</div>
-            <div role="columnheader">Meter</div>
-            <div role="columnheader">Usage</div>
-            <div role="columnheader">Rate</div>
-            <div role="columnheader">Amount</div>
+            <div role="columnheader">{t('columns.tenant')}</div>
+            <div role="columnheader">{t('columns.meter')}</div>
+            <div role="columnheader">{t('columns.usage')}</div>
+            <div role="columnheader">{t('columns.rate')}</div>
+            <div role="columnheader">{t('columns.amount')}</div>
             <div role="columnheader" className="sr-only">
-              Billing
+              {t('columns.billing')}
             </div>
           </div>
           {list.data.items.map((o) => (
@@ -73,19 +74,19 @@ export function OveragesCard() {
               </div>
               <div role="cell" style={{ textAlign: 'right' }}>
                 {o.billedAt ? (
-                  <Badge tone="good">Queued</Badge>
+                  <Badge tone="good">{t('overages.queued')}</Badge>
                 ) : canManage ? (
                   <button
                     type="button"
                     className="btn btn--sm btn--outline-accent"
                     disabled={bill.isPending && bill.variables === o.id}
                     onClick={() => addToInvoice(o)}
-                    aria-label={`Add ${o.tenantName} ${o.meter.toLowerCase()} overage to invoice`}
+                    aria-label={t('overages.addToInvoiceFor', { tenant: o.tenantName, meter: o.meter.toLowerCase() })}
                   >
-                    Add to invoice
+                    {t('overages.addToInvoice')}
                   </button>
                 ) : (
-                  <Badge tone="warn">Unbilled</Badge>
+                  <Badge tone="warn">{t('overages.unbilled')}</Badge>
                 )}
               </div>
             </div>
@@ -93,9 +94,9 @@ export function OveragesCard() {
         </div>
       )}
       <div className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
-        Overage meters reset on the 1st. Rates are set in{' '}
+        {t('overages.footer')}{' '}
         <Link className="link" style={{ fontSize: 11.5 }} to={pathOf('plans')}>
-          Plans &amp; pricing → Add-ons
+          {t('overages.footerLink')}
         </Link>
         .
       </div>

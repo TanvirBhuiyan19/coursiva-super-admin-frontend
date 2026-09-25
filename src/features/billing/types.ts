@@ -110,7 +110,6 @@ export interface PricingConfig {
 
 export const ROLLOUTS = ['new_signups', 'migrate_all'] as const;
 export type Rollout = (typeof ROLLOUTS)[number];
-export const ROLLOUT_LABELS: Record<Rollout, string> = { new_signups: 'New signups only', migrate_all: 'Migrate everyone' };
 
 /** PUT /billing/pricing */
 export interface PricingUpdate {

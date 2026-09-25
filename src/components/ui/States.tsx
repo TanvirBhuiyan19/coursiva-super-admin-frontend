@@ -2,20 +2,22 @@ import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { errorMessage } from '@/lib/api/errors';
 import { ApiError } from '@/lib/api/errors';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { Card } from './Layout';
 import { SkeletonRows } from './Misc';
 
 export function ErrorState({ error, onRetry, compact }: { error: unknown; onRetry?: () => void; compact?: boolean }) {
+  const tc = useCommonT();
   const forbidden = error instanceof ApiError && error.isForbidden;
   const body = (
     <div className="empty" role="alert">
       <div style={{ fontWeight: 700, color: 'var(--tx)', marginBottom: 4 }}>
-        {forbidden ? 'You don’t have access to this' : 'Couldn’t load this'}
+        {forbidden ? tc('errors.forbidden') : tc('errors.loadFailed')}
       </div>
-      <div>{forbidden ? 'Ask a platform owner to grant you the permission.' : errorMessage(error)}</div>
+      <div>{forbidden ? tc('errors.forbiddenHint') : errorMessage(error)}</div>
       {onRetry && !forbidden && (
         <button type="button" className="btn btn--sm" style={{ marginTop: 12 }} onClick={onRetry}>
-          Try again
+          {tc('actions.retry')}
         </button>
       )}
     </div>

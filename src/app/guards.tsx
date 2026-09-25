@@ -4,6 +4,7 @@ import { useSession } from '@/features/auth/api';
 import type { Permission } from '@/features/auth/permissions';
 import { useCan } from '@/features/auth/useCan';
 import { ErrorState, SkeletonRows } from '@/components/ui';
+import { useT } from './i18n';
 
 function FullPageLoading() {
   return (
@@ -43,17 +44,18 @@ export function RedirectIfAuthed({ children }: { children: ReactNode }) {
 
 /** Screen-level permission gate. The API enforces the same rule. */
 export function RequirePermission({ permission, children }: { permission: Permission | undefined; children: ReactNode }) {
+  const t = useT();
   const can = useCan();
   if (can(permission)) return <>{children}</>;
   return (
     <div className="screen" style={{ maxWidth: 640 }}>
       <div className="card" role="alert">
-        <h2 className="card-title">You don’t have access to this screen</h2>
+        <h2 className="card-title">{t('guards.forbiddenTitle')}</h2>
         <p className="note" style={{ margin: '8px 0 14px' }}>
-          Your role doesn’t include this area. Ask a platform owner if you need it.
+          {t('guards.forbiddenBody')}
         </p>
         <Link className="btn" to="/">
-          Back to dashboard
+          {t('guards.backToDashboard')}
         </Link>
       </div>
     </div>
@@ -61,15 +63,16 @@ export function RequirePermission({ permission, children }: { permission: Permis
 }
 
 export function NotFound() {
+  const t = useT();
   return (
     <div className="screen" style={{ maxWidth: 640 }}>
       <div className="card">
-        <h2 className="card-title">Page not found</h2>
+        <h2 className="card-title">{t('guards.notFoundTitle')}</h2>
         <p className="note" style={{ margin: '8px 0 14px' }}>
-          That address doesn’t match anything in the console. It may have moved.
+          {t('guards.notFoundBody')}
         </p>
         <Link className="btn btn--primary" to="/">
-          Go to dashboard
+          {t('guards.goToDashboard')}
         </Link>
       </div>
     </div>

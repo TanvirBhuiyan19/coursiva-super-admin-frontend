@@ -1,11 +1,12 @@
 import { Bar, Card, QueryState, SkeletonRows, ToggleRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
-import { plural } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useAddToRoadmap, useIntegrationSettings, useSetIntegrationPolicy } from '../api';
+import { useT } from '../i18n';
 
 /** What tenants may connect. Each policy toggle saves immediately (optimistic). */
 export function IntegrationsCard() {
+  const t = useT();
   const can = useCan();
   const manage = can('platform.manage');
   const q = useIntegrationSettings();
@@ -14,13 +15,15 @@ export function IntegrationsCard() {
 
   return (
     <Card
-      title="Integration marketplace"
+      title={t('integrations.title')}
       sub={
-        q.data ? `${q.data.liveApps} apps live · ${q.data.categories} categories · ${plural(q.data.requests.length, 'request')}` : undefined
+        q.data
+          ? t('integrations.sub', { liveApps: q.data.liveApps, categories: q.data.categories, count: q.data.requests.length })
+          : undefined
       }
     >
       <p className="t-sm muted" style={{ marginTop: 0, lineHeight: 1.55 }}>
-        What tenants may connect, and which apps gate a module until they do. Tenants configure their own credentials — you never hold them.
+        {t('integrations.intro')}
       </p>
       <QueryState query={q} compact skeleton={<SkeletonRows rows={6} />}>
         {(d) => (
@@ -35,14 +38,14 @@ export function IntegrationsCard() {
                 onChange={(enabled) =>
                   setPolicy.mutate(
                     { key: p.key, enabled },
-                    { onSuccess: () => toast(`${p.label} — ${enabled ? 'on for every tenant' : 'off for every tenant'}`) },
+                    { onSuccess: () => toast(t(enabled ? 'integrations.policyOn' : 'integrations.policyOff', { label: p.label })) },
                   )
                 }
               />
             ))}
 
             <h3 className="eyebrow" style={{ marginTop: 16, marginBottom: 4 }}>
-              Adoption across tenants
+              {t('integrations.adoption')}
             </h3>
             <ul className="plain-list">
               {d.adoption.map((a) => (
@@ -54,10 +57,13 @@ export function IntegrationsCard() {
                     </span>
                   </span>
                   <span style={{ width: 110, display: 'flex' }}>
-                    <Bar value={a.totalTenants ? Math.round((a.tenants / a.totalTenants) * 100) : 0} label={`${a.name} adoption`} />
+                    <Bar
+                      value={a.totalTenants ? Math.round((a.tenants / a.totalTenants) * 100) : 0}
+                      label={t('integrations.adoptionLabel', { name: a.name })}
+                    />
                   </span>
                   <span className="nowrap" style={{ width: 110, fontWeight: 700 }}>
-                    {a.tenants} of {plural(a.totalTenants, 'tenant')}
+                    {t('integrations.adoptionCount', { tenants: a.tenants, count: a.totalTenants })}
                   </span>
                   {a.note && (
                     <span className="muted" style={{ flex: 1, minWidth: 140 }}>
@@ -69,7 +75,7 @@ export function IntegrationsCard() {
             </ul>
 
             <h3 className="eyebrow" style={{ marginTop: 16, marginBottom: 8 }}>
-              Tenant requests
+              {t('integrations.requests')}
             </h3>
             <ul className="hstack wrap plain-list" style={{ gap: 8 }}>
               {d.requests.map((r) => (
@@ -79,15 +85,15 @@ export function IntegrationsCard() {
                     className="chip"
                     aria-pressed={r.onRoadmap}
                     disabled={!manage || r.onRoadmap}
-                    aria-label={r.onRoadmap ? `${r.name} is on the roadmap` : `Add ${r.name} to the roadmap`}
+                    aria-label={t(r.onRoadmap ? 'integrations.onRoadmap' : 'integrations.addToRoadmap', { name: r.name })}
                     onClick={() =>
                       roadmap.mutate(r.id, {
-                        onSuccess: () => toast(`${r.name} added to the integration roadmap — requesters get notified on launch`),
+                        onSuccess: () => toast(t('integrations.addedToRoadmap', { name: r.name })),
                       })
                     }
                   >
                     {r.onRoadmap ? '✓ ' : ''}
-                    {r.name} <span className="faint">· {plural(r.requests, 'request')}</span>
+                    {r.name} <span className="faint">· {t('integrations.requestCount', { count: r.requests })}</span>
                   </button>
                 </li>
               ))}

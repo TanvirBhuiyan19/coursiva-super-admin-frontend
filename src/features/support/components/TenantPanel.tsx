@@ -3,22 +3,26 @@ import { Badge, Card, Chip } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { useImpersonate } from '@/features/tenants/api';
 import { formatDate, healthTone, money, planTone, toneFg } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { useUi } from '@/store/ui';
 import { useSupportOptions, useUpdateTicket } from '../api';
+import { useT } from '../i18n';
 import { statusTone } from '../sla';
 import type { TicketDetail } from '../types';
 
 const eyebrow = { fontSize: 10.5, marginBottom: 8 } as const;
 
-export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
+export function TenantPanel({ ticket: tk }: { ticket: TicketDetail }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
-  const ctx = t.tenantContext;
+  const ctx = tk.tenantContext;
   const setUi = useUi((s) => s.set);
   const impersonate = useImpersonate(ctx.id);
-  const update = useUpdateTicket(t.id);
+  const update = useUpdateTicket(tk.id);
   const options = useSupportOptions();
   const manage = can('support.manage');
-  const tags = [...new Set([...(options.data?.tags ?? []), ...t.tags])];
+  const tags = [...new Set([...(options.data?.tags ?? []), ...tk.tags])];
 
   return (
     <div className="stack" style={{ gap: 14, flex: '1 1 260px', minWidth: 0 }}>
@@ -28,12 +32,12 @@ export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
             {ctx.name}
           </h2>
           <Badge tone={planTone(ctx.plan)} xs>
-            {ctx.plan}
+            {tc(`enums.plan.${ctx.plan}`)}
           </Badge>
         </div>
         <div className="faint" style={{ fontSize: 12, marginTop: 2 }}>
-          {ctx.mrr ? `${money(ctx.mrr)} MRR` : 'No MRR'} · {ctx.ownerName} ·{' '}
-          <span style={{ color: toneFg(healthTone(ctx.health)) }}>{ctx.health}</span>
+          {ctx.mrr ? t('tenant.mrr', { amount: money(ctx.mrr) }) : t('tenant.noMrr')} · {ctx.ownerName} ·{' '}
+          <span style={{ color: toneFg(healthTone(ctx.health)) }}>{tc(`enums.tenantHealth.${ctx.health}`)}</span>
         </div>
         <dl className="stack" style={{ gap: 8, marginTop: 12, marginBottom: 0 }}>
           {ctx.signals.map((s) => (
@@ -47,7 +51,7 @@ export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
         </dl>
         <div className="hstack wrap" style={{ marginTop: 14 }}>
           <Link to={`/tenants/${ctx.id}`} className="btn btn--sm">
-            Open tenant
+            {t('tenant.open')}
           </Link>
           {can('tenants.impersonate') && (
             <button
@@ -56,7 +60,7 @@ export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
               disabled={impersonate.isPending}
               onClick={() => impersonate.mutate(undefined, { onSuccess: () => setUi({ impersonating: ctx.id }) })}
             >
-              Impersonate
+              {t('tenant.impersonate')}
             </button>
           )}
         </div>
@@ -65,14 +69,14 @@ export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
       <Card
         title={
           <span className="eyebrow" style={eyebrow}>
-            Tags
+            {t('tenant.tags')}
           </span>
         }
         style={{ padding: '16px 18px' }}
       >
-        <div className="hstack wrap" style={{ gap: 6 }} role="group" aria-label="Ticket tags">
+        <div className="hstack wrap" style={{ gap: 6 }} role="group" aria-label={t('tenant.tagsLabel')}>
           {tags.map((tag) => {
-            const on = t.tags.includes(tag);
+            const on = tk.tags.includes(tag);
             return (
               <Chip
                 key={tag}
@@ -80,7 +84,7 @@ export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
                 accent
                 on={on}
                 disabled={!manage}
-                onClick={() => update.mutate({ tags: on ? t.tags.filter((x) => x !== tag) : [...t.tags, tag] })}
+                onClick={() => update.mutate({ tags: on ? tk.tags.filter((x) => x !== tag) : [...tk.tags, tag] })}
               >
                 {tag}
               </Chip>
@@ -92,13 +96,13 @@ export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
       <Card
         title={
           <span className="eyebrow" style={eyebrow}>
-            Past tickets
+            {t('tenant.pastTickets')}
           </span>
         }
         style={{ padding: '16px 18px' }}
       >
         {ctx.pastTickets.length === 0 ? (
-          <div className="note">No other tickets from {ctx.name}.</div>
+          <div className="note">{t('tenant.noPastTickets', { name: ctx.name })}</div>
         ) : (
           <ul className="plain-list">
             {ctx.pastTickets.map((p) => (
@@ -114,12 +118,13 @@ export function TenantPanel({ ticket: t }: { ticket: TicketDetail }) {
                     </div>
                   )}
                   <div className="faint" style={{ fontSize: 11 }}>
-                    #{p.number} · <span style={{ color: toneFg(statusTone(p.status)) }}>{p.status}</span> · {formatDate(p.createdAt)}
+                    #{p.number} · <span style={{ color: toneFg(statusTone(p.status)) }}>{t(`status.${p.status}`)}</span> ·{' '}
+                    {formatDate(p.createdAt)}
                   </div>
                 </div>
                 {p.csat != null && (
-                  <span className="muted nowrap" style={{ fontWeight: 700 }} aria-label={`CSAT ${p.csat} out of 5`}>
-                    {p.csat} ★
+                  <span className="muted nowrap" style={{ fontWeight: 700 }} aria-label={t('tenant.csatLabel', { score: p.csat })}>
+                    {t('tenant.csatStars', { score: p.csat })}
                   </span>
                 )}
               </li>

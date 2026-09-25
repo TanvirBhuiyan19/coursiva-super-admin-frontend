@@ -1,7 +1,9 @@
 import { Badge, Dot, Empty, ErrorState, Pagination, SkeletonRows } from '@/components/ui';
 import type { Paginated } from '@/lib/api/types';
 import { timeAgo } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import type { UseQueryResult } from '@tanstack/react-query';
+import { useT } from '../i18n';
 import { priorityTone, slaFg, slaLabel, slaTone, statusTone } from '../sla';
 import type { Ticket } from '../types';
 
@@ -14,12 +16,14 @@ interface Props {
 }
 
 export function TicketList({ query, selectedId, onSelect, onPage, onClear }: Props) {
+  const t = useT();
+  const tc = useCommonT();
   if (query.error) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   const rows = query.data?.data ?? [];
   return (
     <section
       className="card card--flush"
-      aria-label="Tickets"
+      aria-label={t('list.label')}
       aria-busy={query.isFetching}
       style={{ flex: '1 1 280px', minWidth: 0, padding: 0 }}
     >
@@ -31,11 +35,11 @@ export function TicketList({ query, selectedId, onSelect, onPage, onClear }: Pro
         <Empty
           action={
             <button type="button" className="btn btn--sm" onClick={onClear}>
-              Show all open tickets
+              {t('list.showAllOpen')}
             </button>
           }
         >
-          Nothing in this view.
+          {t('list.empty')}
         </Empty>
       ) : (
         <ul className="plain-list">
@@ -73,18 +77,18 @@ export function TicketList({ query, selectedId, onSelect, onPage, onClear }: Pro
                       </span>
                     </span>
                     <span className="ellipsis" style={{ display: 'block', fontSize: 12.5, color: 'var(--tx2)', marginTop: 2 }}>
-                      #{tk.number} · {tk.tenant.name} · {tk.requesterName} · {tk.tenant.plan}
+                      #{tk.number} · {tk.tenant.name} · {tk.requesterName} · {tc(`enums.plan.${tk.tenant.plan}`)}
                     </span>
                     <span className="hstack wrap" style={{ gap: 6, marginTop: 6 }}>
                       <Badge tone={priorityTone(tk.priority)} pill xs>
-                        {tk.priority}
+                        {t(`priority.${tk.priority}`)}
                       </Badge>
                       <Badge tone={statusTone(tk.status)} pill xs>
-                        {tk.status}
+                        {t(`status.${tk.status}`)}
                       </Badge>
                       {tk.escalated && (
                         <Badge tone="bad" pill xs>
-                          Escalated
+                          {t('list.escalated')}
                         </Badge>
                       )}
                       <Dot tone={tone} size={6} />
@@ -99,7 +103,7 @@ export function TicketList({ query, selectedId, onSelect, onPage, onClear }: Pro
           })}
         </ul>
       )}
-      {query.data && query.data.meta.lastPage > 1 && <Pagination meta={query.data.meta} noun="tickets" onPage={onPage} />}
+      {query.data && query.data.meta.lastPage > 1 && <Pagination meta={query.data.meta} noun={t('list.noun')} onPage={onPage} />}
     </section>
   );
 }

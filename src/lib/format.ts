@@ -1,24 +1,46 @@
 // Formatting and display rules shared across features. Pure functions — unit tested in format.test.ts.
 import type { Tone } from './domain';
+import { intlLocale } from './i18n';
+import { t } from './i18n/common';
 
-const LOCALE = 'en-US';
-const nf = new Intl.NumberFormat(LOCALE);
+// Every formatter follows the active locale (`lib/i18n`); instances are cached per locale + options.
+const cache = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat>();
+function cached<T extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat>(
+  kind: string,
+  options: object,
+  make: (locale: string) => T,
+): T {
+  const locale = intlLocale();
+  const key = `${kind}|${locale}|${JSON.stringify(options)}`;
+  let f = cache.get(key) as T | undefined;
+  if (!f) cache.set(key, (f = make(locale)));
+  return f;
+}
+const numberFormat = (o: Intl.NumberFormatOptions = {}) => cached('n', o, (l) => new Intl.NumberFormat(l, o));
+const dateFormat = (o: Intl.DateTimeFormatOptions) => cached('d', o, (l) => new Intl.DateTimeFormat(l, o));
+const relativeFormat = () => cached('r', {}, (l) => new Intl.RelativeTimeFormat(l, { style: 'narrow', numeric: 'auto' }));
 
-export const num = (n: number) => nf.format(n);
+/** Platform amounts are always US dollars; only the presentation follows the locale. */
+const CURRENCY = 'USD';
+
+export const num = (n: number) => numberFormat().format(n);
 
 /** $1,234 (whole dollars). */
-export const money = (n: number) => '$' + nf.format(Math.round(n));
+export const money = (n: number) => numberFormat({ style: 'currency', currency: CURRENCY, maximumFractionDigits: 0 }).format(Math.round(n));
 
 /** Two decimals under $100, whole dollars above: $4.20 · $1,234. */
 export const moneyFine = (n: number) =>
-  '$' + n.toLocaleString(LOCALE, n < 100 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 0 });
+  numberFormat(
+    n < 100
+      ? { style: 'currency', currency: CURRENCY, minimumFractionDigits: 2, maximumFractionDigits: 2 }
+      : { style: 'currency', currency: CURRENCY, maximumFractionDigits: 0 },
+  ).format(n);
 
 /** $53.9K · $1.2M */
-export const moneyCompact = (n: number) => '$' + new Intl.NumberFormat(LOCALE, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+export const moneyCompact = (n: number) =>
+  numberFormat({ style: 'currency', currency: CURRENCY, notation: 'compact', maximumFractionDigits: 1 }).format(n);
 
 export const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0) + '%';
-
-export const plural = (n: number, one: string, many = one + 's') => `${nf.format(n)} ${n === 1 ? one : many}`;
 
 export const initials = (name: string, max = 2) =>
   name
@@ -49,15 +71,15 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
-/** "just now" · "12m ago" · "3h ago" · "5d ago" · "Aug 12" · "Aug 12, 2025". */
+/** "just now" · "12m ago" · "3h ago" · "5d ago" · "Aug 12" · "Aug 12, 2025" (en-US; other locales use their CLDR forms). */
 export function timeAgo(iso: string | null | undefined, now = Date.now()) {
   if (!iso) return '—';
-  const t = new Date(iso).getTime();
-  const diff = now - t;
-  if (diff < MIN) return 'just now';
-  if (diff < HOUR) return Math.floor(diff / MIN) + 'm ago';
-  if (diff < DAY) return Math.floor(diff / HOUR) + 'h ago';
-  if (diff < 14 * DAY) return Math.floor(diff / DAY) + 'd ago';
+  const t0 = new Date(iso).getTime();
+  const diff = now - t0;
+  if (diff < MIN) return t('time.justNow');
+  if (diff < HOUR) return relativeFormat().format(-Math.floor(diff / MIN), 'minute');
+  if (diff < DAY) return relativeFormat().format(-Math.floor(diff / HOUR), 'hour');
+  if (diff < 14 * DAY) return relativeFormat().format(-Math.floor(diff / DAY), 'day');
   return formatDate(iso, now);
 }
 
@@ -66,14 +88,21 @@ export function formatDate(iso: string | null | undefined, now = Date.now()) {
   if (!iso) return '—';
   const d = new Date(iso);
   const sameYear = d.getFullYear() === new Date(now).getFullYear();
-  return d.toLocaleDateString(LOCALE, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+  return dateFormat({ month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) }).format(d);
 }
 
 /** "Mar 2025" */
-export const formatMonth = (iso: string) => new Date(iso).toLocaleDateString(LOCALE, { month: 'short', year: 'numeric' });
+export const formatMonth = (iso: string) => dateFormat({ month: 'short', year: 'numeric' }).format(new Date(iso));
+
+/** Month name of a calendar date (`2025-03-01` or a timestamp), read in UTC: "Mar" / "March". */
+export const monthName = (iso: string, width: 'short' | 'long' = 'short') =>
+  dateFormat({ month: width, timeZone: 'UTC' }).format(new Date(iso.length === 10 ? iso + 'T00:00:00Z' : iso));
+
+/** "Aug 12" (no year). */
+export const formatDay = (iso: string) => dateFormat({ month: 'short', day: 'numeric' }).format(new Date(iso));
 
 export const formatDateTime = (iso: string) =>
-  new Date(iso).toLocaleString(LOCALE, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  dateFormat({ month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
 
 /** Whole days from now until `iso` (negative when in the past). */
 export const daysUntil = (iso: string, now = Date.now()) => Math.ceil((new Date(iso).getTime() - now) / DAY);

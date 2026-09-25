@@ -5,7 +5,13 @@ import { Field, FormError, Input, Spinner } from '@/components/ui';
 import { env } from '@/config/env';
 import { ApiError, errorMessage } from '@/lib/api/errors';
 import { useLogin, useTwoFactorChallenge } from './api';
+import { useT } from './i18n';
 import { validateCode, validateCredentials, type LoginErrors as Errors } from './validation';
+
+/** Brand name and demo credentials are data, not copy. */
+const BRAND = 'Coursiva';
+const DEMO_PASSWORD = 'password';
+const DEMO_CODE = '123456';
 
 const DEMO_ACCOUNTS = [
   ['sam@coursiva.io', 'Owner'],
@@ -27,6 +33,7 @@ const serverErrors = (err: unknown, fields: (keyof Errors)[]): Errors | null => 
 };
 
 export default function LoginPage() {
+  const t = useT();
   const [step, setStep] = useState<'password' | 'code'>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -112,20 +119,20 @@ export default function LoginPage() {
             C
           </div>
           <div>
-            <div style={{ fontWeight: 700 }}>Coursiva</div>
-            <div className="t-xs muted">Platform console</div>
+            <div style={{ fontWeight: 700 }}>{BRAND}</div>
+            <div className="t-xs muted">{t('login.product')}</div>
           </div>
         </div>
 
         {step === 'password' ? (
           <form onSubmit={onLogin} noValidate>
             <h1 id="auth-title" className="modal-title">
-              Sign in
+              {t('login.signIn')}
             </h1>
             <p className="t-sm muted" style={{ margin: '4px 0 6px' }}>
-              Staff access only. Every session is logged.
+              {t('login.intro')}
             </p>
-            <Field label="Work email" error={errors.email}>
+            <Field label={t('login.email')} error={errors.email}>
               {(p) => (
                 <Input
                   {...p}
@@ -141,7 +148,7 @@ export default function LoginPage() {
                 />
               )}
             </Field>
-            <Field label="Password" error={errors.password}>
+            <Field label={t('login.password')} error={errors.password}>
               {(p) => (
                 <Input
                   {...p}
@@ -159,22 +166,22 @@ export default function LoginPage() {
             </Field>
             <label className="hstack t-sm" style={{ marginTop: 14, cursor: 'pointer' }}>
               <input type="checkbox" className="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-              Keep me signed in on this device
+              {t('login.remember')}
             </label>
             <FormError>{formError}</FormError>
             <button type="submit" className="btn btn--primary btn--lg btn--block" style={{ marginTop: 18 }} disabled={login.isPending}>
-              {login.isPending && <Spinner />} Sign in
+              {login.isPending && <Spinner />} {t('login.signIn')}
             </button>
           </form>
         ) : (
           <form onSubmit={onCode} noValidate>
             <h1 id="auth-title" className="modal-title">
-              Two-factor authentication
+              {t('login.twoFactorTitle')}
             </h1>
             <p className="t-sm muted" style={{ margin: '4px 0 6px' }}>
-              Enter the 6-digit code from your authenticator app.
+              {t('login.twoFactorIntro')}
             </p>
-            <Field label="Authentication code" error={errors.code}>
+            <Field label={t('login.code')} error={errors.code}>
               {(p) => (
                 <Input
                   {...p}
@@ -194,19 +201,19 @@ export default function LoginPage() {
             </Field>
             <FormError>{formError}</FormError>
             <button type="submit" className="btn btn--primary btn--lg btn--block" style={{ marginTop: 18 }} disabled={challenge.isPending}>
-              {challenge.isPending && <Spinner />} Verify
+              {challenge.isPending && <Spinner />} {t('login.verify')}
             </button>
             <button type="button" className="link link--muted" style={{ marginTop: 12 }} onClick={() => setStep('password')}>
-              ← Use a different account
+              {t('login.differentAccount')}
             </button>
           </form>
         )}
 
         {env.enableMocks && (
           <div className="callout" style={{ marginTop: 20, display: 'block' }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>Demo accounts (mock API)</div>
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>{t('demo.title')}</div>
             <div className="t-xs muted" style={{ marginBottom: 6 }}>
-              Password <code>password</code> · 2FA code <code>123456</code>
+              {t('demo.password')} <code>{DEMO_PASSWORD}</code> {t('demo.code')} <code>{DEMO_CODE}</code>
             </div>
             <div className="hstack wrap" style={{ gap: 6 }}>
               {DEMO_ACCOUNTS.map(([demoEmail, role]) => (
@@ -216,11 +223,11 @@ export default function LoginPage() {
                   className="chip chip--xs"
                   onClick={() => {
                     setEmail(demoEmail);
-                    setPassword('password');
+                    setPassword(DEMO_PASSWORD);
                     setErrors({});
                   }}
                 >
-                  {role}
+                  {t(`demo.roles.${role}`)}
                 </button>
               ))}
             </div>

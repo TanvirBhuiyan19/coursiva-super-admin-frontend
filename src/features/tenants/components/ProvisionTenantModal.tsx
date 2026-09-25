@@ -6,15 +6,23 @@ import { PLANS } from '@/lib/domain';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast, useUi } from '@/store/ui';
 import { useState } from 'react';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { useProvisionTenant } from '../api';
+import { t as msg, useT } from '../i18n';
 
 const schema = z.object({
-  name: z.string().trim().min(2, 'Enter the school name (2+ characters).').max(80, 'Keep it under 80 characters.'),
-  ownerEmail: z.email('Enter a valid email address.'),
+  name: z
+    .string()
+    .trim()
+    .min(2, { error: () => msg('provision.errors.nameMin') })
+    .max(80, { error: () => msg('provision.errors.nameMax') }),
+  ownerEmail: z.email({ error: () => msg('provision.errors.email') }),
   plan: z.enum(PLANS),
 });
 
 export function ProvisionTenantModal() {
+  const t = useT();
+  const tc = useCommonT();
   const navigate = useNavigate();
   const close = () => useUi.getState().set({ provisionOpen: false });
   const provision = useProvisionTenant();
@@ -36,7 +44,7 @@ export function ProvisionTenantModal() {
     provision.mutate(values, {
       onSuccess: (tenant) => {
         close();
-        toast(`Tenant provisioned — invite sent to ${values.ownerEmail}`);
+        toast(t('provision.provisioned', { email: values.ownerEmail }));
         void navigate(`/tenants/${tenant.id}`);
       },
       onError: (err) => {
@@ -46,46 +54,60 @@ export function ProvisionTenantModal() {
   });
 
   return (
-    <Modal onClose={close} label="Provision a new tenant">
+    <Modal onClose={close} label={t('provision.title')}>
       <form onSubmit={(e) => void onSubmit(e)} noValidate>
-        <h2 className="modal-title">Provision a new tenant</h2>
+        <h2 className="modal-title">{t('provision.title')}</h2>
         <p className="t-sm muted" style={{ marginTop: 3, marginBottom: 0 }}>
-          Creates the workspace, subdomain and owner invite in one step.
+          {t('provision.intro')}
         </p>
-        <Field label="School name" error={form.formState.errors.name?.message}>
-          {(p) => <Input {...p} {...form.register('name')} size="lg" placeholder="e.g. Harbor Music School" autoComplete="organization" />}
-        </Field>
-        <Field label="Owner email" error={form.formState.errors.ownerEmail?.message}>
+        <Field label={t('provision.schoolName')} error={form.formState.errors.name?.message}>
           {(p) => (
-            <Input {...p} {...form.register('ownerEmail')} size="lg" type="email" placeholder="owner@school.com" autoComplete="email" />
+            <Input {...p} {...form.register('name')} size="lg" placeholder={t('provision.schoolPlaceholder')} autoComplete="organization" />
+          )}
+        </Field>
+        <Field label={t('provision.ownerEmail')} error={form.formState.errors.ownerEmail?.message}>
+          {(p) => (
+            <Input
+              {...p}
+              {...form.register('ownerEmail')}
+              size="lg"
+              type="email"
+              placeholder={t('provision.ownerPlaceholder')}
+              autoComplete="email"
+            />
           )}
         </Field>
         <div
           className="hstack t-sm"
           style={{ marginTop: 12, background: 'var(--pg)', border: '1px solid var(--bd2)', borderRadius: 9, padding: '9px 12px' }}
         >
-          <span className="muted">Subdomain</span>
+          <span className="muted">{t('provision.subdomain')}</span>
           <span className="mono ellipsis" style={{ fontWeight: 700 }}>
             {slug}
           </span>
           <span className="fg-good" style={{ marginLeft: 'auto', fontWeight: 700, fontSize: 11, flexShrink: 0 }}>
-            auto-SSL
+            {t('provision.autoSsl')}
           </span>
         </div>
         <div className="field-label" id="prov-plan">
-          Plan
+          {t('provision.plan')}
         </div>
-        <Seg label="Plan" options={PLANS} value={plan} onChange={(v) => form.setValue('plan', v, { shouldDirty: true })} />
+        <Seg
+          label={t('provision.plan')}
+          options={PLANS.map((p) => [p, tc(`enums.plan.${p}`)] as const)}
+          value={plan}
+          onChange={(v) => form.setValue('plan', v, { shouldDirty: true })}
+        />
         <p className="muted" style={{ fontSize: 12, marginTop: 10, marginBottom: 0 }}>
-          Starts on a free trial. The owner sets their password from the invite email.
+          {t('provision.trialNote')}
         </p>
         <FormError>{formError}</FormError>
         <div className="hstack" style={{ gap: 10, marginTop: 18 }}>
           <button type="button" className="btn btn--lg" style={{ flex: 1 }} onClick={close}>
-            Cancel
+            {tc('actions.cancel')}
           </button>
           <button type="submit" className="btn btn--primary btn--lg" style={{ flex: 1.4 }} disabled={provision.isPending}>
-            {provision.isPending && <Spinner />} Create tenant
+            {provision.isPending && <Spinner />} {t('provision.create')}
           </button>
         </div>
       </form>

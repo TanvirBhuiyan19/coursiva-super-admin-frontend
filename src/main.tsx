@@ -14,10 +14,13 @@ import { whenIdle } from '@/lib/lazy';
 import { initErrorReporting, reportError } from '@/lib/reportError';
 import { createQueryClient, setActiveQueryClient } from '@/lib/queryClient';
 import { applyTokens } from '@/theme/themes';
+import { applyDocumentLocale } from '@/lib/i18n';
+import { I18nBoundary } from '@/lib/i18n/I18nBoundary';
 
 // Paint the saved theme before the first render so there's no flash of the wrong mode.
 const { brand, uiMode } = useUi.getState();
 applyTokens(brand, uiMode);
+applyDocumentLocale();
 
 async function bootstrap() {
   // Compared directly (not via env.ts) so production builds without mocks drop the mock API chunk entirely.
@@ -34,7 +37,9 @@ async function bootstrap() {
   createRoot(root).render(
     <StrictMode>
       <AppProviders client={queryClient}>
-        <RouterProvider router={router} />
+        <I18nBoundary>
+          <RouterProvider router={router} />
+        </I18nBoundary>
       </AppProviders>
     </StrictMode>,
   );

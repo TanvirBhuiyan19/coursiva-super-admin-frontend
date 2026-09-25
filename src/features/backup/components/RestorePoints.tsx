@@ -8,6 +8,7 @@ import { formatDate, formatDateTime, timeAgo } from '@/lib/format';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useBackupPoints, useRunBackup, useRunDrill, useStageRestore } from '../api';
+import { t as tStatic, useT } from '../i18n';
 import type { BackupPoint, Restore } from '../types';
 
 const COLS = 'minmax(0,1.4fr) minmax(0,1.2fr) minmax(0,0.6fr) minmax(0,0.8fr) minmax(0,0.7fr)';
@@ -18,7 +19,7 @@ const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 function recentDays(n: number) {
   return Array.from({ length: n }, (_, i) => {
     const iso = new Date(Date.now() - i * DAY).toISOString();
-    return { value: iso.slice(0, 10), label: i === 0 ? 'Today' : i === 1 ? 'Yesterday' : formatDate(iso) };
+    return { value: iso.slice(0, 10), label: i === 0 ? tStatic('points.today') : i === 1 ? tStatic('points.yesterday') : formatDate(iso) };
   });
 }
 
@@ -28,24 +29,25 @@ const stageSchema = z
     pitrTime: z
       .string()
       .trim()
-      .refine((v) => v === '' || TIME_RE.test(v), 'Enter a time as HH:MM (24-hour), e.g. 13:42.'),
-    scope: z.string().min(1, 'Choose what to restore.'),
+      .refine((v) => v === '' || TIME_RE.test(v), { error: () => tStatic('points.timeFormat') }),
+    scope: z.string().min(1, { error: () => tStatic('points.chooseScope') }),
     dryRun: z.boolean(),
   })
   .superRefine((v, ctx) => {
     if (v.pitrTime && TIME_RE.test(v.pitrTime) && new Date(`${v.pitrDate}T${v.pitrTime}:00Z`).getTime() > Date.now())
-      ctx.addIssue({ code: 'custom', path: ['pitrTime'], message: 'That time is in the future.' });
+      ctx.addIssue({ code: 'custom', path: ['pitrTime'], message: tStatic('points.future') });
   });
 
 const pointName = (p: BackupPoint) => formatDateTime(p.takenAt);
 
 function TenantScopeOptions() {
+  const t = useT();
   const list = useTenants({ perPage: 100, sort: 'name' });
   return (
     <>
-      {list.data?.data.map((t) => (
-        <option key={t.id} value={t.id}>
-          Tenant: {t.name}
+      {list.data?.data.map((tn) => (
+        <option key={tn.id} value={tn.id}>
+          {t('points.tenantOption', { name: tn.name })}
         </option>
       ))}
     </>
@@ -53,6 +55,7 @@ function TenantScopeOptions() {
 }
 
 function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walDays: number; onDone: () => void }) {
+  const t = useT();
   const can = useCan();
   const stage = useStageRestore();
   const days = recentDays(walDays + 1);
@@ -79,8 +82,8 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
         onSuccess: (r) => {
           toast(
             r.pointInTime
-              ? `Point-in-time restore staged — the transaction log replays to ${r.sourceLabel.replace(' (point-in-time)', '')}. A second staff member must approve.`
-              : `Restore staged — a second staff member must approve before ${r.scopeLabel} is touched`,
+              ? t('points.pitrStaged', { target: r.sourceLabel.replace(' (point-in-time)', '') })
+              : t('points.staged', { scope: r.scopeLabel }),
           );
           onDone();
         },
@@ -95,10 +98,10 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
     <form
       onSubmit={(e) => void onSubmit(e)}
       noValidate
-      aria-label={`Restore from ${pointName(point)}`}
+      aria-label={t('points.restoreFrom', { point: pointName(point) })}
       style={{ background: 'var(--pg)', border: '1px solid var(--bd2)', borderRadius: 11, padding: 16, marginTop: 12 }}
     >
-      <h3 style={{ fontWeight: 700, fontSize: 13 }}>Restore from {pointName(point)}</h3>
+      <h3 style={{ fontWeight: 700, fontSize: 13 }}>{t('points.restoreFrom', { point: pointName(point) })}</h3>
       <div
         style={{
           display: 'grid',
@@ -108,7 +111,7 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
           alignItems: 'start',
         }}
       >
-        <Field label="Point-in-time day" error={errs.pitrDate?.message}>
+        <Field label={t('points.pitrDay')} error={errs.pitrDate?.message}>
           {(p) => (
             <select {...p} {...form.register('pitrDate')} className="select">
               {days.map((d) => (
@@ -119,56 +122,50 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
             </select>
           )}
         </Field>
-        <Field
-          label="Point-in-time (optional, UTC)"
-          error={errs.pitrTime?.message}
-          hint={`Leave empty to restore the snapshot. WAL covers the last ${walDays} days.`}
-        >
-          {(p) => <Input {...p} {...form.register('pitrTime')} placeholder="HH:MM" inputMode="numeric" autoComplete="off" />}
+        <Field label={t('points.pitrTime')} error={errs.pitrTime?.message} hint={t('points.pitrHint', { days: walDays })}>
+          {(p) => (
+            <Input {...p} {...form.register('pitrTime')} placeholder={t('points.timePlaceholder')} inputMode="numeric" autoComplete="off" />
+          )}
         </Field>
-        <Field label="Scope" error={errs.scope?.message}>
+        <Field label={t('points.scope')} error={errs.scope?.message}>
           {(p) => (
             <select {...p} {...form.register('scope')} className="select">
-              <option value="platform">Full platform</option>
+              <option value="platform">{t('points.fullPlatform')}</option>
               {can('tenants.view') && <TenantScopeOptions />}
             </select>
           )}
         </Field>
       </div>
       <div className="hstack wrap" style={{ gap: 12, marginTop: 14 }}>
-        <Toggle
-          on={dryRun}
-          onChange={(v) => form.setValue('dryRun', v, { shouldDirty: true })}
-          label="Dry run — restore into an isolated sandbox first"
-        />
+        <Toggle on={dryRun} onChange={(v) => form.setValue('dryRun', v, { shouldDirty: true })} label={t('points.dryRunToggle')} />
         <span className="t-sm muted" style={{ flex: 1, minWidth: 200 }}>
-          {dryRun ? 'Dry run — restore into an isolated sandbox first' : 'Live restore — affected tenants go into maintenance mode'}
+          {dryRun ? t('points.dryRunToggle') : t('points.liveHint')}
         </span>
         <button type="button" className="btn" onClick={onDone}>
-          Close
+          {t('points.close')}
         </button>
         <button type="submit" className="btn btn--primary" disabled={stage.isPending}>
-          {stage.isPending && <Spinner />} Stage restore
+          {stage.isPending && <Spinner />} {t('points.stage')}
         </button>
       </div>
       <FormError>{formError}</FormError>
       <p className="note" style={{ marginTop: 10, marginBottom: 0 }}>
-        Single-tenant restores don’t touch other tenants. Live restores put affected tenants in maintenance mode. Point-in-time recovery
-        replays the transaction log on top of the nearest snapshot — recover to any minute, not just backup times.
+        {t('points.note')}
       </p>
     </form>
   );
 }
 
-const statusBadge: Record<Restore['status'], ['good' | 'warn' | 'flat' | 'info', string]> = {
-  staged: ['warn', 'Awaiting approval'],
-  approved: ['info', 'Approved'],
-  running: ['info', 'Running'],
-  completed: ['good', 'Completed'],
-  cancelled: ['flat', 'Cancelled'],
+const STATUS_TONE: Record<Restore['status'], 'good' | 'warn' | 'flat' | 'info'> = {
+  staged: 'warn',
+  approved: 'info',
+  running: 'info',
+  completed: 'good',
+  cancelled: 'flat',
 };
 
 export function RestorePoints({ walDays, restores }: { walDays: number; restores: Restore[] }) {
+  const t = useT();
   const can = useCan();
   const list = useBackupPoints();
   const run = useRunBackup();
@@ -180,7 +177,7 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
 
   return (
     <Card
-      title="Restore points"
+      title={t('points.title')}
       right={
         can('platform.manage') ? (
           <div className="hstack wrap" style={{ gap: 8, marginLeft: 'auto' }}>
@@ -190,46 +187,43 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
               disabled={drill.isPending}
               onClick={() =>
                 drill.mutate(undefined, {
-                  onSuccess: () =>
-                    toast('Restore drill passed — a random tenant was restored into a sandbox, report emailed to platform staff'),
+                  onSuccess: () => toast(t('points.drillPassed')),
                 })
               }
             >
-              {drill.isPending && <Spinner />} Run restore drill
+              {drill.isPending && <Spinner />} {t('points.runDrill')}
             </button>
             <button
               type="button"
               className="btn btn--primary"
               disabled={run.isPending}
-              onClick={() =>
-                run.mutate(undefined, { onSuccess: (p) => toast(`Manual backup completed — ${p.sizeGb} GB snapshot, checksum verified`) })
-              }
+              onClick={() => run.mutate(undefined, { onSuccess: (p) => toast(t('points.manualDone', { size: p.sizeGb })) })}
             >
-              {run.isPending && <Spinner />} Back up now
+              {run.isPending && <Spinner />} {t('points.backUpNow')}
             </button>
           </div>
         ) : undefined
       }
     >
       <p className="t-sm muted" style={{ marginTop: -4, marginBottom: 0 }}>
-        Checksum-verified snapshots. Restores stage first and need a second staff member’s approval.
+        {t('points.intro')}
       </p>
       {list.error ? (
         <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />
       ) : (
         <div className="table-scroll" style={{ marginTop: 8, position: 'relative' }}>
-          <div role="table" aria-label="Restore points">
+          <div role="table" aria-label={t('points.title')}>
             <TRow cols={COLS} min={600} head>
-              <div role="columnheader">Point</div>
-              <div role="columnheader">Type</div>
-              <div role="columnheader">Size</div>
-              <div role="columnheader">Integrity</div>
+              <div role="columnheader">{t('points.point')}</div>
+              <div role="columnheader">{t('points.type')}</div>
+              <div role="columnheader">{t('points.size')}</div>
+              <div role="columnheader">{t('points.integrity')}</div>
               <div role="columnheader">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t('points.actions')}</span>
               </div>
             </TRow>
             {list.isPending && <SkeletonRows rows={5} />}
-            {list.data?.length === 0 && <Empty>No restore points yet — run a backup to create one.</Empty>}
+            {list.data?.length === 0 && <Empty>{t('points.empty')}</Empty>}
             {list.data?.map((p) => (
               <TRow key={p.id} cols={COLS} min={600} selected={selected === p.id}>
                 <div role="cell" className="min0">
@@ -238,15 +232,15 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
                 </div>
                 <div role="cell" className="min0">
                   <Badge pill tone={p.kind === 'Incremental' ? 'flat' : 'accent'}>
-                    {p.kind === 'Manual' && p.label ? `Manual — ${p.label}` : p.kind}
+                    {p.kind === 'Manual' && p.label ? t('points.manualLabel', { label: p.label }) : t(`enums.kind.${p.kind}`)}
                   </Badge>
                 </div>
                 <div role="cell" className="muted">
-                  {p.sizeGb} GB
+                  {t('points.sizeGb', { size: p.sizeGb })}
                 </div>
                 <div role="cell" className={p.integrity === 'Verified' ? 'fg-good' : 'fg-warn'} style={{ fontSize: 12, fontWeight: 700 }}>
                   {p.integrity === 'Verified' ? '✓ ' : ''}
-                  {p.integrity}
+                  {t(`enums.integrity.${p.integrity}`)}
                 </div>
                 <div role="cell" style={{ textAlign: 'right' }}>
                   {can('platform.manage') && (
@@ -255,11 +249,11 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
                       className="link"
                       style={{ fontSize: 12 }}
                       disabled={!!active || p.integrity !== 'Verified'}
-                      title={active ? 'Finish or cancel the current restore first' : undefined}
-                      aria-label={selected === p.id ? `Close restore from ${pointName(p)}` : `Restore from ${pointName(p)}`}
+                      title={active ? t('points.finishFirst') : undefined}
+                      aria-label={t(selected === p.id ? 'points.closeRestoreFrom' : 'points.restoreFrom', { point: pointName(p) })}
                       onClick={() => setSelected((s) => (s === p.id ? null : p.id))}
                     >
-                      {selected === p.id ? 'Close' : 'Restore…'}
+                      {selected === p.id ? t('points.close') : t('points.restore')}
                     </button>
                   )}
                 </div>
@@ -273,22 +267,22 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
       {history.length > 0 && (
         <>
           <h3 className="eyebrow" style={{ marginTop: 16, marginBottom: 4 }}>
-            Recent restores
+            {t('points.recent')}
           </h3>
           <ul className="plain-list">
             {history.map((r) => (
               <li key={r.id} className="row wrap" style={{ gap: 10, fontSize: 12.5 }}>
                 <span className="min0" style={{ flex: 1, minWidth: 220 }}>
                   <span style={{ fontWeight: 600 }}>
-                    {r.dryRun ? 'Dry run' : 'Live restore'} · {r.scopeLabel}
+                    {t('points.historyLine', { kind: r.dryRun ? t('banner.dryRun') : t('banner.live'), scope: r.scopeLabel })}
                   </span>{' '}
                   <span className="muted">← {r.sourceLabel}</span>
                   <div className="t-xs faint">
-                    Staged by {r.stagedByName}
-                    {r.approvedByName ? ` · approved by ${r.approvedByName}` : ''} · {timeAgo(r.completedAt ?? r.stagedAt)}
+                    {t('points.stagedBy', { name: r.stagedByName })}
+                    {r.approvedByName ? t('points.approvedBy', { name: r.approvedByName }) : ''} · {timeAgo(r.completedAt ?? r.stagedAt)}
                   </div>
                 </span>
-                <Badge tone={statusBadge[r.status][0]}>{statusBadge[r.status][1]}</Badge>
+                <Badge tone={STATUS_TONE[r.status]}>{t(`enums.restoreStatus.${r.status}`)}</Badge>
               </li>
             ))}
           </ul>

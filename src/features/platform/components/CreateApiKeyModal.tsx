@@ -2,13 +2,22 @@ import { useState } from 'react';
 import { z } from 'zod';
 import { Field, FormError, Input, Modal, Seg, Spinner } from '@/components/ui';
 import { errorMessage } from '@/lib/api/errors';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useCreateApiKey } from '../api';
+import { t, useT } from '../i18n';
 import { API_KEY_SCOPES, type CreatedApiKey } from '../types';
 
+/** Decorative warning glyph (not text). */
+const WARN_ICON = '⚠';
+
 const schema = z.object({
-  name: z.string().trim().min(2, 'Name the key (2+ characters) so you know where it’s used.').max(60, 'Keep the name under 60 characters.'),
+  name: z
+    .string()
+    .trim()
+    .min(2, { error: () => t('createKey.nameMin') })
+    .max(60, { error: () => t('createKey.nameMax') }),
   scope: z.enum(API_KEY_SCOPES),
 });
 
@@ -17,6 +26,8 @@ const schema = z.object({
  * component's state — it is never written to the query cache and is gone once the dialog closes.
  */
 export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const tc = useCommonT();
   const create = useCreateApiKey();
   const form = useZodForm(schema, { defaultValues: { name: '', scope: 'Read only' } });
   const [formError, setFormError] = useState<string | null>(null);
@@ -39,21 +50,20 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
     try {
       await navigator.clipboard.writeText(created.secret);
       setCopied(true);
-      toast(`${created.name} copied — store it in your secrets manager`);
+      toast(t('createKey.copiedToast', { name: created.name }));
     } catch {
-      toast('Couldn’t copy — select the key and copy it manually', 'error');
+      toast(t('createKey.copyFailed'), 'error');
     }
   };
 
   if (created)
     return (
-      <Modal onClose={onClose} label="Copy your new API key" width={500}>
-        <h2 className="modal-title">Copy your new API key</h2>
+      <Modal onClose={onClose} label={t('createKey.secretTitle')} width={500}>
+        <h2 className="modal-title">{t('createKey.secretTitle')}</h2>
         <p className="t-sm muted" style={{ marginTop: 3 }}>
-          This is the only time the full key is shown. After you close this dialog only <span className="mono">{created.prefix}</span> is
-          visible.
+          {t('createKey.secretIntroBefore')} <span className="mono">{created.prefix}</span> {t('createKey.secretIntroAfter')}
         </p>
-        <Field label={`${created.name} · ${created.scope}`}>
+        <Field label={t('createKey.secretFieldLabel', { name: created.name, scope: t(`enums.apiKeyScope.${created.scope}`) })}>
           {(p) => (
             <Input
               {...p}
@@ -67,42 +77,44 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
           )}
         </Field>
         <div className="callout callout--warn" style={{ marginTop: 12 }}>
-          <span aria-hidden="true">⚠</span>
-          <span>
-            Anyone with this key can call the platform API with {created.scope.toLowerCase()} permissions. Don’t paste it in tickets or
-            chat.
-          </span>
+          <span aria-hidden="true">{WARN_ICON}</span>
+          <span>{t('createKey.secretWarning', { scope: t(`enums.apiKeyScopePhrase.${created.scope}`) })}</span>
         </div>
         <div className="hstack" style={{ gap: 10, marginTop: 18 }}>
           <button type="button" className="btn btn--lg" style={{ flex: 1 }} onClick={() => void copy()}>
-            {copied ? 'Copied' : 'Copy key'}
+            {copied ? tc('actions.copied') : t('createKey.copyKey')}
           </button>
           <button type="button" className="btn btn--primary btn--lg" style={{ flex: 1.4 }} onClick={onClose}>
-            {copied ? 'Done' : 'I’ve saved it'}
+            {copied ? t('createKey.done') : t('createKey.saved')}
           </button>
         </div>
       </Modal>
     );
 
   return (
-    <Modal onClose={onClose} label="Create an API key">
+    <Modal onClose={onClose} label={t('createKey.title')}>
       <form onSubmit={(e) => void submit(e)} noValidate>
-        <h2 className="modal-title">Create an API key</h2>
+        <h2 className="modal-title">{t('createKey.title')}</h2>
         <p className="t-sm muted" style={{ marginTop: 3, marginBottom: 0 }}>
-          Platform keys call the admin API on behalf of Coursiva staff. Use the narrowest scope that works.
+          {t('createKey.intro')}
         </p>
-        <Field label="Key name" error={form.formState.errors.name?.message}>
-          {(p) => <Input {...p} {...form.register('name')} size="lg" placeholder="e.g. Metabase sync" autoComplete="off" />}
+        <Field label={t('createKey.nameLabel')} error={form.formState.errors.name?.message}>
+          {(p) => <Input {...p} {...form.register('name')} size="lg" placeholder={t('createKey.namePlaceholder')} autoComplete="off" />}
         </Field>
-        <div className="field-label">Scope</div>
-        <Seg label="Scope" options={API_KEY_SCOPES} value={scope} onChange={(v) => form.setValue('scope', v, { shouldDirty: true })} />
+        <div className="field-label">{t('createKey.scope')}</div>
+        <Seg
+          label={t('createKey.scope')}
+          options={API_KEY_SCOPES.map((sc) => [sc, t(`enums.apiKeyScope.${sc}`)] as const)}
+          value={scope}
+          onChange={(v) => form.setValue('scope', v, { shouldDirty: true })}
+        />
         <FormError>{formError}</FormError>
         <div className="hstack" style={{ gap: 10, marginTop: 18 }}>
           <button type="button" className="btn btn--lg" style={{ flex: 1 }} onClick={onClose}>
-            Cancel
+            {tc('actions.cancel')}
           </button>
           <button type="submit" className="btn btn--primary btn--lg" style={{ flex: 1.4 }} disabled={create.isPending}>
-            {create.isPending && <Spinner />} Create key
+            {create.isPending && <Spinner />} {t('createKey.submit')}
           </button>
         </div>
       </form>

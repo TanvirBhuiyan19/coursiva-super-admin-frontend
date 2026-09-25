@@ -19,64 +19,71 @@ import { toast } from '@/store/ui';
 import { useComplianceSummary, useDsars, useFulfilDsar, useRetention, useSetRetention } from '../api';
 import { dueLabel } from '../components/format';
 import { SubProcessorsCard } from '../components/SubProcessorsCard';
+import { useT } from '../i18n';
 import { RETENTION_PERIODS, type Dsar, type DsarType } from '../types';
 
 const COLS = 'minmax(0,1.6fr) minmax(0,1.5fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,1fr) minmax(0,1.3fr)';
 const TYPE_TONE: Record<DsarType, Tone> = { Access: 'info', Deletion: 'bad', Portability: 'warn' };
-const ACTION_LABEL: Record<DsarType, string> = { Access: 'Send report', Deletion: 'Erase data', Portability: 'Export data' };
 
 function dueTone(days: number): Tone {
   return days <= 0 ? 'bad' : days <= 5 ? 'warn' : 'flat';
 }
 
 function DsarAction({ d }: { d: Dsar }) {
+  const t = useT();
   const can = useCan();
   const fulfil = useFulfilDsar();
   if (d.fulfilledAt)
     return (
       <Badge tone="good" title={formatDateTime(d.fulfilledAt)}>
-        ✓ {d.type === 'Deletion' ? 'Erased' : 'Fulfilled'} {timeAgo(d.fulfilledAt)}
+        {t(d.type === 'Deletion' ? 'compliance.erased' : 'compliance.fulfilled', { when: timeAgo(d.fulfilledAt) })}
       </Badge>
     );
-  if (!can('governance.manage')) return <Badge tone="flat">Pending</Badge>;
+  if (!can('governance.manage')) return <Badge tone="flat">{t('compliance.pending')}</Badge>;
   const run = () =>
     fulfil.mutate(d.id, {
       onSuccess: () =>
         toast(
           d.type === 'Deletion'
-            ? `Data erased for ${d.requester} — ${d.tenantName} and the requester notified`
-            : `Data package sent to ${d.requester}`,
+            ? t('compliance.toastErased', { requester: d.requester, tenant: d.tenantName })
+            : t('compliance.toastSent', { requester: d.requester }),
         ),
     });
   return d.type === 'Deletion' ? (
-    <ConfirmButton className="btn btn--sm btn--danger" confirmLabel="Confirm erase" pending={fulfil.isPending} onConfirm={run}>
-      {ACTION_LABEL[d.type]}
+    <ConfirmButton
+      className="btn btn--sm btn--danger"
+      confirmLabel={t('compliance.confirmErase')}
+      pending={fulfil.isPending}
+      onConfirm={run}
+    >
+      {t(`compliance.actions.${d.type}`)}
     </ConfirmButton>
   ) : (
     <button type="button" className="btn btn--sm btn--primary" disabled={fulfil.isPending} onClick={run}>
-      {ACTION_LABEL[d.type]}
+      {t(`compliance.actions.${d.type}`)}
     </button>
   );
 }
 
 function DsarTable() {
+  const t = useT();
   const list = useDsars();
   if (list.error) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
   return (
-    <Card title="Data subject requests" sub="GDPR Art. 15 / 17 / 20 · 30-day statutory deadline" className="table-scroll">
-      <div role="table" aria-label="Data subject requests" aria-busy={list.isFetching}>
+    <Card title={t('compliance.dsars.title')} sub={t('compliance.dsars.sub')} className="table-scroll">
+      <div role="table" aria-label={t('compliance.dsars.title')} aria-busy={list.isFetching}>
         <TRow cols={COLS} min={760} head>
-          <div role="columnheader">Requester</div>
-          <div role="columnheader">Tenant</div>
-          <div role="columnheader">Type</div>
-          <div role="columnheader">Received</div>
-          <div role="columnheader">Due</div>
-          <div role="columnheader">Status</div>
+          <div role="columnheader">{t('compliance.dsars.requester')}</div>
+          <div role="columnheader">{t('compliance.dsars.tenant')}</div>
+          <div role="columnheader">{t('compliance.dsars.type')}</div>
+          <div role="columnheader">{t('compliance.dsars.received')}</div>
+          <div role="columnheader">{t('compliance.dsars.due')}</div>
+          <div role="columnheader">{t('compliance.dsars.status')}</div>
         </TRow>
         {list.isPending ? (
           <SkeletonRows rows={4} h={22} />
         ) : list.data.data.length === 0 ? (
-          <Empty>No privacy requests received.</Empty>
+          <Empty>{t('compliance.dsars.empty')}</Empty>
         ) : (
           list.data.data.map((d) => {
             const days = daysUntil(d.dueAt);
@@ -89,7 +96,7 @@ function DsarTable() {
                   {d.tenantName}
                 </div>
                 <div role="cell">
-                  <Badge tone={TYPE_TONE[d.type]}>{d.type}</Badge>
+                  <Badge tone={TYPE_TONE[d.type]}>{t(`enums.dsarType.${d.type}`)}</Badge>
                 </div>
                 <div role="cell" className="muted">
                   <time dateTime={d.receivedAt} title={formatDateTime(d.receivedAt)}>
@@ -118,13 +125,14 @@ function DsarTable() {
 }
 
 function RetentionCard() {
+  const t = useT();
   const can = useCan();
   const q = useRetention();
   const save = useSetRetention();
   return (
-    <Card title="Retention policy">
+    <Card title={t('compliance.retention.title')}>
       <p className="t-sm muted" style={{ margin: '0 0 12px' }}>
-        How long the platform keeps each data class after deletion.
+        {t('compliance.retention.intro')}
       </p>
       <QueryState query={q} skeleton={<SkeletonRows rows={4} h={22} />} compact>
         {(rows) => (
@@ -136,14 +144,17 @@ function RetentionCard() {
                 </span>
                 <Select
                   value={r.period}
-                  options={RETENTION_PERIODS}
-                  label={`${r.label} retention`}
+                  options={RETENTION_PERIODS.map((p) => [p, t(`enums.retentionPeriod.${p}`)] as const)}
+                  label={t('compliance.retention.selectLabel', { label: r.label })}
                   disabled={!can('governance.manage')}
                   style={{ width: 'auto', padding: '6px 9px', fontSize: 12.5, fontWeight: 600, borderRadius: 7 }}
                   onChange={(period) =>
                     save.mutate(
                       { key: r.key, period },
-                      { onSuccess: () => toast(`${r.label} kept for ${period} — purge jobs pick this up tonight`) },
+                      {
+                        onSuccess: () =>
+                          toast(t('compliance.retention.saved', { label: r.label, period: t(`enums.retentionPeriod.${period}`) })),
+                      },
                     )
                   }
                 />
@@ -157,29 +168,38 @@ function RetentionCard() {
 }
 
 export default function CompliancePage() {
+  const t = useT();
   const summary = useComplianceSummary();
   const s = summary.data;
   const nearest = s?.nearestDueAt ? daysUntil(s.nearestDueAt) : null;
 
   return (
-    <Screen max={1150} label="Compliance and privacy">
+    <Screen max={1150} label={t('compliance.title')}>
       {summary.error ? (
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
       ) : s ? (
         <KpiRow
           items={[
-            { label: 'Open DSARs', value: String(s.openDsars), sub: s.overdueDsars ? `${s.overdueDsars} overdue` : 'None overdue' },
             {
-              label: 'Nearest deadline',
+              label: t('compliance.kpi.openDsars'),
+              value: String(s.openDsars),
+              sub: s.overdueDsars ? t('compliance.kpi.overdue', { count: s.overdueDsars }) : t('compliance.kpi.noneOverdue'),
+            },
+            {
+              label: t('compliance.kpi.nearestDeadline'),
               value: (
                 <span style={{ color: nearest != null && nearest <= 0 ? 'var(--rFg)' : undefined }}>
                   {nearest == null ? '—' : dueLabel(nearest, true)}
                 </span>
               ),
-              sub: s.nearestDueAt ? formatDate(s.nearestDueAt) : 'Nothing pending',
+              sub: s.nearestDueAt ? formatDate(s.nearestDueAt) : t('compliance.kpi.nothingPending'),
             },
-            { label: 'Sub-processors', value: String(s.subProcessors), sub: 'Listed in the DPA' },
-            { label: 'DPAs signed', value: `${s.dpasSigned} / ${s.tenants}`, sub: 'On the live DPA version' },
+            { label: t('compliance.kpi.subProcessors'), value: String(s.subProcessors), sub: t('compliance.kpi.listedInDpa') },
+            {
+              label: t('compliance.kpi.dpasSigned'),
+              value: t('compliance.kpi.dpasSignedValue', { signed: s.dpasSigned, total: s.tenants }),
+              sub: t('compliance.kpi.onLiveDpa'),
+            },
           ]}
         />
       ) : (

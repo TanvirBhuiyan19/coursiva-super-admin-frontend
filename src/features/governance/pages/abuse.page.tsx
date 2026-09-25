@@ -5,21 +5,24 @@ import { useCan } from '@/features/auth/useCan';
 import { errorMessage } from '@/lib/api/errors';
 import { PLANS, type Plan } from '@/lib/domain';
 import { formatDateTime, num, sevTone, timeAgo } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useAbuseSignals, useBlockIp, useBlockedIps, useRateLimits, useResolveSignal, useSetRateLimits, useUnblockIp } from '../api';
-import { IP_ERROR, isIpOrCidr } from '../ip';
+import { t as tStatic, useT } from '../i18n';
+import { isIpOrCidr } from '../ip';
 import type { AbuseSignal, RateLimit } from '../types';
 
 const COLS = 'minmax(0,0.8fr) minmax(0,1.6fr) minmax(0,2.4fr) minmax(0,1.7fr)';
 
 function SignalRow({ s }: { s: AbuseSignal }) {
+  const t = useT();
   const can = useCan();
   const resolve = useResolveSignal();
   return (
     <TRow cols={COLS} min={700}>
       <div role="cell">
-        <Badge tone={sevTone(s.severity)}>{s.severity}</Badge>
+        <Badge tone={sevTone(s.severity)}>{t(`enums.severity.${s.severity}`)}</Badge>
       </div>
       <div role="cell" className="min0">
         <div className="ellipsis t-strong">{s.tenantName}</div>
@@ -45,19 +48,16 @@ function SignalRow({ s }: { s: AbuseSignal }) {
               type="button"
               className="btn btn--sm"
               disabled={resolve.isPending}
-              aria-label={`Dismiss signal for ${s.tenantName}`}
+              aria-label={t('abuse.dismissLabel', { tenant: s.tenantName })}
               onClick={() =>
-                resolve.mutate(
-                  { id: s.id, how: 'dismiss' },
-                  { onSuccess: () => toast(`Signal for ${s.tenantName} dismissed — no action taken`) },
-                )
+                resolve.mutate({ id: s.id, how: 'dismiss' }, { onSuccess: () => toast(t('abuse.dismissed', { tenant: s.tenantName })) })
               }
             >
-              Dismiss
+              {t('abuse.dismiss')}
             </button>
           </>
         ) : (
-          <span className="t-xs faint">Suggested: {s.actionLabel}</span>
+          <span className="t-xs faint">{t('abuse.suggested', { action: s.actionLabel })}</span>
         )}
       </div>
     </TRow>
@@ -65,19 +65,20 @@ function SignalRow({ s }: { s: AbuseSignal }) {
 }
 
 function SignalsCard() {
+  const t = useT();
   const q = useAbuseSignals();
   return (
-    <Card title="Abuse signals" className="table-scroll">
+    <Card title={t('abuse.signals')} className="table-scroll">
       <QueryState query={q} skeleton={<SkeletonRows rows={3} h={24} />} compact>
         {(rows) =>
           rows.length ? (
-            <div role="table" aria-label="Abuse signals">
+            <div role="table" aria-label={t('abuse.signals')}>
               {rows.map((s) => (
                 <SignalRow key={s.id} s={s} />
               ))}
             </div>
           ) : (
-            <Empty>All signals cleared. Nothing needs review.</Empty>
+            <Empty>{t('abuse.signalsEmpty')}</Empty>
           )
         }
       </QueryState>
@@ -88,12 +89,14 @@ function SignalsCard() {
 const perMinute = z
   .string()
   .trim()
-  .regex(/^\d+$/, 'Enter a whole number.')
+  .regex(/^\d+$/, { error: () => tStatic('abuse.rateLimits.wholeNumber') })
   .transform(Number)
-  .refine((n) => n >= 1 && n <= 100_000, 'From 1 to 100,000.');
+  .refine((n) => n >= 1 && n <= 100_000, { error: () => tStatic('abuse.rateLimits.range') });
 const limitsSchema = z.object({ Launch: perMinute, Growth: perMinute, Scale: perMinute });
 
 function RateLimitForm({ limits }: { limits: RateLimit[] }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
   const save = useSetRateLimits();
   const [formError, setFormError] = useState<string | null>(null);
@@ -108,7 +111,12 @@ function RateLimitForm({ limits }: { limits: RateLimit[] }) {
     save.mutate(
       PLANS.map((plan) => ({ plan, perMinute: v[plan] })),
       {
-        onSuccess: () => toast(`Rate limits applied across all tenants — ${PLANS.map((p) => `${p} ${num(v[p])}`).join(' · ')} req/min`),
+        onSuccess: () =>
+          toast(
+            t('abuse.rateLimits.applied', {
+              limits: PLANS.map((p) => t('abuse.rateLimits.appliedItem', { plan: tc(`enums.plan.${p}`), count: v[p] })).join(' · '),
+            }),
+          ),
         onError: (err) => {
           if (!applyServerErrors(form, err)) setFormError(errorMessage(err));
         },
@@ -128,23 +136,23 @@ function RateLimitForm({ limits }: { limits: RateLimit[] }) {
           return (
             <li key={plan} className="row wrap" style={{ gap: '8px 12px', padding: '12px 0' }}>
               <label htmlFor={id} style={{ fontWeight: 700, width: 70, flexShrink: 0 }}>
-                {plan}
+                {tc(`enums.plan.${plan}`)}
               </label>
               <input
                 id={id}
                 className="input"
                 inputMode="numeric"
-                aria-label={`${plan} requests per minute`}
+                aria-label={t('abuse.rateLimits.inputLabel', { plan: tc(`enums.plan.${plan}`) })}
                 aria-invalid={err ? true : undefined}
                 aria-describedby={err || belowPeak ? `${id}-msg` : undefined}
                 disabled={disabled}
                 style={{ width: 90, flexShrink: 0, padding: '7px 10px', fontWeight: 700, textAlign: 'right' }}
                 {...form.register(plan)}
               />
-              <span className="t-sm muted min0">req/min</span>
+              <span className="t-sm muted min0">{t('abuse.rateLimits.unit')}</span>
               <span className="muted nowrap" style={{ fontSize: 12, marginLeft: 'auto' }}>
-                peak {l ? num(l.peakPerMinute) : '—'}/min
-                {l && l.perMinute !== l.defaultPerMinute ? ` · default ${num(l.defaultPerMinute)}` : ''}
+                {t('abuse.rateLimits.peak', { peak: l ? num(l.peakPerMinute) : '—' })}
+                {l && l.perMinute !== l.defaultPerMinute ? t('abuse.rateLimits.default', { count: l.defaultPerMinute }) : ''}
               </span>
               {err ? (
                 <div id={`${id}-msg`} className="field-error" role="alert" style={{ flexBasis: '100%', marginTop: 0 }}>
@@ -152,7 +160,7 @@ function RateLimitForm({ limits }: { limits: RateLimit[] }) {
                 </div>
               ) : belowPeak ? (
                 <div id={`${id}-msg`} className="field-hint fg-warn" style={{ flexBasis: '100%', marginTop: 0 }}>
-                  Below today’s peak — busy {plan} tenants will be throttled.
+                  {t('abuse.rateLimits.belowPeak', { plan: tc(`enums.plan.${plan}`) })}
                 </div>
               ) : null}
             </li>
@@ -167,7 +175,7 @@ function RateLimitForm({ limits }: { limits: RateLimit[] }) {
           style={{ marginTop: 14, padding: '9px 16px', fontSize: 13 }}
           disabled={save.isPending}
         >
-          {save.isPending && <Spinner />} Apply limits
+          {save.isPending && <Spinner />} {t('abuse.rateLimits.apply')}
         </button>
       )}
     </form>
@@ -175,10 +183,15 @@ function RateLimitForm({ limits }: { limits: RateLimit[] }) {
 }
 
 const ipSchema = z.object({
-  ip: z.string().trim().min(1, 'Enter an IP address or CIDR range.').refine(isIpOrCidr, IP_ERROR),
+  ip: z
+    .string()
+    .trim()
+    .min(1, { error: () => tStatic('abuse.blocked.required') })
+    .refine(isIpOrCidr, { error: () => tStatic('abuse.blocked.invalid') }),
 });
 
 function BlockIpForm() {
+  const t = useT();
   const block = useBlockIp();
   const [formError, setFormError] = useState<string | null>(null);
   const form = useZodForm(ipSchema, { defaultValues: { ip: '' }, mode: 'onSubmit' });
@@ -191,7 +204,7 @@ function BlockIpForm() {
       {
         onSuccess: (row) => {
           form.reset({ ip: '' });
-          toast(`${row.ip} blocked — requests from it now get a 403 at the edge`);
+          toast(t('abuse.blocked.blockedToast', { ip: row.ip }));
         },
         onError: (e) => {
           if (!applyServerErrors(form, e)) setFormError(errorMessage(e));
@@ -206,15 +219,15 @@ function BlockIpForm() {
         <input
           className="input mono"
           style={{ flex: 1, minWidth: 0, padding: '9px 12px' }}
-          placeholder="e.g. 203.0.113.42 or 198.51.100.0/24"
-          aria-label="IP address or CIDR range to block"
+          placeholder={t('abuse.blocked.placeholder')}
+          aria-label={t('abuse.blocked.inputLabel')}
           aria-invalid={err ? true : undefined}
           aria-describedby={err ? 'block-ip-msg' : undefined}
           autoComplete="off"
           {...form.register('ip')}
         />
         <button type="submit" className="btn btn--primary" style={{ padding: '9px 14px' }} disabled={block.isPending}>
-          {block.isPending && <Spinner />} Block
+          {block.isPending && <Spinner />} {t('abuse.blocked.block')}
         </button>
       </div>
       {err && (
@@ -228,16 +241,17 @@ function BlockIpForm() {
 }
 
 function BlockedIpsCard() {
+  const t = useT();
   const can = useCan();
   const q = useBlockedIps();
   const unblock = useUnblockIp();
   return (
-    <Card title="Blocked IPs">
+    <Card title={t('abuse.blocked.title')}>
       {can('governance.manage') && <BlockIpForm />}
       <QueryState query={q} skeleton={<SkeletonRows rows={3} h={20} />} compact>
         {(rows) =>
           rows.length ? (
-            <ul className="plain-list" aria-label="Blocked IP addresses">
+            <ul className="plain-list" aria-label={t('abuse.blocked.list')}>
               {rows.map((b) => (
                 <li key={b.id} className="row wrap" style={{ padding: '10px 0', gap: '4px 12px' }}>
                   <span className="mono t-strong">{b.ip}</span>
@@ -249,18 +263,18 @@ function BlockedIpsCard() {
                     <ConfirmButton
                       className="link"
                       style={{ fontSize: 12 }}
-                      confirmLabel={`Confirm unblock ${b.ip}`}
+                      confirmLabel={t('abuse.blocked.confirmUnblock', { ip: b.ip })}
                       disabled={unblock.isPending}
-                      onConfirm={() => unblock.mutate(b.id, { onSuccess: () => toast(`${b.ip} unblocked — traffic allowed again`) })}
+                      onConfirm={() => unblock.mutate(b.id, { onSuccess: () => toast(t('abuse.blocked.unblockedToast', { ip: b.ip })) })}
                     >
-                      Unblock
+                      {t('abuse.blocked.unblock')}
                     </ConfirmButton>
                   )}
                 </li>
               ))}
             </ul>
           ) : (
-            <Empty>No IPs blocked.</Empty>
+            <Empty>{t('abuse.blocked.empty')}</Empty>
           )
         }
       </QueryState>
@@ -269,17 +283,18 @@ function BlockedIpsCard() {
 }
 
 export default function AbusePage() {
+  const t = useT();
   const limits = useRateLimits();
   return (
-    <Screen max={1150} label="Abuse and limits">
+    <Screen max={1150} label={t('abuse.title')}>
       <SignalsCard />
 
       <div
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 16, alignItems: 'start' }}
       >
-        <Card title="API rate limits">
+        <Card title={t('abuse.rateLimits.title')}>
           <p className="t-sm muted" style={{ margin: '0 0 4px' }}>
-            Requests per minute per tenant, by plan.
+            {t('abuse.rateLimits.intro')}
           </p>
           {limits.error ? (
             <ErrorState error={limits.error} onRetry={() => void limits.refetch()} compact />

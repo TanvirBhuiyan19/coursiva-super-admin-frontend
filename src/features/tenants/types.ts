@@ -4,16 +4,6 @@ import type { LimitKey, Plan, Region, TenantHealth, TenantStatus } from '@/lib/d
 export const TENANT_SEGMENTS = ['all', 'watchlist', 'at_risk', 'trials_ending', 'past_due', 'dormant', 'top_mrr'] as const;
 export type TenantSegment = (typeof TENANT_SEGMENTS)[number];
 
-export const SEGMENT_LABELS: Record<TenantSegment, string> = {
-  all: 'All tenants',
-  watchlist: 'Watchlist',
-  at_risk: 'At risk',
-  trials_ending: 'Trials ending',
-  past_due: 'Past due',
-  dormant: 'Dormant 3d+',
-  top_mrr: 'Top by MRR',
-};
-
 export type TenantSort =
   'name' | '-name' | 'students' | '-students' | 'mrr' | '-mrr' | 'created_at' | '-created_at' | 'last_active_at' | '-last_active_at';
 

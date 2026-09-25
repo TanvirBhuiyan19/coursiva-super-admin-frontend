@@ -3,16 +3,20 @@ import { Link } from 'react-router-dom';
 import { Badge, ChipGroup, Empty, ErrorState, Pagination, Screen, SkeletonRows } from '@/components/ui';
 import { api } from '@/lib/api/client';
 import { AUDIT_CATEGORIES, type AuditCategory, type Tone } from '@/lib/domain';
-import { formatDateTime, num, timeAgo } from '@/lib/format';
+import { formatDateTime, timeAgo } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 import { useDebounced } from '@/lib/useDebounced';
 import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
 import { useAuditLog } from '../api';
+import { useT } from '../i18n';
 import type { AuditParams } from '../types';
 
 const CATEGORY_TONE: Record<AuditCategory, Tone> = { Auth: 'info', Billing: 'warn', Tenants: 'good', Flags: 'flat', Security: 'bad' };
 
 export default function AuditPage() {
+  const t = useT();
+  const tc = useCommonT();
   const [f, setF] = useUrlState({ q: '', category: 'All', page: '1' });
   const [search, setSearch] = useState(f.q);
   const debounced = useDebounced(search, 300);
@@ -34,46 +38,46 @@ export default function AuditPage() {
     try {
       const { page: _p, perPage: _pp, ...filters } = params;
       await api.download('/audit/export', { ...filters }, 'audit-log.csv');
-      toast(`${num(log.data?.meta.total ?? 0)} audit entries exported`);
+      toast(t('exported', { count: log.data?.meta.total ?? 0 }));
     } catch {
-      toast('Export failed — try again', 'error');
+      toast(t('exportFailed'), 'error');
     } finally {
       setExporting(false);
     }
   };
 
   return (
-    <Screen max={1050} label="Audit log">
+    <Screen max={1050} label={t('title')}>
       <div className="hstack wrap">
         <input
           className="input"
           type="search"
           style={{ width: 260 }}
-          placeholder="Search actor or action…"
-          aria-label="Search audit log"
+          placeholder={t('searchPlaceholder')}
+          aria-label={t('searchLabel')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <ChipGroup
-          label="Filter by category"
-          options={['All', ...AUDIT_CATEGORIES]}
+          label={t('filterLabel')}
+          options={[['All', t('all')] as const, ...AUDIT_CATEGORIES.map((c) => [c, tc(`enums.auditCategory.${c}`)] as const)]}
           value={f.category}
           onChange={(category) => setF({ category })}
         />
         <div className="spacer" />
         <button type="button" className="btn" disabled={exporting} onClick={() => void exportCsv()}>
-          {exporting ? 'Exporting…' : 'Export CSV'}
+          {exporting ? t('exporting') : tc('actions.exportCsv')}
         </button>
       </div>
 
       {log.error ? (
         <ErrorState error={log.error} onRetry={() => void log.refetch()} />
       ) : (
-        <section className="card" aria-label="Audit entries" aria-busy={log.isFetching}>
+        <section className="card" aria-label={t('entries')} aria-busy={log.isFetching}>
           {log.isPending ? (
             <SkeletonRows rows={10} h={22} />
           ) : log.data.data.length === 0 ? (
-            <Empty>No events match these filters.</Empty>
+            <Empty>{t('empty')}</Empty>
           ) : (
             <ol className="stack plain-list">
               {log.data.data.map((a) => (
@@ -95,18 +99,18 @@ export default function AuditPage() {
                       <>
                         {' '}
                         <Link className="link" style={{ fontSize: 11.5 }} to={`/tenants/${a.tenantId}`}>
-                          View tenant
+                          {t('viewTenant')}
                         </Link>
                       </>
                     )}
                   </span>
                   {a.ip && <span className="mono t-xs faint">{a.ip}</span>}
-                  <Badge tone={CATEGORY_TONE[a.category]}>{a.category}</Badge>
+                  <Badge tone={CATEGORY_TONE[a.category]}>{tc(`enums.auditCategory.${a.category}`)}</Badge>
                 </li>
               ))}
             </ol>
           )}
-          {log.data && <Pagination meta={log.data.meta} noun="entries" onPage={(p) => setF({ page: String(p) })} />}
+          {log.data && <Pagination meta={log.data.meta} noun={t('noun')} onPage={(p) => setF({ page: String(p) })} />}
         </section>
       )}
     </Screen>

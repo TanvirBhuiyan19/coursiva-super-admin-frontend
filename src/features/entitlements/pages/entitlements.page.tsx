@@ -3,38 +3,27 @@ import { Bar, Card, ConfirmButton, Dot, Empty, QueryState, Screen, SkeletonRows,
 import { pathOf } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
 import { PLANS, type LimitKey } from '@/lib/domain';
-import { money, num, plural } from '@/lib/format';
+import { money, num } from '@/lib/format';
+import { t as common, useT as useCommonT } from '@/lib/i18n/common';
 import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
 import { useEntitlements, usePlanLimits, useResetEntitlements, useSetEntitlements } from '../api';
+import { t as msg, useT } from '../i18n';
 import type { EntitlementCell, EntitlementMatrix, EntitlementModule, PlanLimit } from '../types';
 
 const COLS = 'minmax(0,1.8fr) repeat(3, minmax(0,90px))';
 const MIN = 520;
-const NOTE =
-  'Source of truth for what a tenant sees. Turning a module off hides its nav item and blocks its routes for every tenant on that plan.';
-const ADDON_NOTE =
-  'Modules marked EXTENSION are sold in the extension catalogue. Which plans get one free is set there — the ticks below follow it, and an override here wins for that plan only.';
-const LIMIT_NOTE = 'Every limit here can be overridden per tenant in the tenant drawer — 0 means unlimited.';
 const TAG_STYLE = { background: 'transparent', padding: '1px 5px', flexShrink: 0 } as const;
 
-const LIMIT_ROW_LABELS: Record<LimitKey, string> = {
-  students: 'Students',
-  storageGb: 'Storage',
-  staffSeats: 'Staff seats',
-  apiPerMinute: 'API req/min',
-  liveRoomMinutes: 'Live room minutes',
-  courses: 'Courses',
-};
-
 function formatLimit(key: LimitKey, v: number) {
-  if (key === 'liveRoomMinutes') return v ? `${num(v)}/mo` : 'BYO only';
-  if (v === 0) return 'Unlimited';
-  if (key === 'storageGb') return v >= 1000 ? `${num(v / 1000)} TB` : `${num(v)} GB`;
+  if (key === 'liveRoomMinutes') return v ? msg('limits.perMonth', { value: v }) : msg('limits.byoOnly');
+  if (v === 0) return common('states.unlimited');
+  if (key === 'storageGb') return v >= 1000 ? msg('limits.tb', { value: v / 1000 }) : msg('limits.gb', { value: v });
   return num(v);
 }
 
 function PlanHead({ first, sticky }: { first: string; sticky?: boolean }) {
+  const tc = useCommonT();
   return (
     <TRow
       cols={COLS}
@@ -45,7 +34,7 @@ function PlanHead({ first, sticky }: { first: string; sticky?: boolean }) {
       <div role="columnheader">{first}</div>
       {PLANS.map((p) => (
         <div key={p} role="columnheader" style={{ textAlign: 'center' }}>
-          {p}
+          {tc(`enums.plan.${p}`)}
         </div>
       ))}
     </TRow>
@@ -55,20 +44,27 @@ function PlanHead({ first, sticky }: { first: string; sticky?: boolean }) {
 function extensionTip(m: EntitlementModule) {
   const x = m.extension;
   if (!x) return '';
-  const incl = x.includedPlans.length ? `free on ${x.includedPlans.join(', ')}` : 'paid on every plan';
-  return `${x.name} · ${money(x.price)}/mo · ${incl} — ${
-    x.gatesModule ? 'the L/G/S toggles in Extensions drive these ticks' : 'an upsell inside this module, so it does not change access here'
-  }`;
+  const incl = x.includedPlans.length
+    ? msg('matrix.tip.freeOn', { plans: x.includedPlans.map((p) => common(`enums.plan.${p}`)).join(', ') })
+    : msg('matrix.tip.paidEverywhere');
+  return msg('matrix.tip.full', {
+    name: x.name,
+    price: money(x.price),
+    included: incl,
+    effect: x.gatesModule ? msg('matrix.tip.gates') : msg('matrix.tip.upsell'),
+  });
 }
 
 function ModuleRow({ m }: { m: EntitlementModule }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
   const set = useSetEntitlements();
   const manage = can('platform.manage');
   const toggle = (c: EntitlementCell) => {
     const enabled = !c.enabled;
     set.mutate([{ moduleId: m.id, plan: c.plan, enabled }], {
-      onSuccess: () => toast(`${m.label} ${enabled ? 'added to' : 'removed from'} ${c.plan} — tenant dashboards update on next load`),
+      onSuccess: () => toast(t(enabled ? 'matrix.added' : 'matrix.removed', { module: m.label, plan: tc(`enums.plan.${c.plan}`) })),
     });
   };
   const tip = extensionTip(m);
@@ -78,12 +74,12 @@ function ModuleRow({ m }: { m: EntitlementModule }) {
         <span className="ellipsis">{m.label}</span>
         {m.core && (
           <span className="badge badge--tag faint" style={{ ...TAG_STYLE, border: '1px solid var(--bd)' }}>
-            CORE
+            {t('matrix.core')}
           </span>
         )}
         {m.extension && (
           <span className="badge badge--tag fg-accent" title={tip} style={{ ...TAG_STYLE, border: '1px solid var(--ac)', cursor: 'help' }}>
-            {m.extension.gatesModule ? 'EXTENSION' : 'UPSELL'}
+            {m.extension.gatesModule ? t('matrix.extension') : t('matrix.upsell')}
             <span className="sr-only"> — {tip}</span>
           </span>
         )}
@@ -92,13 +88,11 @@ function ModuleRow({ m }: { m: EntitlementModule }) {
         <div key={c.plan} role="cell" className="hstack" style={{ justifyContent: 'center', gap: 5 }}>
           <Toggle
             on={c.enabled}
-            label={m.core ? `${m.label} on ${c.plan} (core)` : `${m.label} on ${c.plan}`}
+            label={t(m.core ? 'matrix.toggleCore' : 'matrix.toggle', { module: m.label, plan: tc(`enums.plan.${c.plan}`) })}
             disabled={m.core || !manage}
             onChange={() => toggle(c)}
           />
-          <span style={{ width: 5, flexShrink: 0 }}>
-            {c.overridden && <Dot tone="warn" size={5} label="Overridden from the plan default" />}
-          </span>
+          <span style={{ width: 5, flexShrink: 0 }}>{c.overridden && <Dot tone="warn" size={5} label={t('matrix.overridden')} />}</span>
         </div>
       ))}
     </TRow>
@@ -106,6 +100,8 @@ function ModuleRow({ m }: { m: EntitlementModule }) {
 }
 
 function Summary({ m }: { m: EntitlementMatrix }) {
+  const t = useT();
+  const tc = useCommonT();
   const can = useCan();
   const reset = useResetEntitlements();
   const [f, setF] = useUrlState({ q: '' });
@@ -113,7 +109,7 @@ function Summary({ m }: { m: EntitlementMatrix }) {
     <Card>
       <div className="hstack wrap" style={{ gap: 10 }}>
         <h2 className="card-title" style={{ minWidth: 180, flex: 1 }}>
-          What each plan unlocks
+          {t('summary.title')}
         </h2>
         <input
           className="input"
@@ -121,26 +117,26 @@ function Summary({ m }: { m: EntitlementMatrix }) {
           style={{ width: 180, padding: '8px 11px', fontSize: 12.5 }}
           value={f.q}
           onChange={(e) => setF({ q: e.target.value })}
-          placeholder="Find a module…"
-          aria-label="Find a module"
+          placeholder={t('summary.findPlaceholder')}
+          aria-label={t('summary.findLabel')}
         />
         {m.overrideCount > 0 && can('platform.manage') && (
           <ConfirmButton
             className="btn btn--sm"
-            confirmLabel="Confirm reset"
+            confirmLabel={t('summary.confirmReset')}
             pending={reset.isPending}
             onConfirm={() =>
               reset.mutate(undefined, {
-                onSuccess: () => toast(`Reset ${plural(m.overrideCount, 'override')} — every plan is back to its defaults`),
+                onSuccess: () => toast(t('summary.resetDone', { count: m.overrideCount })),
               })
             }
           >
-            Reset to defaults
+            {t('summary.resetToDefaults')}
           </ConfirmButton>
         )}
       </div>
       <p className="muted t-sm" style={{ marginTop: 4, lineHeight: 1.55 }}>
-        {NOTE}
+        {t('summary.note')}
       </p>
       <ul
         className="plain-list"
@@ -149,26 +145,27 @@ function Summary({ m }: { m: EntitlementMatrix }) {
         {m.plans.map((p) => (
           <li key={p.plan} className="card card--inset" style={{ borderColor: 'var(--bd)', padding: '12px 14px' }}>
             <div className="t-sm" style={{ fontWeight: 700 }}>
-              {p.plan}
+              {tc(`enums.plan.${p.plan}`)}
             </div>
             <div className="muted t-xs" style={{ marginTop: 2 }}>
-              {p.enabled} of {p.total} modules
+              {t('summary.planModules', { enabled: p.enabled, total: p.total })}
             </div>
             <Bar size="thin" value={p.total ? Math.round((p.enabled / p.total) * 100) : 0} style={{ marginTop: 8, flex: 'none' }} />
           </li>
         ))}
       </ul>
       <div className="faint t-xs" style={{ marginTop: 10 }}>
-        {m.overrideCount ? `${plural(m.overrideCount, 'override')} from plan defaults` : 'Matching plan defaults'}
+        {m.overrideCount ? t('summary.overrides', { count: m.overrideCount }) : t('summary.matchingDefaults')}
       </div>
       <p className="faint t-xs" style={{ marginTop: 6, lineHeight: 1.5 }}>
-        {ADDON_NOTE}
+        {t('summary.addonNote')}
       </p>
     </Card>
   );
 }
 
 function Matrix({ m }: { m: EntitlementMatrix }) {
+  const t = useT();
   const [f, setF] = useUrlState({ q: '' });
   const needle = f.q.trim().toLowerCase();
   const groups = [...new Set(m.modules.map((x) => x.group))]
@@ -179,17 +176,17 @@ function Matrix({ m }: { m: EntitlementMatrix }) {
     .filter((g) => g.mods.length);
   return (
     <div className="card table-scroll" style={{ padding: '6px 20px 14px' }}>
-      <div role="table" aria-label="Plan entitlements">
-        <PlanHead first="Module" sticky />
+      <div role="table" aria-label={t('matrix.label')}>
+        <PlanHead first={t('matrix.module')} sticky />
         {groups.length === 0 && (
           <Empty
             action={
               <button type="button" className="btn btn--sm" onClick={() => setF({ q: '' })}>
-                Clear search
+                {t('matrix.clearSearch')}
               </button>
             }
           >
-            No module matches “{f.q}”
+            {t('matrix.noMatch', { query: f.q })}
           </Empty>
         )}
         {groups.map((g) => (
@@ -214,24 +211,25 @@ function Matrix({ m }: { m: EntitlementMatrix }) {
 }
 
 function Limits({ rows }: { rows: PlanLimit[] }) {
+  const t = useT();
   return (
     <section className="card table-scroll" aria-labelledby="ent-limits-title">
       <h2 id="ent-limits-title" className="card-title">
-        Limits by plan
+        {t('limits.title')}
       </h2>
       <p className="muted t-sm" style={{ marginTop: 3 }}>
-        {LIMIT_NOTE} Live room minutes are edited in{' '}
+        {t('limits.note')} {t('limits.liveRoomEditedIn')}{' '}
         <Link className="link" to={pathOf('media')}>
-          Video &amp; storage
+          {t('limits.mediaLink')}
         </Link>
         .
       </p>
-      <div role="table" aria-label="Limits by plan" style={{ marginTop: 8 }}>
-        <PlanHead first="Limit" />
+      <div role="table" aria-label={t('limits.title')} style={{ marginTop: 8 }}>
+        <PlanHead first={t('limits.limit')} />
         {rows.map((r) => (
           <TRow key={r.key} cols={COLS} min={MIN} style={{ gap: 10, padding: '10px 0' }}>
             <div role="rowheader" style={{ fontWeight: 600 }}>
-              {LIMIT_ROW_LABELS[r.key]}
+              {t(`limits.rows.${r.key}`)}
             </div>
             {r.values.map((v) => (
               <div key={v.plan} role="cell" className="muted" style={{ textAlign: 'center' }}>
@@ -246,10 +244,11 @@ function Limits({ rows }: { rows: PlanLimit[] }) {
 }
 
 export default function EntitlementsPage() {
+  const t = useT();
   const matrix = useEntitlements();
   const limits = usePlanLimits();
   return (
-    <Screen max={1000} label="Plan entitlements">
+    <Screen max={1000} label={t('title')}>
       <QueryState
         query={matrix}
         skeleton={

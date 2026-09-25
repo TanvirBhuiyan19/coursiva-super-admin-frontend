@@ -3,6 +3,7 @@
 // - snake_case on the wire, camelCase in the app.
 // - Every failure becomes an ApiError (HTTP) or NetworkError (no response).
 import { apiUrl, backendUrl } from '@/config/env';
+import { intlLocale } from '@/lib/i18n';
 import { camelizeKeys, snakeizeKeys, toSnake } from './case';
 import { ApiError, NetworkError, type FieldErrors } from './errors';
 
@@ -59,6 +60,8 @@ async function request<T>(method: Method, path: string, opts: RequestOptions = {
   if (method !== 'GET') await ensureCsrf();
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    // Laravel localises validation and error messages from this (SetLocale middleware).
+    'Accept-Language': intlLocale(),
     'X-Requested-With': 'XMLHttpRequest',
     ...opts.headers,
   };

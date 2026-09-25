@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Tone } from '@/lib/domain';
 import { cx } from '@/lib/cx';
 import { toneFg } from '@/lib/format';
+import { useT as useCommonT } from '@/lib/i18n/common';
 
 interface BarProps {
   /** 0–100, or any CSS width. */
@@ -52,10 +53,11 @@ export function Avatar({ text, color, size = 28, round, radius, fontSize }: Avat
   );
 }
 
-export function Empty({ children = 'Nothing here', action }: { children?: ReactNode; action?: ReactNode }) {
+export function Empty({ children, action }: { children?: ReactNode; action?: ReactNode }) {
+  const tc = useCommonT();
   return (
     <div className="empty">
-      <div>{children}</div>
+      <div>{children ?? tc('states.empty')}</div>
       {action && <div style={{ marginTop: 10 }}>{action}</div>}
     </div>
   );
@@ -63,7 +65,8 @@ export function Empty({ children = 'Nothing here', action }: { children?: ReactN
 
 interface ConfirmButtonProps {
   children: ReactNode;
-  confirmLabel: ReactNode;
+  /** Label while armed; defaults to “Are you sure?”. */
+  confirmLabel?: ReactNode;
   onConfirm: () => void;
   className?: string;
   style?: CSSProperties;
@@ -82,6 +85,7 @@ export function ConfirmButton({
   disabled,
   pending,
 }: ConfirmButtonProps) {
+  const tc = useCommonT();
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return undefined;
@@ -104,7 +108,7 @@ export function ConfirmButton({
       }}
     >
       {pending ? <Spinner /> : null}
-      {armed ? confirmLabel : children}
+      {armed ? (confirmLabel ?? tc('actions.areYouSure')) : children}
     </button>
   );
 }
@@ -120,8 +124,9 @@ export function Skeleton({ h = 14, w = '100%', r = 6, style }: { h?: number; w?:
 
 /** Stacked skeleton rows for list/table placeholders. */
 export function SkeletonRows({ rows = 5, h = 18 }: { rows?: number; h?: number }) {
+  const tc = useCommonT();
   return (
-    <div className="stack" style={{ gap: 14, padding: '8px 0' }} role="status" aria-label="Loading">
+    <div className="stack" style={{ gap: 14, padding: '8px 0' }} role="status" aria-label={tc('states.loadingLabel')}>
       {Array.from({ length: rows }, (_, i) => (
         <Skeleton key={i} h={h} w={`${92 - ((i * 13) % 30)}%`} />
       ))}

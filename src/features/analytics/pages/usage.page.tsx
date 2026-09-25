@@ -1,24 +1,20 @@
 import { Link } from 'react-router-dom';
 import { Badge, Bar, Card, Empty, ErrorState, Screen, SkeletonRows, TRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
-import { money, num } from '@/lib/format';
+import { money, monthName, num } from '@/lib/format';
 import { useUsage } from '../api';
 import { KpiSkeletons } from '../components/charts';
 import { compactCount, formatGb } from '../format';
+import { t as tPlain, useT } from '../i18n';
 import type { Usage, UsageMeter } from '../types';
 
-const METER_LABEL: Record<UsageMeter, string> = {
-  storage: 'Object storage',
-  bandwidth: 'CDN bandwidth',
-  transcode: 'Video transcode',
-  api_requests: 'API requests',
-};
+const meterLabel = (m: UsageMeter) => tPlain(`usage.meter.${m}`);
 /** Storage is a point-in-time total; the other meters reset each billing month. */
 const MONTHLY: Record<UsageMeter, boolean> = { storage: false, bandwidth: true, transcode: true, api_requests: true };
 
 function formatMeter(meter: UsageMeter, n: number) {
   if (meter === 'storage' || meter === 'bandwidth') return formatGb(n);
-  if (meter === 'transcode') return `${compactCount(n)} min`;
+  if (meter === 'transcode') return tPlain('usage.minutes', { value: compactCount(n) });
   return compactCount(n);
 }
 
@@ -26,19 +22,20 @@ const COLS = 'minmax(190px,1.6fr) 80px 90px 90px 80px minmax(150px,1fr)';
 const NUM = { textAlign: 'right' } as const;
 
 function Capacity({ u }: { u: Usage }) {
-  const month = new Date(u.period + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+  const t = useT();
+  const month = monthName(u.period);
   return (
     <div className="grid-kpi">
       {u.capacity.map((c) => (
-        <section key={c.meter} className="card" aria-label={METER_LABEL[c.meter]}>
+        <section key={c.meter} className="card" aria-label={meterLabel(c.meter)}>
           <h2 className="kpi-label" style={{ margin: 0 }}>
-            {METER_LABEL[c.meter]}
+            {meterLabel(c.meter)}
             {MONTHLY[c.meter] ? ` · ${month}` : ''}
           </h2>
           <div className="kpi-value" style={{ fontSize: 24 }}>
             {formatMeter(c.meter, c.used)}{' '}
             <span className="faint nowrap" style={{ fontSize: 12, fontWeight: 400, fontFamily: 'inherit' }}>
-              of {formatMeter(c.meter, c.capacity)}
+              {t('usage.ofCapacity', { value: formatMeter(c.meter, c.capacity) })}
             </span>
           </div>
           <Bar
@@ -46,15 +43,15 @@ function Capacity({ u }: { u: Usage }) {
             color={c.nearLimit ? 'var(--aDot)' : undefined}
             size="md"
             style={{ marginTop: 12 }}
-            label={`${METER_LABEL[c.meter]}: ${c.usedPct}% of capacity used`}
+            label={t('usage.capacityLabel', { meter: meterLabel(c.meter), pct: c.usedPct })}
           />
           {c.nearLimit ? (
             <div className="fg-warn" style={{ fontSize: 11.5, fontWeight: 600, marginTop: 8 }}>
-              Approaching limit · {c.usedPct}% used
+              {t('usage.approaching', { pct: c.usedPct })}
             </div>
           ) : (
             <div className="kpi-sub" style={{ marginTop: 8 }}>
-              {c.usedPct}% used
+              {t('usage.used', { pct: c.usedPct })}
             </div>
           )}
         </section>
@@ -64,6 +61,7 @@ function Capacity({ u }: { u: Usage }) {
 }
 
 export default function UsagePage() {
+  const t = useT();
   const q = useUsage();
   const can = useCan();
   const u = q.data;
@@ -75,35 +73,35 @@ export default function UsagePage() {
       </Screen>
     );
 
-  const month = u ? new Date(u.period + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' }) : '';
+  const month = u ? monthName(u.period, 'long') : '';
 
   return (
-    <Screen max={1150} label="Usage and infrastructure">
+    <Screen max={1150} label={t('usage.title')}>
       {u ? <Capacity u={u} /> : <KpiSkeletons n={4} />}
 
-      <Card title={`Top consumers${month ? ` · ${month}` : ''}`} className="table-scroll">
+      <Card title={month ? t('usage.topConsumersIn', { month }) : t('usage.topConsumers')} className="table-scroll">
         {!u ? (
           <SkeletonRows rows={5} h={22} />
         ) : u.topConsumers.length === 0 ? (
-          <Empty>No usage recorded this month yet.</Empty>
+          <Empty>{t('usage.empty')}</Empty>
         ) : (
-          <div role="table" aria-label="Top consumers">
+          <div role="table" aria-label={t('usage.topConsumers')}>
             <TRow cols={COLS} min={760} head style={{ gap: 14 }}>
-              <div role="columnheader">Tenant</div>
+              <div role="columnheader">{t('usage.cols.tenant')}</div>
               <div role="columnheader" style={NUM}>
-                Storage
+                {t('usage.cols.storage')}
               </div>
               <div role="columnheader" style={NUM}>
-                Bandwidth
+                {t('usage.cols.bandwidth')}
               </div>
               <div role="columnheader" style={NUM}>
-                Video
+                {t('usage.cols.video')}
               </div>
               <div role="columnheader" style={NUM}>
-                API calls
+                {t('usage.cols.api')}
               </div>
               <div role="columnheader" style={NUM}>
-                Share of platform
+                {t('usage.cols.share')}
               </div>
             </TRow>
             {u.topConsumers.map((r) => (
@@ -118,7 +116,7 @@ export default function UsagePage() {
                   )}
                   {r.overage && (
                     <Badge tone="warn" style={{ marginLeft: 6, fontSize: 11 }}>
-                      {r.overage.meter} overage · +{money(r.overage.amount)}
+                      {t('usage.overage', { meter: r.overage.meter, amount: money(r.overage.amount) })}
                     </Badge>
                   )}
                 </div>
@@ -129,7 +127,7 @@ export default function UsagePage() {
                   {formatGb(r.bandwidthGb)}
                 </div>
                 <div role="cell" className="mono t-sm" style={NUM}>
-                  {compactCount(r.videoMinutes)} min
+                  {t('usage.minutes', { value: compactCount(r.videoMinutes) })}
                 </div>
                 <div role="cell" className="mono t-sm" style={NUM}>
                   {compactCount(r.apiRequests)}
@@ -146,7 +144,7 @@ export default function UsagePage() {
         )}
         {u && u.topConsumers.length > 0 && (
           <div className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
-            Share of platform = the tenant’s average share of storage, bandwidth, video and API usage.
+            {t('usage.shareNote')}
           </div>
         )}
       </Card>

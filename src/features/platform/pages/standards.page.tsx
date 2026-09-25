@@ -2,9 +2,11 @@ import { Badge, Card, ErrorState, Screen, SkeletonRows, Spinner, TRow } from '@/
 import { useCan } from '@/features/auth/useCan';
 import type { Tone } from '@/lib/domain';
 import { num, timeAgo } from '@/lib/format';
+import { intlLocale } from '@/lib/i18n';
 import { toast } from '@/store/ui';
 import { useReprocessImport, useStandards } from '../api';
 import { Tiles } from '../components/Tiles';
+import { useT } from '../i18n';
 import type { FailedImport, StandardSupport, Standards } from '../types';
 
 const COLS = 'minmax(0,1.3fr) minmax(0,0.7fr) minmax(0,1fr) minmax(0,2fr) minmax(0,1fr)';
@@ -16,9 +18,10 @@ const A11Y_TONE: Record<Standards['accessibility'][number]['status'], Tone> = {
 };
 /** 1.2M · 9,410 */
 const compact = (n: number) =>
-  n >= 100_000 ? new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n) : num(n);
+  n >= 100_000 ? new Intl.NumberFormat(intlLocale(), { notation: 'compact', maximumFractionDigits: 1 }).format(n) : num(n);
 
 function ImportRow({ row, canManage }: { row: FailedImport; canManage: boolean }) {
+  const t = useT();
   const reprocess = useReprocessImport();
   return (
     <li className="row wrap" style={{ gap: 10, fontSize: 12.5 }}>
@@ -36,10 +39,10 @@ function ImportRow({ row, canManage }: { row: FailedImport; canManage: boolean }
           className="btn btn--sm"
           style={{ padding: '6px 11px', fontSize: 11.5 }}
           disabled={reprocess.isPending}
-          aria-label={`Re-process ${row.file}`}
+          aria-label={t('standards.reprocessLabel', { file: row.file })}
           onClick={() => reprocess.mutate(row.id, { onSuccess: (r) => toast(r.message, r.outcome === 'imported' ? 'default' : 'error') })}
         >
-          {reprocess.isPending && <Spinner />} Re-process
+          {reprocess.isPending && <Spinner />} {t('standards.reprocess')}
         </button>
       )}
     </li>
@@ -47,6 +50,7 @@ function ImportRow({ row, canManage }: { row: FailedImport; canManage: boolean }
 }
 
 export default function StandardsPage() {
+  const t = useT();
   const can = useCan();
   const q = useStandards();
   const d = q.data;
@@ -60,26 +64,26 @@ export default function StandardsPage() {
     );
 
   return (
-    <Screen max={1250} label="Standards and conformance">
+    <Screen max={1250} label={t('standards.screenLabel')}>
       <Tiles
         items={
           d && [
-            { label: 'SCORM packages', value: num(d.summary.scormPackages), sub: 'Imported and converted' },
-            { label: 'xAPI statements · 24h', value: compact(d.summary.xapiStatements24h), sub: 'Streamed to tenant LRSs' },
-            { label: 'LTI launches · 30d', value: compact(d.summary.ltiLaunches30d), sub: 'Canvas, Moodle, Blackboard' },
-            { label: 'Failed imports', value: num(d.summary.failedImports), sub: 'Awaiting re-processing' },
+            { label: t('standards.tiles.scorm'), value: num(d.summary.scormPackages), sub: t('standards.tiles.scormSub') },
+            { label: t('standards.tiles.xapi'), value: compact(d.summary.xapiStatements24h), sub: t('standards.tiles.xapiSub') },
+            { label: t('standards.tiles.lti'), value: compact(d.summary.ltiLaunches30d), sub: t('standards.tiles.ltiSub') },
+            { label: t('standards.tiles.failed'), value: num(d.summary.failedImports), sub: t('standards.tiles.failedSub') },
           ]
         }
       />
 
       <div className="card table-scroll" style={{ padding: '6px 18px 4px' }}>
-        <div role="table" aria-label="Supported standards">
+        <div role="table" aria-label={t('standards.table')}>
           <TRow cols={COLS} min={720} head style={{ gap: 10, fontSize: 10.5 }}>
-            <div role="columnheader">Standard</div>
-            <div role="columnheader">Direction</div>
-            <div role="columnheader">In use</div>
-            <div role="columnheader">Notes</div>
-            <div role="columnheader">Support</div>
+            <div role="columnheader">{t('standards.cols.standard')}</div>
+            <div role="columnheader">{t('standards.cols.direction')}</div>
+            <div role="columnheader">{t('standards.cols.inUse')}</div>
+            <div role="columnheader">{t('standards.cols.notes')}</div>
+            <div role="columnheader">{t('standards.cols.support')}</div>
           </TRow>
           {!d && <SkeletonRows rows={6} h={22} />}
           {d?.standards.map((s) => (
@@ -88,15 +92,15 @@ export default function StandardsPage() {
                 {s.name}
               </div>
               <div role="cell" className="muted">
-                {s.direction}
+                {t(`enums.standardDirection.${s.direction}`)}
               </div>
-              <div role="cell">{s.packages ? `${num(s.packages)} packages` : 'Not in use'}</div>
+              <div role="cell">{s.packages ? t('standards.packages', { count: s.packages }) : t('standards.notInUse')}</div>
               <div role="cell" className="muted" style={{ lineHeight: 1.45 }}>
                 {s.note}
               </div>
               <div role="cell">
                 <Badge tone={SUPPORT_TONE[s.support]} style={{ fontSize: 11, padding: '3px 8px' }}>
-                  {s.support}
+                  {t(`enums.standardSupport.${s.support}`)}
                 </Badge>
               </div>
             </TRow>
@@ -105,7 +109,7 @@ export default function StandardsPage() {
       </div>
 
       <div className="grid-2">
-        <Card title="Failed imports" style={{ padding: '18px 20px' }}>
+        <Card title={t('standards.failedTitle')} style={{ padding: '18px 20px' }}>
           {!d ? (
             <SkeletonRows rows={2} h={22} />
           ) : d.failedImports.length ? (
@@ -116,13 +120,13 @@ export default function StandardsPage() {
             </ul>
           ) : (
             <div className="muted t-sm" style={{ padding: '14px 0' }}>
-              Every package imported cleanly.
+              {t('standards.allClean')}
             </div>
           )}
         </Card>
-        <Card title="Accessibility conformance" style={{ padding: '18px 20px' }}>
+        <Card title={t('standards.a11yTitle')} style={{ padding: '18px 20px' }}>
           <p className="muted t-sm" style={{ margin: '0 0 4px' }}>
-            Backs the VPAT you send to enterprise and education buyers.
+            {t('standards.a11yIntro')}
           </p>
           {!d ? (
             <SkeletonRows rows={4} h={22} />
@@ -137,7 +141,7 @@ export default function StandardsPage() {
                     </div>
                   </div>
                   <Badge tone={A11Y_TONE[a.status]} style={{ fontSize: 11, padding: '3px 8px' }}>
-                    {a.status}
+                    {t(`enums.a11yStatus.${a.status}`)}
                   </Badge>
                 </li>
               ))}
@@ -147,8 +151,7 @@ export default function StandardsPage() {
       </div>
 
       <div className="card note" style={{ padding: '16px 18px', fontSize: 12.5, lineHeight: 1.6 }}>
-        Imported packages are converted to native lessons so they inherit DRM, analytics and mobile playback — the original file is kept for
-        re-export.
+        {t('standards.note')}
       </div>
     </Screen>
   );

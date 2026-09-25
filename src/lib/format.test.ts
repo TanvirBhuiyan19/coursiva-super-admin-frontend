@@ -1,17 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  daysUntil,
-  formatDate,
-  initials,
-  money,
-  moneyCompact,
-  moneyFine,
-  plural,
-  scoreTone,
-  shortDuration,
-  timeAgo,
-  utilTone,
-} from './format';
+import { daysUntil, formatDate, initials, money, moneyCompact, moneyFine, scoreTone, shortDuration, timeAgo, utilTone } from './format';
 
 const NOW = new Date('2026-09-25T12:00:00Z').getTime();
 const minus = (ms: number) => new Date(NOW - ms).toISOString();
@@ -42,10 +30,6 @@ describe('helpers', () => {
   it('builds initials', () => {
     expect(initials('Nordic Yoga School')).toBe('NY');
     expect(initials('  sam  ortega ')).toBe('SO');
-  });
-  it('pluralises', () => {
-    expect(plural(1, 'tenant')).toBe('1 tenant');
-    expect(plural(1200, 'tenant')).toBe('1,200 tenants');
   });
   it('computes days until', () => {
     expect(daysUntil(new Date(NOW + 2.5 * 86_400_000).toISOString(), NOW)).toBe(3);

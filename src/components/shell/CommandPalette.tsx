@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { SCREENS, type ScreenDef } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
 import { useGlobalSearch, type SearchType } from '@/features/shell/api';
+import { useT } from '@/features/shell/i18n';
 import { useDebounced } from '@/lib/useDebounced';
 import { useUi } from '@/store/ui';
 import { Modal } from '../ui';
@@ -18,29 +19,16 @@ interface Item {
 }
 
 const PREFIX: Record<string, Group> = { '>': 'Action', '/': 'Screen', '@': 'Tenant', $: 'Invoice', '#': 'Ticket', '~': 'Staff' };
-const SCOPES: [string, string][] = [
-  ['>', 'Actions'],
-  ['/', 'Screens'],
-  ['@', 'Tenants'],
-  ['$', 'Invoices'],
-  ['#', 'Tickets'],
-  ['~', 'Staff'],
-];
+const SCOPES = Object.keys(PREFIX);
 const ORDER: Group[] = ['Recent', 'Action', 'Screen', 'Tenant', 'Invoice', 'Ticket', 'Staff'];
-const TITLE: Record<Group, string> = {
-  Recent: 'Recent',
-  Action: 'Actions',
-  Screen: 'Screens',
-  Tenant: 'Tenants',
-  Invoice: 'Invoices',
-  Ticket: 'Tickets',
-  Staff: 'Staff',
-};
 const REMOTE: Partial<Record<Group, SearchType>> = { Tenant: 'tenant', Invoice: 'invoice', Ticket: 'ticket', Staff: 'staff' };
 const GLYPH: Record<SearchType, string> = { tenant: '◉', invoice: '$', ticket: '✉', staff: '☺' };
 const GROUP_OF: Record<SearchType, Group> = { tenant: 'Tenant', invoice: 'Invoice', ticket: 'Ticket', staff: 'Staff' };
+/** Keyboard keys shown in hints (not translated). */
+const KEYS = { enter: '↵', arrows: '↑↓', esc: 'esc', toggle: '⌘K' };
 
 export default function CommandPalette() {
+  const t = useT();
   const navigate = useNavigate();
   const can = useCan();
   const { set: setUi, toggleUiMode, pushRecent } = useUi.getState();
@@ -61,21 +49,29 @@ export default function CommandPalette() {
     const go = (path: string) => () => navigate(path);
     const actions: Item[] = [
       ...(can('tenants.manage')
-        ? [{ key: 'a:new', label: 'Create new tenant', glyph: '⚡', group: 'Action' as const, run: () => setUi({ provisionOpen: true }) }]
+        ? [
+            {
+              key: 'a:new',
+              label: t('palette.actions.newTenant'),
+              glyph: '⚡',
+              group: 'Action' as const,
+              run: () => setUi({ provisionOpen: true }),
+            },
+          ]
         : []),
       ...(can('announcements.send')
-        ? [{ key: 'a:ann', label: 'Broadcast announcement', glyph: '⚡', group: 'Action' as const, run: go('/announcements') }]
+        ? [{ key: 'a:ann', label: t('palette.actions.announce'), glyph: '⚡', group: 'Action' as const, run: go('/announcements') }]
         : []),
       ...(can('platform.view')
-        ? [{ key: 'a:status', label: 'Post or resolve an incident', glyph: '⚡', group: 'Action' as const, run: go('/platform/flags') }]
+        ? [{ key: 'a:status', label: t('palette.actions.incident'), glyph: '⚡', group: 'Action' as const, run: go('/platform/flags') }]
         : []),
-      { key: 'a:theme', label: 'Toggle light / dark mode', glyph: '⚡', group: 'Action', run: toggleUiMode },
+      { key: 'a:theme', label: t('palette.actions.theme'), glyph: '⚡', group: 'Action', run: toggleUiMode },
     ];
     const screens: Item[] = (SCREENS as readonly ScreenDef[])
       .filter((s) => can(s.permission))
       .map((s) => ({ key: 's:' + s.id, label: s.title, glyph: '→', group: 'Screen', run: go(s.path) }));
     return [...actions, ...screens];
-  }, [can, navigate, setUi, toggleUiMode]);
+  }, [can, navigate, setUi, toggleUiMode, t]);
 
   const remote: Item[] = (wantsRemote ? (search.data ?? []) : []).map((r) => ({
     key: `${r.type}:${r.id}`,
@@ -122,7 +118,7 @@ export default function CommandPalette() {
   const optionId = (i: number) => `cmd-opt-${i}`;
 
   return (
-    <Modal onClose={close} width={560} top label="Command palette">
+    <Modal onClose={close} width={560} top label={t('palette.label')}>
       <div className="cmdk">
         <input
           data-autofocus
@@ -132,8 +128,8 @@ export default function CommandPalette() {
             setSel(0);
           }}
           onKeyDown={onKey}
-          placeholder="Search tenants, invoices, tickets — or type > for actions"
-          aria-label="Search the console"
+          placeholder={t('palette.placeholder')}
+          aria-label={t('palette.searchLabel')}
           role="combobox"
           aria-expanded="true"
           aria-controls="cmd-list"
@@ -142,7 +138,7 @@ export default function CommandPalette() {
           className="cmdk-input"
         />
         <div className="hstack wrap cmdk-scopes">
-          {SCOPES.map(([k, label]) => (
+          {SCOPES.map((k) => (
             <button
               key={k}
               type="button"
@@ -152,17 +148,17 @@ export default function CommandPalette() {
                 setSel(0);
               }}
             >
-              <b className="mono">{k}</b> {label}
+              <b className="mono">{k}</b> {t(`palette.groups.${PREFIX[k]!}`)}
             </button>
           ))}
           <div className="spacer" />
           <span className="faint nowrap" style={{ fontSize: 11 }} aria-live="polite">
-            {loading ? 'Searching…' : `${ordered.length} ${ordered.length === 1 ? 'result' : 'results'}`}
+            {loading ? t('palette.searching') : t('palette.resultCount', { count: ordered.length })}
           </span>
         </div>
-        <div className="cmdk-list" id="cmd-list" role="listbox" aria-label="Results">
+        <div className="cmdk-list" id="cmd-list" role="listbox" aria-label={t('palette.results')}>
           {ordered.map((item, idx) => {
-            const header = idx === 0 || ordered[idx - 1]!.group !== item.group ? TITLE[item.group] : null;
+            const header = idx === 0 || ordered[idx - 1]!.group !== item.group ? t(`palette.groups.${item.group}`) : null;
             const on = idx === selIdx;
             return (
               <div key={item.group + item.key}>
@@ -194,26 +190,26 @@ export default function CommandPalette() {
                       </span>
                     )}
                   </span>
-                  {on && <kbd className="kbd">↵</kbd>}
-                  <span className="cmdk-kind">{item.group === 'Recent' ? 'Recent' : item.group}</span>
+                  {on && <kbd className="kbd">{KEYS.enter}</kbd>}
+                  <span className="cmdk-kind">{t(`palette.kinds.${item.group}`)}</span>
                 </div>
               </div>
             );
           })}
-          {!ordered.length && !loading && <div className="empty">No matches</div>}
+          {!ordered.length && !loading && <div className="empty">{t('palette.noMatches')}</div>}
         </div>
         <div className="cmdk-foot faint">
           <span>
-            <b>↑↓</b> navigate
+            <b>{KEYS.arrows}</b> {t('palette.hints.navigate')}
           </span>
           <span>
-            <b>↵</b> open
+            <b>{KEYS.enter}</b> {t('palette.hints.open')}
           </span>
           <span>
-            <b>esc</b> close
+            <b>{KEYS.esc}</b> {t('palette.hints.close')}
           </span>
           <span>
-            <b>⌘K</b> toggle
+            <b>{KEYS.toggle}</b> {t('palette.hints.toggle')}
           </span>
         </div>
       </div>

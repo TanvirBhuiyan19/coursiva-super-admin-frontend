@@ -1,6 +1,7 @@
 import { Card, QueryState, Screen, SkeletonRows } from '@/components/ui';
 import { useDrm, useLiveRooms, useStorage } from '../api';
 import { DrmCard, LiveRoomsCard, StorageCard } from '../components/MediaSections';
+import { useT } from '../i18n';
 
 const skeleton = (
   <Card>
@@ -9,11 +10,12 @@ const skeleton = (
 );
 
 export default function MediaPage() {
+  const t = useT();
   const liveRooms = useLiveRooms();
   const drm = useDrm();
   const storage = useStorage();
   return (
-    <Screen max={1000} label="Video and storage">
+    <Screen max={1000} label={t('title')}>
       <QueryState query={liveRooms} skeleton={skeleton}>
         {(s) => <LiveRoomsCard s={s} />}
       </QueryState>

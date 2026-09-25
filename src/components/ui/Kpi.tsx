@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cx } from '@/lib/cx';
+import { useT as useCommonT } from '@/lib/i18n/common';
 
 export interface KpiItem {
   label: string;
@@ -14,14 +15,15 @@ interface KpiProps extends KpiItem {
   small?: boolean;
 }
 
-export function Kpi({ label, value, sub, delta, deltaColor, deltaSuffix = 'vs previous period', small }: KpiProps) {
+export function Kpi({ label, value, sub, delta, deltaColor, deltaSuffix, small }: KpiProps) {
+  const tc = useCommonT();
   return (
     <div className={cx('card', small && 'card--tight')}>
       <div className="kpi-label">{label}</div>
       <div className={cx('kpi-value', small && 'kpi-value--sm')}>{value}</div>
       {delta != null && (
         <div style={{ fontSize: 12, marginTop: 6, color: deltaColor ?? 'var(--gFg)', fontWeight: 600 }}>
-          {delta} <span style={{ color: 'var(--tx4)', fontWeight: 400 }}>{deltaSuffix}</span>
+          {delta} <span style={{ color: 'var(--tx4)', fontWeight: 400 }}>{deltaSuffix ?? tc('time.vsPreviousPeriod')}</span>
         </div>
       )}
       {sub != null && <div className="kpi-sub">{sub}</div>}

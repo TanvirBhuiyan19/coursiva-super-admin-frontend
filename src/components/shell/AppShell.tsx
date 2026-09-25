@@ -2,6 +2,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { screenForPath } from '@/app/screens';
 import { IdleLock } from '@/features/auth/IdleLock';
+import { useT } from '@/features/shell/i18n';
 import { ImpersonationView, ProvisionTenantModal } from '@/features/tenants';
 import { lazyWithPreload, whenIdle } from '@/lib/lazy';
 import { useUi } from '@/store/ui';
@@ -15,6 +16,7 @@ import { RouteErrorBoundary } from './RouteErrorBoundary';
 const CommandPalette = lazyWithPreload(() => import('./CommandPalette'));
 
 export default function AppShell() {
+  const t = useT();
   const { pathname } = useLocation();
   const screen = screenForPath(pathname);
   const cmdOpen = useUi((s) => s.cmdOpen);
@@ -48,15 +50,15 @@ export default function AppShell() {
 
   // Document title follows the screen; a new screen starts at the top.
   useEffect(() => {
-    document.title = screen ? `${screen.title} · Coursiva console` : 'Coursiva console';
+    document.title = screen ? t('documentTitle', { screen: screen.title }) : t('documentTitleFallback');
     content.current?.scrollTo(0, 0);
-  }, [screen]);
+  }, [screen, t]);
 
   return (
     // While idle-locked the whole app is inert (no focus, clicks or screen-reader access) behind the lock screen.
     <div className={'shell' + (mobileNav ? ' nav-open' : '')} inert={locked}>
       <a href="#main" className="skip-link">
-        Skip to content
+        {t('skipToContent')}
       </a>
       <Sidebar screen={screen} />
       <div className="sb-backdrop" onClick={() => setUi({ mobileNav: false })} aria-hidden="true" />

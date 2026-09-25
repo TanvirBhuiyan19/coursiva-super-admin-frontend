@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { Badge, Bar, Card, ConfirmButton, Empty, ErrorState, Screen, SkeletonRows, Spinner } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
-import { formatMonth, plural, timeAgo } from '@/lib/format';
+import { formatMonth, timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useApiKeys, useRetryDelivery, useRevokeApiKey, useWebhooks } from '../api';
 import { CreateApiKeyModal } from '../components/CreateApiKeyModal';
+import { useT } from '../i18n';
 import type { ApiKey, WebhookDelivery } from '../types';
 
 function KeyRow({ k, canManage }: { k: ApiKey; canManage: boolean }) {
+  const t = useT();
   const revoke = useRevokeApiKey();
   return (
     <li className="row" style={{ gap: 14, padding: '12px 0' }}>
@@ -20,32 +22,32 @@ function KeyRow({ k, canManage }: { k: ApiKey; canManage: boolean }) {
         </div>
       </div>
       <Badge tone="flat" style={{ fontSize: 11 }}>
-        {k.scope}
+        {t(`enums.apiKeyScope.${k.scope}`)}
       </Badge>
       <span className="muted" style={{ flex: 1, fontSize: 12 }}>
-        Created {formatMonth(k.createdAt)}
+        {t('apiKeys.created', { month: formatMonth(k.createdAt) })}
       </span>
       <span className="muted" style={{ width: 110, fontSize: 12 }}>
-        {k.lastUsedAt ? `Used ${timeAgo(k.lastUsedAt)}` : 'Never used'}
+        {k.lastUsedAt ? t('apiKeys.used', { time: timeAgo(k.lastUsedAt) }) : t('apiKeys.neverUsed')}
       </span>
       <div style={{ width: 120, display: 'flex', justifyContent: 'flex-end' }}>
         {k.revokedAt ? (
-          <Badge tone="bad" style={{ fontSize: 11 }} title={`Revoked ${timeAgo(k.revokedAt)}`}>
-            Revoked
+          <Badge tone="bad" style={{ fontSize: 11 }} title={t('apiKeys.revokedAt', { time: timeAgo(k.revokedAt) })}>
+            {t('apiKeys.revoked')}
           </Badge>
         ) : canManage ? (
           <ConfirmButton
             className="btn btn--sm btn--danger"
             style={{ padding: '5px 11px', fontWeight: 600 }}
-            confirmLabel="Confirm revoke"
+            confirmLabel={t('apiKeys.confirmRevoke')}
             pending={revoke.isPending}
-            onConfirm={() => revoke.mutate(k.id, { onSuccess: () => toast(`${k.name} revoked — requests with ${k.prefix} now get 401`) })}
+            onConfirm={() => revoke.mutate(k.id, { onSuccess: () => toast(t('apiKeys.toastRevoked', { name: k.name, prefix: k.prefix })) })}
           >
-            Revoke
+            {t('apiKeys.revoke')}
           </ConfirmButton>
         ) : (
           <Badge tone="good" style={{ fontSize: 11 }}>
-            Active
+            {t('apiKeys.active')}
           </Badge>
         )}
       </div>
@@ -54,6 +56,7 @@ function KeyRow({ k, canManage }: { k: ApiKey; canManage: boolean }) {
 }
 
 function DeliveryRow({ d, canManage }: { d: WebhookDelivery; canManage: boolean }) {
+  const t = useT();
   const retry = useRetryDelivery();
   return (
     <li className="row" style={{ gap: 14, padding: '12px 0', fontSize: 12.5 }}>
@@ -66,8 +69,8 @@ function DeliveryRow({ d, canManage }: { d: WebhookDelivery; canManage: boolean 
       <span className="fg-bad" style={{ width: 190, fontWeight: 600, flexShrink: 0 }}>
         {d.error}
       </span>
-      <span className="muted" style={{ width: 84, flexShrink: 0 }} title={`Last attempt ${timeAgo(d.lastAttemptAt)}`}>
-        {plural(d.attempts, 'attempt')}
+      <span className="muted" style={{ width: 84, flexShrink: 0 }} title={t('webhooks.lastAttempt', { time: timeAgo(d.lastAttemptAt) })}>
+        {t('webhooks.attempts', { count: d.attempts })}
       </span>
       {canManage && (
         <button
@@ -75,17 +78,20 @@ function DeliveryRow({ d, canManage }: { d: WebhookDelivery; canManage: boolean 
           className="btn btn--sm btn--danger"
           style={{ padding: '5px 11px', fontWeight: 600 }}
           disabled={retry.isPending}
-          aria-label={`Retry ${d.event} to ${d.url}`}
+          aria-label={t('webhooks.retryLabel', { event: d.event, url: d.url })}
           onClick={() =>
             retry.mutate(d.id, {
               onSuccess: (r) =>
                 r.delivered
-                  ? toast(`${d.event} delivered — ${r.status ?? 200} OK`)
-                  : toast(`${d.event} failed again — HTTP ${r.status ?? 'timeout'}. Ask the tenant to fix the endpoint.`, 'error'),
+                  ? toast(t('webhooks.delivered', { event: d.event, status: String(r.status ?? 200) }))
+                  : toast(
+                      t('webhooks.failedAgain', { event: d.event, status: r.status === null ? t('webhooks.timeout') : String(r.status) }),
+                      'error',
+                    ),
             })
           }
         >
-          {retry.isPending && <Spinner />} Retry
+          {retry.isPending && <Spinner />} {t('webhooks.retry')}
         </button>
       )}
     </li>
@@ -93,6 +99,7 @@ function DeliveryRow({ d, canManage }: { d: WebhookDelivery; canManage: boolean 
 }
 
 export default function ApiPage() {
+  const t = useT();
   const can = useCan();
   const canManage = can('platform.manage');
   const keys = useApiKeys();
@@ -100,9 +107,9 @@ export default function ApiPage() {
   const [creating, setCreating] = useState(false);
 
   return (
-    <Screen max={1050} label="API and webhooks">
+    <Screen max={1050} label={t('apiKeys.screenLabel')}>
       <Card
-        title="API keys"
+        title={t('apiKeys.title')}
         right={
           canManage && (
             <button
@@ -111,7 +118,7 @@ export default function ApiPage() {
               style={{ padding: '6px 12px', fontSize: 12.5, fontWeight: 600 }}
               onClick={() => setCreating(true)}
             >
-              Create key
+              {t('apiKeys.create')}
             </button>
           )
         }
@@ -121,10 +128,10 @@ export default function ApiPage() {
         ) : keys.error ? (
           <ErrorState compact error={keys.error} onRetry={() => void keys.refetch()} />
         ) : keys.data.length === 0 ? (
-          <Empty>No platform API keys yet.</Empty>
+          <Empty>{t('apiKeys.empty')}</Empty>
         ) : (
           <div className="table-scroll">
-            <ul className="plain-list" aria-label="API keys" style={{ minWidth: 640 }}>
+            <ul className="plain-list" aria-label={t('apiKeys.title')} style={{ minWidth: 640 }}>
               {keys.data.map((k) => (
                 <KeyRow key={k.id} k={k} canManage={canManage} />
               ))}
@@ -133,17 +140,17 @@ export default function ApiPage() {
         )}
       </Card>
 
-      <Card title="Webhook endpoints">
+      <Card title={t('webhooks.title')}>
         {hooks.isPending ? (
           <SkeletonRows rows={3} h={24} />
         ) : hooks.error ? (
           <ErrorState compact error={hooks.error} onRetry={() => void hooks.refetch()} />
         ) : hooks.data.endpoints.length === 0 ? (
-          <Empty>No webhook endpoints registered.</Empty>
+          <Empty>{t('webhooks.empty')}</Empty>
         ) : (
           <>
             <div className="table-scroll">
-              <ul className="plain-list" aria-label="Webhook endpoints" style={{ minWidth: 560 }}>
+              <ul className="plain-list" aria-label={t('webhooks.title')} style={{ minWidth: 560 }}>
                 {hooks.data.endpoints.map((e) => (
                   <li key={e.id} className="row" style={{ gap: 14, padding: '12px 0' }}>
                     <div className="min0" style={{ flex: 1 }}>
@@ -159,32 +166,32 @@ export default function ApiPage() {
                         size="md"
                         value={e.successRate7d}
                         tone={e.status === 'Healthy' ? 'accent' : 'bad'}
-                        label={`${e.url} delivery success ${e.successRate7d}%`}
+                        label={t('webhooks.successLabel', { url: e.url, pct: e.successRate7d })}
                       />
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{e.successRate7d}%</span>
                     </span>
                     <Badge tone={e.status === 'Healthy' ? 'good' : 'bad'} style={{ fontSize: 11 }}>
-                      {e.status}
+                      {t(`enums.webhookStatus.${e.status}`)}
                     </Badge>
                   </li>
                 ))}
               </ul>
             </div>
             <div className="faint" style={{ fontSize: 11, marginTop: 10 }}>
-              Delivery success rate, last 7 days.
+              {t('webhooks.successFootnote')}
             </div>
           </>
         )}
       </Card>
 
-      <Card title="Failed deliveries · last 24 h">
+      <Card title={t('webhooks.failedTitle')}>
         {hooks.isPending ? (
           <SkeletonRows rows={3} h={24} />
         ) : hooks.error ? (
           <ErrorState compact error={hooks.error} onRetry={() => void hooks.refetch()} />
         ) : hooks.data.failedDeliveries.length ? (
           <div className="table-scroll">
-            <ul className="plain-list" aria-label="Failed deliveries" style={{ minWidth: 700 }}>
+            <ul className="plain-list" aria-label={t('webhooks.failedList')} style={{ minWidth: 700 }}>
               {hooks.data.failedDeliveries.map((d) => (
                 <DeliveryRow key={d.id} d={d} canManage={canManage} />
               ))}
@@ -192,7 +199,7 @@ export default function ApiPage() {
           </div>
         ) : (
           <div className="muted" style={{ fontSize: 13, marginTop: 12 }}>
-            No failed deliveries in the last 24 hours.
+            {t('webhooks.noFailed')}
           </div>
         )}
       </Card>

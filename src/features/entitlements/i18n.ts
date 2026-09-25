@@ -1,0 +1,62 @@
+import { defineMessages } from '@/lib/i18n';
+
+export const { t, useT } = defineMessages('entitlements', {
+  title: 'Plan entitlements',
+  summary: {
+    title: 'What each plan unlocks',
+    findPlaceholder: 'Find a module…',
+    findLabel: 'Find a module',
+    confirmReset: 'Confirm reset',
+    resetToDefaults: 'Reset to defaults',
+    resetDone: {
+      one: 'Reset {count} override — every plan is back to its defaults',
+      other: 'Reset {count} overrides — every plan is back to its defaults',
+    },
+    note: 'Source of truth for what a tenant sees. Turning a module off hides its nav item and blocks its routes for every tenant on that plan.',
+    planModules: '{enabled} of {total} modules',
+    overrides: { one: '{count} override from plan defaults', other: '{count} overrides from plan defaults' },
+    matchingDefaults: 'Matching plan defaults',
+    addonNote:
+      'Modules marked EXTENSION are sold in the extension catalogue. Which plans get one free is set there — the ticks below follow it, and an override here wins for that plan only.',
+  },
+  matrix: {
+    label: 'Plan entitlements',
+    module: 'Module',
+    clearSearch: 'Clear search',
+    noMatch: 'No module matches “{query}”',
+    core: 'CORE',
+    extension: 'EXTENSION',
+    upsell: 'UPSELL',
+    toggle: '{module} on {plan}',
+    toggleCore: '{module} on {plan} (core)',
+    overridden: 'Overridden from the plan default',
+    added: '{module} added to {plan} — tenant dashboards update on next load',
+    removed: '{module} removed from {plan} — tenant dashboards update on next load',
+    tip: {
+      full: '{name} · {price}/mo · {included} — {effect}',
+      freeOn: 'free on {plans}',
+      paidEverywhere: 'paid on every plan',
+      gates: 'the L/G/S toggles in Extensions drive these ticks',
+      upsell: 'an upsell inside this module, so it does not change access here',
+    },
+  },
+  limits: {
+    title: 'Limits by plan',
+    limit: 'Limit',
+    note: 'Every limit here can be overridden per tenant in the tenant drawer — 0 means unlimited.',
+    liveRoomEditedIn: 'Live room minutes are edited in',
+    mediaLink: 'Video & storage',
+    rows: {
+      students: 'Students',
+      storageGb: 'Storage',
+      staffSeats: 'Staff seats',
+      apiPerMinute: 'API req/min',
+      liveRoomMinutes: 'Live room minutes',
+      courses: 'Courses',
+    },
+    perMonth: '{value}/mo',
+    byoOnly: 'BYO only',
+    tb: '{value} TB',
+    gb: '{value} GB',
+  },
+});
