@@ -8,7 +8,7 @@ import { plural } from '@/lib/format';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useUpdatePlatformSettings } from '../api';
-import { SESSION_HOURS, type PlatformSettings } from '../types';
+import { IDLE_LOCK_MINUTES, SESSION_HOURS, type PlatformSettings } from '../types';
 
 const num = (msg: string) => z.number({ error: msg });
 
@@ -32,6 +32,7 @@ const schema = z.object({
     (v) => (SESSION_HOURS as readonly number[]).includes(v),
     'Choose a session timeout.',
   ),
+  idleLockMinutes: num('Choose an idle lock.').refine((v) => (IDLE_LOCK_MINUTES as readonly number[]).includes(v), 'Choose an idle lock.'),
   weeklyDigest: z.boolean(),
   billingAlerts: z.boolean(),
   incidentAlerts: z.boolean(),
@@ -50,6 +51,7 @@ const pick = (s: PlatformSettings): Values => ({
   requireStaffTwoFactor: s.requireStaffTwoFactor,
   enforceSso: s.enforceSso,
   sessionHours: s.sessionHours,
+  idleLockMinutes: s.idleLockMinutes,
   weeklyDigest: s.weeklyDigest,
   billingAlerts: s.billingAlerts,
   incidentAlerts: s.incidentAlerts,
@@ -162,7 +164,7 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
             <div className="min0" style={{ flex: 1, minWidth: 200 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Session timeout</div>
               <div className="t-xs muted" style={{ marginTop: 2 }}>
-                Staff are signed out after this period of inactivity.
+                Staff must sign in again after this long, however active they are.
               </div>
             </div>
             <select
@@ -181,6 +183,31 @@ export function PlatformSettingsForm({ settings }: { settings: PlatformSettings 
           {errors.sessionHours && (
             <div className="field-error" role="alert">
               {errors.sessionHours.message}
+            </div>
+          )}
+          <div className="hstack wrap" style={{ gap: 14, paddingTop: 12 }}>
+            <div className="min0" style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Idle lock</div>
+              <div className="t-xs muted" style={{ marginTop: 2 }}>
+                The console locks after this long without activity; staff re-enter their password to continue.
+              </div>
+            </div>
+            <select
+              {...form.register('idleLockMinutes', { valueAsNumber: true })}
+              className="select"
+              aria-label="Idle lock"
+              style={{ width: 'auto' }}
+            >
+              {IDLE_LOCK_MINUTES.map((m) => (
+                <option key={m} value={m}>
+                  {m} minutes
+                </option>
+              ))}
+            </select>
+          </div>
+          {errors.idleLockMinutes && (
+            <div className="field-error" role="alert">
+              {errors.idleLockMinutes.message}
             </div>
           )}
         </Card>

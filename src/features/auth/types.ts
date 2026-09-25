@@ -7,6 +7,8 @@ export interface User {
   role: Role;
   twoFactorEnabled: boolean;
   permissions: Permission[];
+  /** Minutes without activity before the console locks (platform policy). */
+  idleLockMinutes: number;
 }
 
 export interface LoginInput {

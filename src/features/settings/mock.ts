@@ -5,6 +5,7 @@ import { collection, singleton } from '@/mocks/db';
 import { authorize, handle, invalid, noContent, notFound, ok, readBody, recordAudit, route } from '@/mocks/http';
 import { PLANS } from '@/lib/domain';
 import {
+  IDLE_LOCK_MINUTES,
   SESSION_HOURS,
   type IntegrationSettings,
   type PlatformSettings,
@@ -29,6 +30,7 @@ export const FIELD_LABELS: Record<keyof PlatformSettings, string> = {
   requireStaffTwoFactor: 'staff 2FA requirement',
   enforceSso: 'SSO enforcement',
   sessionHours: 'session timeout',
+  idleLockMinutes: 'idle lock',
   weeklyDigest: 'weekly digest',
   billingAlerts: 'billing alerts',
   incidentAlerts: 'incident alerts',
@@ -60,6 +62,8 @@ function validateSettings(body: PlatformSettingsUpdate): Record<string, string> 
   if (body.dunningRetries !== undefined && !isInt(body.dunningRetries, 1, 5)) e.dunningRetries = 'Payment retries must be between 1 and 5.';
   if (body.sessionHours !== undefined && !(SESSION_HOURS as readonly number[]).includes(body.sessionHours))
     e.sessionHours = 'Choose a session timeout of 4, 8, 12 or 24 hours.';
+  if (body.idleLockMinutes !== undefined && !(IDLE_LOCK_MINUTES as readonly number[]).includes(body.idleLockMinutes))
+    e.idleLockMinutes = 'Choose an idle lock of 5, 10, 15, 30 or 60 minutes.';
   for (const k of BOOLEAN_FIELDS) if (body[k] !== undefined && typeof body[k] !== 'boolean') e[k] = 'Must be on or off.';
   return e;
 }

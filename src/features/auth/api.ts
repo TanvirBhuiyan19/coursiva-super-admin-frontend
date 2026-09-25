@@ -3,6 +3,7 @@ import { api } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/errors';
 import type { Resource } from '@/lib/api/types';
 import { rememberPermissions } from './permissionHint';
+import { resetIdleLock } from './useIdleLock';
 import type { LoginInput, LoginResult, User } from './types';
 
 export const authKeys = {
@@ -37,6 +38,7 @@ export function useLogin() {
     mutationFn: (input: LoginInput) => api.post<Resource<LoginResult>>('/auth/login', input).then((r) => r.data),
     onSuccess: (res) => {
       if (res.user) {
+        resetIdleLock();
         rememberPermissions(res.user);
         qc.setQueryData(authKeys.me, res.user);
       }
@@ -50,6 +52,7 @@ export function useTwoFactorChallenge() {
   return useMutation({
     mutationFn: (code: string) => api.post<Resource<User>>('/auth/two-factor-challenge', { code }).then((r) => r.data),
     onSuccess: (user) => {
+      resetIdleLock();
       rememberPermissions(user);
       qc.setQueryData(authKeys.me, user);
     },
@@ -63,8 +66,19 @@ export function useLogout() {
     mutationFn: () => api.post<undefined>('/auth/logout'),
     onSettled: () => {
       rememberPermissions(null);
+      resetIdleLock();
       qc.clear();
       qc.setQueryData(authKeys.me, null);
     },
+  });
+}
+
+/** Re-enters the password to unlock an idle-locked console (Fortify `POST /user/confirm-password` equivalent). */
+export function useConfirmPassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (password: string) => api.post<undefined>('/auth/confirm-password', { password }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['audit'] }),
+    meta: { errorToast: false },
   });
 }

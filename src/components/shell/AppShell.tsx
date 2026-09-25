@@ -1,6 +1,7 @@
-import { Suspense, useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { screenForPath } from '@/app/screens';
+import { IdleLock } from '@/features/auth/IdleLock';
 import { ImpersonationView, ProvisionTenantModal } from '@/features/tenants';
 import { lazyWithPreload, whenIdle } from '@/lib/lazy';
 import { useUi } from '@/store/ui';
@@ -22,6 +23,7 @@ export default function AppShell() {
   const impersonating = useUi((s) => s.impersonating);
   const setUi = useUi((s) => s.set);
   const content = useRef<HTMLElement>(null);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     whenIdle(() => {
@@ -51,7 +53,8 @@ export default function AppShell() {
   }, [screen]);
 
   return (
-    <div className={'shell' + (mobileNav ? ' nav-open' : '')}>
+    // While idle-locked the whole app is inert (no focus, clicks or screen-reader access) behind the lock screen.
+    <div className={'shell' + (mobileNav ? ' nav-open' : '')} inert={locked}>
       <a href="#main" className="skip-link">
         Skip to content
       </a>
@@ -79,6 +82,7 @@ export default function AppShell() {
         {impersonating && <ImpersonationView />}
       </Suspense>
       <Toasts />
+      <IdleLock onLockedChange={setLocked} />
     </div>
   );
 }

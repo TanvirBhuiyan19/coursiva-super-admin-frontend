@@ -14,7 +14,8 @@ Signed-in staff user. `401` when signed out.
     "email": "sam@coursiva.io",
     "role": "Owner",
     "two_factor_enabled": true,
-    "permissions": ["tenants.view", "tenants.manage", "…"]
+    "permissions": ["tenants.view", "tenants.manage", "…"],
+    "idle_lock_minutes": 15
   }
 }
 ```
@@ -37,6 +38,21 @@ Body: `{ "code": "123456" }` (TOTP; recovery codes may also be accepted).
 - `422 errors.code` for a wrong code · `419` if there is no pending login.
 
 Audit: `Signed in to the platform console (2FA)` (Auth).
+
+`idle_lock_minutes` is the platform idle-lock policy (`platform_settings.idle_lock_minutes`).
+
+## Idle lock — `POST /auth/confirm-password`
+
+The console locks itself after `idle_lock_minutes` without activity (tracked client-side across tabs; the lock
+survives reloads). Unlocking re-confirms the password without starting a new session — Laravel Fortify's
+password confirmation (`password.confirm`).
+
+Body: `{ "password": "…" }` → `204` · `422 errors.password` = `The provided password was incorrect.` · `401` if the
+session has already expired (the client then shows the login page). Rate-limit like login.
+Audit: `Unlocked the console after an idle lock` (Auth).
+
+The server must still enforce `session_hours` as the absolute session lifetime; the idle lock only protects an
+unattended, still-valid session.
 
 ## `POST /auth/logout`
 

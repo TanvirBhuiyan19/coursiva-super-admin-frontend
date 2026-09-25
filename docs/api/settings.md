@@ -83,3 +83,9 @@ Audit (Billing): `Updated tax & invoicing: Stripe Tax off, invoice numbering →
 ### `DELETE /settings/tax/regions/{id}`
 
 `204`. Checkout stops collecting tax there. Audit (Billing): `Removed tax registration for {region} — checkout stops collecting {kind}`.
+
+### `idle_lock_minutes`
+
+One of `5, 10, 15, 30, 60` (default `15`); `422 errors.idle_lock_minutes` = `Choose an idle lock of 5, 10, 15, 30 or 60 minutes.`
+Reported to every staff user in `GET /auth/me` → `idle_lock_minutes`. Distinct from `session_hours` (absolute
+session lifetime).

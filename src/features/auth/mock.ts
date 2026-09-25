@@ -1,6 +1,6 @@
 // Mock implementation of the auth endpoints (Laravel Sanctum SPA + Fortify-style 2FA).
 import { http } from 'msw';
-import { session, staff, type StaffRow } from '@/mocks/collections';
+import { platformSettings, session, staff, type StaffRow } from '@/mocks/collections';
 import { authorize, handle, HttpError, invalid, noContent, ok, permissionsOf, readBody, recordAudit, route } from '@/mocks/http';
 import type { LoginInput, User } from './types';
 
@@ -11,6 +11,7 @@ export const toUser = (s: StaffRow): User => ({
   role: s.role,
   twoFactorEnabled: s.twoFactorEnabled,
   permissions: permissionsOf(s),
+  idleLockMinutes: platformSettings.get().idleLockMinutes,
 });
 
 /** Mock 2FA code (a real backend verifies a TOTP). */
@@ -57,6 +58,18 @@ export const handlers = [
       const user = staff.update(pending, { lastSeenAt: new Date().toISOString() })!;
       recordAudit('Signed in to the platform console (2FA)', 'Auth');
       return ok(toUser(user));
+    }),
+  ),
+
+  // Laravel Fortify's password confirmation: unlocks an idle-locked console without a new session.
+  http.post(
+    route('/auth/confirm-password'),
+    handle(async ({ request }) => {
+      const user = authorize();
+      const { password } = await readBody<{ password: string }>(request);
+      if (!password || password !== user.password) throw invalid({ password: 'The provided password was incorrect.' });
+      recordAudit('Unlocked the console after an idle lock', 'Auth');
+      return noContent();
     }),
   ),
 

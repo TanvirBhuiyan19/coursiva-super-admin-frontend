@@ -615,6 +615,8 @@ export interface PlatformSettings {
   requireStaffTwoFactor: boolean;
   enforceSso: boolean;
   sessionHours: number;
+  /** Lock the console after this many minutes without activity (5, 10, 15, 30, 60). */
+  idleLockMinutes: number;
   weeklyDigest: boolean;
   billingAlerts: boolean;
   incidentAlerts: boolean;
@@ -629,6 +631,7 @@ export const platformSettings = singleton<PlatformSettings>('platformSettings', 
   requireStaffTwoFactor: true,
   enforceSso: false,
   sessionHours: 12,
+  idleLockMinutes: 15,
   weeklyDigest: true,
   billingAlerts: true,
   incidentAlerts: true,

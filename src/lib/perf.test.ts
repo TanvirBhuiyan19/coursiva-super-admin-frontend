@@ -14,6 +14,7 @@ const user = (permissions: User['permissions']): User => ({
   role: 'Support',
   twoFactorEnabled: true,
   permissions,
+  idleLockMinutes: 15,
 });
 
 describe('lazyWithPreload', () => {

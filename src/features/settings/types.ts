@@ -5,6 +5,8 @@ import type { Plan } from '@/lib/domain';
 export const SESSION_HOURS = [4, 8, 12, 24] as const;
 export type SessionHours = (typeof SESSION_HOURS)[number];
 
+export const IDLE_LOCK_MINUTES = [5, 10, 15, 30, 60] as const;
+
 /** The `platformSettings` singleton. */
 export interface PlatformSettings {
   supportEmail: string;
@@ -19,6 +21,8 @@ export interface PlatformSettings {
   enforceSso: boolean;
   /** Staff inactivity timeout: 4, 8, 12 or 24 hours. */
   sessionHours: number;
+  /** Idle lock: the console locks after this many minutes without activity (5, 10, 15, 30 or 60). */
+  idleLockMinutes: number;
   weeklyDigest: boolean;
   billingAlerts: boolean;
   incidentAlerts: boolean;

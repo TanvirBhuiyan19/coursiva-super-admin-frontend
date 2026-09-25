@@ -484,3 +484,16 @@ a.sb-sub.is-active {
   padding: 28px;
   box-shadow: var(--shCard);
 }
+
+/* ---------- Idle lock ---------- */
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  /* Opaque: nothing from the locked session is visible behind it. */
+  background: radial-gradient(1200px 600px at 10% -10%, var(--acT), transparent 60%), var(--pg);
+}
