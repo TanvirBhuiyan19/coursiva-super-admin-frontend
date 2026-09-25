@@ -1,0 +1,169 @@
+/* Base reset and global element styles. All colours come from tokens set by theme/themes.ts. */
+
+/* Self-hosted variable fonts (see main.tsx). Fallbacks are metric-matched so the swap causes no layout shift. */
+@font-face {
+  font-family: 'Instrument Sans Fallback';
+  src: local('Arial');
+  size-adjust: 97%;
+  ascent-override: 96%;
+  descent-override: 25%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Bricolage Grotesque Fallback';
+  src: local('Arial');
+  size-adjust: 102%;
+  ascent-override: 92%;
+  descent-override: 24%;
+  line-gap-override: 0%;
+}
+
+:root {
+  --font-body: 'Instrument Sans Variable', 'Instrument Sans Fallback', system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque Variable', 'Bricolage Grotesque Fallback', 'Instrument Sans Variable', sans-serif;
+  --font-mono: ui-monospace, Menlo, Consolas, monospace;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--tx);
+  background: var(--pg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--ac);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--acH);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+}
+
+/* Every form control gets explicit colours so dark mode never falls back to browser white fields. */
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--tx);
+  background: var(--card);
+  color-scheme: var(--cscheme);
+}
+option {
+  background: var(--card);
+  color: var(--tx);
+}
+::placeholder {
+  color: var(--tx4);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ac);
+  outline-offset: 2px;
+}
+
+.display {
+  font-family: var(--font-display);
+}
+.mono {
+  font-family: var(--font-mono);
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes drawerIn {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: var(--pg);
+}
+::-webkit-scrollbar-track {
+  background: var(--pg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--togOff);
+  border-radius: 5px;
+  border: 2px solid var(--pg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--tx4);
+}
+::-webkit-scrollbar-corner {
+  background: var(--pg);
+}
+
+/* Sidebar scrollbar only appears while scrolling. */
+.sidebar ::-webkit-scrollbar {
+  background: transparent;
+  width: 5px;
+}
+.sidebar ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar ::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+}
+.sidebar[data-scrolling] ::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
