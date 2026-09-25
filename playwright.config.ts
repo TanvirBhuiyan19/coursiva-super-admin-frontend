@@ -9,6 +9,8 @@ const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
  */
 export default defineConfig({
   testDir: './e2e',
+  // e2e/storybook runs against the component catalogue (playwright.storybook.config.ts).
+  testIgnore: /storybook\//,
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -25,7 +27,7 @@ export default defineConfig({
       name: 'desktop',
       use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/owner.json' },
       dependencies: ['setup'],
-      testIgnore: [/auth\.setup\.ts/, /responsive\.spec\.ts/],
+      testIgnore: [/auth\.setup\.ts/, /responsive\.spec\.ts/, /storybook\//],
     },
     {
       name: 'mobile',

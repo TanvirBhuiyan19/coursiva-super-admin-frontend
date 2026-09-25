@@ -36,3 +36,4 @@ test-results
 # playwright auth state
 e2e/.auth
 dist-perf
+storybook-static

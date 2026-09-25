@@ -5,10 +5,23 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import globals from 'globals';
 import i18next from 'eslint-plugin-i18next';
+import storybook from 'eslint-plugin-storybook';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dist-perf', 'coverage', 'playwright-report', 'test-results', 'public/mockServiceWorker.js'] },
+  ...storybook.configs['flat/recommended'],
+  {
+    ignores: [
+      'dist',
+      'dist-perf',
+      'coverage',
+      'playwright-report',
+      'test-results',
+      'public/mockServiceWorker.js',
+      'storybook-static',
+      '!.storybook',
+    ],
+  },
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.strictTypeChecked, jsxA11y.flatConfigs.recommended, prettier],
@@ -79,6 +92,11 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    // Storybook config and stories aren't hot-reloaded app modules.
+    files: ['.storybook/**', '**/*.stories.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
   },
   {
     // Build tooling and CLI scripts print to the console by design.

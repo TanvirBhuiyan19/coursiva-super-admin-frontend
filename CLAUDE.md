@@ -95,6 +95,14 @@ docs/openapi.yaml generated OpenAPI 3.1 spec (`npm run openapi`) — never edit 
   truncated strings). Add a language by adding a lazy loader per namespace: `defineMessages(ns, en, { bn: () => import('./i18n.bn') })`
   — missing keys fall back to English. Changing locale remounts the app (`I18nBoundary`).
 
+### Component catalogue (Storybook)
+
+- Every primitive in `components/ui` has a `<Name>.stories.tsx` next to it (CSF3, `satisfies Meta<typeof X>`). Add or
+  update a story when you add a primitive or a variant. `npm run storybook` (dev, :6006) · `npm run build-storybook`.
+- Toolbar globals mirror the console: theme (Light/Dark), brand colour, locale (incl. pseudo-locale). Stories get a
+  memory router and a query client from `.storybook/preview.tsx`.
+- `npm run test:storybook` runs axe (WCAG 2.2 AA) on every story in light and dark mode; CI fails on any violation.
+
 ### Performance
 
 - **Critical path is budgeted** (`scripts/check-bundle.ts`, initial JS ≤ 125 KB brotli). Anything not needed to render the first screen is lazy: overlays via `lazyWithPreload` (`@/lib/lazy`) + `whenIdle` preload; heavy feature UI exported lazily from the feature's `index.ts`.

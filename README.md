@@ -86,7 +86,8 @@ real-user Web Vitals reporting. Details in `CLAUDE.md` → Performance.
 
 Feature-sliced: each feature in `src/features/<name>/` owns its API types (the contract), hooks, mock
 handlers, components, pages and tests. Pages are routed automatically from `pages/<screenId>.page.tsx`.
-UI text is internationalised (typed per-feature catalogues, locale-aware formatting, pseudo-locale `en-XA` for QA —
+The UI primitives are catalogued in **Storybook** (`npm run storybook`), with an axe accessibility gate over every story
+(`npm run build-storybook && npm run test:storybook`). UI text is internationalised (typed per-feature catalogues, locale-aware formatting, pseudo-locale `en-XA` for QA —
 see _Internationalisation_ in `CLAUDE.md`). See **`CLAUDE.md`** for the full conventions, **`docs/api/`** for the API contract and **`docs/openapi.yaml`** for the
 generated OpenAPI 3.1 spec (`npm run openapi`; verified against the mock API by `src/test/contract.test.ts`).
 
