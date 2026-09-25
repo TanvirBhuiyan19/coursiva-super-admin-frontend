@@ -2,33 +2,9 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
 import type { Resource } from '@/lib/api/types';
+import type { NavBadges, Notification, PlatformStatus, SearchResult, SearchType } from './types';
 
-export interface PlatformStatus {
-  operational: boolean;
-  incident: { title: string; postedAt: string } | null;
-}
-
-export interface NavBadges {
-  support: number;
-}
-
-export interface Notification {
-  id: string;
-  text: string;
-  tone: 'good' | 'warn' | 'bad';
-  createdAt: string;
-  read: boolean;
-  href: string | null;
-}
-
-export type SearchType = 'tenant' | 'invoice' | 'ticket' | 'staff';
-export interface SearchResult {
-  type: SearchType;
-  id: string;
-  label: string;
-  sublabel: string;
-  href: string;
-}
+export type { NavBadges, Notification, PlatformStatus, SearchResult, SearchType } from './types';
 
 export const shellKeys = {
   status: ['platform', 'status'] as const,

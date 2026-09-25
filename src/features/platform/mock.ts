@@ -436,6 +436,8 @@ function findOr404<T>(row: T | undefined, what: string): T {
 
 type IdParams = { id: string };
 type KeyParams = { key: string };
+const SENDER_ACTIONS = ['pause', 'resume', 'dns-check'] as const;
+const CERTIFICATE_ACTIONS = ['revoke', 'reinstate'] as const;
 
 export const handlers = [
   // ---------- Feature flags ----------
@@ -536,32 +538,32 @@ export const handlers = [
     }),
   ),
 
-  http.post<{ id: string; action: string }>(
-    route('/platform/sender-domains/:id/:action'),
-    handle<{ id: string; action: string }>(({ params }) => {
-      authorize('platform.manage');
-      const s = findOr404(senders.find(params.id), 'Sender domain');
-      const name = tenantName(s.tenantId);
-      switch (params.action) {
-        case 'pause':
-          if (s.pausedAt) throw invalid({ paused: `Sending is already paused for ${name}.` });
-          senders.update(s.id, { pausedAt: new Date().toISOString() });
-          recordAudit(`Paused email sending for ${name}`, 'Tenants', s.tenantId);
-          break;
-        case 'resume':
-          if (!s.pausedAt) throw invalid({ paused: `Sending isn’t paused for ${name}.` });
-          senders.update(s.id, { pausedAt: null });
-          recordAudit(`Resumed email sending for ${name}`, 'Tenants', s.tenantId);
-          break;
-        case 'dns-check':
-          senders.update(s.id, { dnsCheckedAt: new Date().toISOString() });
-          recordAudit(`Re-checked DNS for ${s.domain}`, 'Tenants', s.tenantId);
-          break;
-        default:
-          throw notFound('Action');
-      }
-      return ok(toSender(s));
-    }),
+  ...SENDER_ACTIONS.map((action) =>
+    http.post<IdParams>(
+      route(`/platform/sender-domains/:id/${action}`),
+      handle<IdParams>(({ params }) => {
+        authorize('platform.manage');
+        const s = findOr404(senders.find(params.id), 'Sender domain');
+        const name = tenantName(s.tenantId);
+        switch (action) {
+          case 'pause':
+            if (s.pausedAt) throw invalid({ paused: `Sending is already paused for ${name}.` });
+            senders.update(s.id, { pausedAt: new Date().toISOString() });
+            recordAudit(`Paused email sending for ${name}`, 'Tenants', s.tenantId);
+            break;
+          case 'resume':
+            if (!s.pausedAt) throw invalid({ paused: `Sending isn’t paused for ${name}.` });
+            senders.update(s.id, { pausedAt: null });
+            recordAudit(`Resumed email sending for ${name}`, 'Tenants', s.tenantId);
+            break;
+          case 'dns-check':
+            senders.update(s.id, { dnsCheckedAt: new Date().toISOString() });
+            recordAudit(`Re-checked DNS for ${s.domain}`, 'Tenants', s.tenantId);
+            break;
+        }
+        return ok(toSender(s));
+      }),
+    ),
   ),
 
   // ---------- Certificate authority ----------
@@ -592,22 +594,24 @@ export const handlers = [
     }),
   ),
 
-  http.post<{ id: string; action: string }>(
-    route('/platform/certificates/:id/:action'),
-    handle<{ id: string; action: string }>(({ params }) => {
-      authorize('platform.manage');
-      const c = findOr404(certificates.find(params.id), 'Certificate');
-      if (params.action === 'revoke') {
-        if (c.revokedAt) throw invalid({ status: `${c.id} is already revoked.` });
-        certificates.update(c.id, { revokedAt: new Date().toISOString() });
-        recordAudit(`Revoked certificate ${c.id} (${c.learnerName})`, 'Security', c.tenantId);
-      } else if (params.action === 'reinstate') {
-        if (!c.revokedAt) throw invalid({ status: `${c.id} is not revoked.` });
-        certificates.update(c.id, { revokedAt: null });
-        recordAudit(`Reinstated certificate ${c.id} (${c.learnerName})`, 'Security', c.tenantId);
-      } else throw notFound('Action');
-      return ok(toCertificate(c));
-    }),
+  ...CERTIFICATE_ACTIONS.map((action) =>
+    http.post<IdParams>(
+      route(`/platform/certificates/:id/${action}`),
+      handle<IdParams>(({ params }) => {
+        authorize('platform.manage');
+        const c = findOr404(certificates.find(params.id), 'Certificate');
+        if (action === 'revoke') {
+          if (c.revokedAt) throw invalid({ status: `${c.id} is already revoked.` });
+          certificates.update(c.id, { revokedAt: new Date().toISOString() });
+          recordAudit(`Revoked certificate ${c.id} (${c.learnerName})`, 'Security', c.tenantId);
+        } else {
+          if (!c.revokedAt) throw invalid({ status: `${c.id} is not revoked.` });
+          certificates.update(c.id, { revokedAt: null });
+          recordAudit(`Reinstated certificate ${c.id} (${c.learnerName})`, 'Security', c.tenantId);
+        }
+        return ok(toCertificate(c));
+      }),
+    ),
   ),
 
   http.get(

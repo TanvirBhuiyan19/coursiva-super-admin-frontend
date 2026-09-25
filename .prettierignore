@@ -6,3 +6,4 @@ public/mockServiceWorker.js
 package-lock.json
 e2e/.auth
 dist-perf
+docs/openapi.yaml

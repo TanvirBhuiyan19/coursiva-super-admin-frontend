@@ -5,6 +5,7 @@ import type { Plan, Region } from '@/lib/domain';
 import { invalidateTenantData, useUpdateTenant } from '@/features/tenants/api';
 import type { TenantDetail } from '@/features/tenants/types';
 import type {
+  AbuseActionResult,
   AbuseSignal,
   BlockedIp,
   ComplianceSummary,
@@ -208,7 +209,7 @@ export function useResolveSignal() {
   return useMutation({
     mutationFn: ({ id, how }: { id: string; how: 'action' | 'dismiss' }) =>
       how === 'action'
-        ? api.post<Resource<{ signalId: string; outcome: string }>>(`/governance/abuse-signals/${id}/action`).then((r) => r.data)
+        ? api.post<Resource<AbuseActionResult>>(`/governance/abuse-signals/${id}/action`).then((r) => r.data)
         : api.post(`/governance/abuse-signals/${id}/dismiss`).then(() => null),
     onSuccess: (res, { id }) => {
       qc.setQueryData<AbuseSignal[]>(governanceKeys.signals, (rows) => rows?.filter((s) => s.id !== id));

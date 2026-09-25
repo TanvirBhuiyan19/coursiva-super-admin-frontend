@@ -132,6 +132,64 @@ const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
 type Params = { id: string };
 
+/** Single-purpose tenant actions (POST /tenants/{id}/{action}); each is its own route in the API. */
+const TENANT_ACTIONS = [
+  'suspend',
+  'reactivate',
+  'extend-trial',
+  'export',
+  'purge',
+  'revoke-sessions',
+  'reset-password',
+  'reissue-ssl',
+] as const;
+type TenantActionName = (typeof TENANT_ACTIONS)[number];
+
+function runTenantAction(action: TenantActionName, t: TenantRow) {
+  const set = (status: TenantStatus, text: string, perm: Parameters<typeof authorize>[0]) => {
+    authorize(perm);
+    tenants.update(t.id, { status });
+    recordAudit(text, 'Tenants', t.id);
+  };
+  switch (action) {
+    case 'suspend':
+      if (t.status === 'Suspended') throw invalid({ status: `${t.name} is already suspended.` });
+      set('Suspended', `Suspended ${t.name}`, 'tenants.suspend');
+      break;
+    case 'reactivate':
+      set(t.trialEndsAt && new Date(t.trialEndsAt).getTime() > Date.now() ? 'Trial' : 'Active', `Reactivated ${t.name}`, 'tenants.suspend');
+      break;
+    case 'extend-trial': {
+      authorize('tenants.manage');
+      if (t.status !== 'Trial') throw invalid({ status: 'Only tenants on a trial can be extended.' });
+      const base = t.trialEndsAt ? new Date(t.trialEndsAt).getTime() : Date.now();
+      tenants.update(t.id, { trialEndsAt: new Date(base + 14 * DAY).toISOString() });
+      recordAudit(`Extended ${t.name}'s trial by 14 days`, 'Tenants', t.id);
+      break;
+    }
+    case 'export':
+      authorize('tenants.manage');
+      recordAudit(`Queued full data export for ${t.name}`, 'Security', t.id);
+      break;
+    case 'purge':
+      authorize('tenants.purge');
+      recordAudit(`Scheduled data purge for ${t.name} (30-day grace period)`, 'Security', t.id);
+      break;
+    case 'revoke-sessions':
+      authorize('tenants.manage');
+      recordAudit(`Revoked all sessions for ${t.name}`, 'Security', t.id);
+      break;
+    case 'reset-password':
+      authorize('tenants.manage');
+      recordAudit(`Sent password reset to the owner of ${t.name}`, 'Security', t.id);
+      break;
+    case 'reissue-ssl':
+      authorize('tenants.manage');
+      recordAudit(`Reissued SSL certificate for ${t.domain}`, 'Security', t.id);
+      break;
+  }
+}
+
 export const handlers = [
   http.get(
     route('/tenants/summary'),
@@ -456,60 +514,15 @@ export const handlers = [
     }),
   ),
 
-  // Single-purpose actions: POST /tenants/:id/{action}
-  http.post<{ id: string; action: string }>(
-    route('/tenants/:id/:action'),
-    handle<{ id: string; action: string }>(({ params }) => {
-      const t = findTenant(params.id);
-      const set = (status: TenantStatus, text: string, perm: Parameters<typeof authorize>[0]) => {
-        authorize(perm);
-        tenants.update(t.id, { status });
-        recordAudit(text, 'Tenants', t.id);
-      };
-      switch (params.action) {
-        case 'suspend':
-          if (t.status === 'Suspended') throw invalid({ status: `${t.name} is already suspended.` });
-          set('Suspended', `Suspended ${t.name}`, 'tenants.suspend');
-          break;
-        case 'reactivate':
-          set(
-            t.trialEndsAt && new Date(t.trialEndsAt).getTime() > Date.now() ? 'Trial' : 'Active',
-            `Reactivated ${t.name}`,
-            'tenants.suspend',
-          );
-          break;
-        case 'extend-trial': {
-          authorize('tenants.manage');
-          if (t.status !== 'Trial') throw invalid({ status: 'Only tenants on a trial can be extended.' });
-          const base = t.trialEndsAt ? new Date(t.trialEndsAt).getTime() : Date.now();
-          tenants.update(t.id, { trialEndsAt: new Date(base + 14 * DAY).toISOString() });
-          recordAudit(`Extended ${t.name}'s trial by 14 days`, 'Tenants', t.id);
-          break;
-        }
-        case 'export':
-          authorize('tenants.manage');
-          recordAudit(`Queued full data export for ${t.name}`, 'Security', t.id);
-          break;
-        case 'purge':
-          authorize('tenants.purge');
-          recordAudit(`Scheduled data purge for ${t.name} (30-day grace period)`, 'Security', t.id);
-          break;
-        case 'revoke-sessions':
-          authorize('tenants.manage');
-          recordAudit(`Revoked all sessions for ${t.name}`, 'Security', t.id);
-          break;
-        case 'reset-password':
-          authorize('tenants.manage');
-          recordAudit(`Sent password reset to the owner of ${t.name}`, 'Security', t.id);
-          break;
-        case 'reissue-ssl':
-          authorize('tenants.manage');
-          recordAudit(`Reissued SSL certificate for ${t.domain}`, 'Security', t.id);
-          break;
-        default:
-          throw notFound('Action');
-      }
-      return ok(toDetail(t, authorize()));
-    }),
+  // Single-purpose actions: one explicit route each (mirrors the documented API).
+  ...TENANT_ACTIONS.map((action) =>
+    http.post<Params>(
+      route(`/tenants/:id/${action}`),
+      handle<Params>(({ params }) => {
+        const t = findTenant(params.id);
+        runTenantAction(action, t);
+        return ok(toDetail(t, authorize()));
+      }),
+    ),
   ),
 ];

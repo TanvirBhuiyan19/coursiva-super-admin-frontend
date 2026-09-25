@@ -182,6 +182,13 @@ export interface AbuseSignal {
 
 export type AbuseAction = 'freeze_checkout' | 'raise_limit' | 'acknowledge';
 
+/** Result of applying a signal's recommended action. */
+export interface AbuseActionResult {
+  signalId: string;
+  /** Operator-facing sentence describing what happened. */
+  outcome: string;
+}
+
 export interface RateLimit {
   plan: Plan;
   perMinute: number;

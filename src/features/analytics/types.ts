@@ -143,3 +143,10 @@ export interface Experiments {
   kpis: { running: number; significant: number; shipped90d: number; avgWinningLiftPct: number | null };
   experiments: Experiment[];
 }
+
+/** POST /analytics/health/queues/{queue}/retry result. */
+export interface QueueRetryResult {
+  /** Failed jobs pushed back onto the queue. */
+  requeued: number;
+  queue: JobQueue;
+}

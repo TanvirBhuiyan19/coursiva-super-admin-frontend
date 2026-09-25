@@ -122,3 +122,14 @@ export interface BackupActivity {
   createdAt: string;
   text: string;
 }
+
+/** PATCH /backup/settings body: any subset of the policy. */
+export type BackupSettingsUpdate = Partial<BackupSettings>;
+
+/** POST /backup/exports body. */
+export interface TenantExportInput {
+  tenantId: string;
+  format: ExportFormat;
+  /** Include media manifests (file lists + signed URLs), not the media itself. */
+  includeMedia: boolean;
+}

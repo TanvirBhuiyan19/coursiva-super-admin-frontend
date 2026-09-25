@@ -6,6 +6,24 @@ The frontend runs against a Mock Service Worker implementation of exactly this c
 
 The TypeScript types in `src/features/<feature>/types.ts` are the source of truth for every resource.
 
+## OpenAPI 3.1 spec
+
+**[`docs/openapi.yaml`](../openapi.yaml)** is the machine-readable version of this contract: every endpoint with its
+permission (`x-permission`), the audit entry it writes (`x-audit`), request/response schemas (snake_case wire format),
+pagination and error responses. It is generated — never edit it by hand:
+
+```bash
+npm run openapi         # regenerate after changing types.ts or a feature's openapi.ts
+npm run openapi:check   # CI: fails if the committed spec is stale
+```
+
+- Endpoints are declared per feature in `src/features/<feature>/openapi.ts` (DSL: `src/openapi/dsl.ts`); schemas are
+  generated from the feature's `types.ts`.
+- `src/test/contract.test.ts` keeps the spec honest: every mock route must be documented (and vice versa), and every
+  endpoint is called against the mock API with its example and its real JSON response validated against the schema.
+- Laravel side: import the spec into Scribe/Scramble comparisons, Postman/Insomnia, or validate responses in feature
+  tests (e.g. `spectator` / `league/openapi-psr7-validator`) so both implementations stay on one contract.
+
 ## Base URL
 
 ```

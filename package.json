@@ -20,7 +20,9 @@
     "prepare": "husky",
     "build:demo": "tsc -b && vite build --mode demo",
     "size": "node --experimental-strip-types scripts/check-bundle.ts",
-    "preview:prod": "node --experimental-strip-types scripts/preview-prod.ts"
+    "preview:prod": "node --experimental-strip-types scripts/preview-prod.ts",
+    "openapi": "node --experimental-strip-types scripts/openapi.ts",
+    "openapi:check": "node --experimental-strip-types scripts/openapi.ts --check"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
@@ -52,6 +54,8 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^2.1.1",
     "babel-plugin-react-compiler": "^1.0.0",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
@@ -64,10 +68,12 @@
     "lint-staged": "^17.5.1",
     "msw": "^2.15.0",
     "prettier": "^3.9.9",
+    "ts-json-schema-generator": "^2.9.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1",
     "vite": "^8.3.0",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.1",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": ">=22"

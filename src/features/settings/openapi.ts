@@ -1,0 +1,83 @@
+import { defineSpec, noContent, ref, resource } from '@/openapi/dsl';
+
+export const spec = defineSpec({
+  tag: 'Settings',
+  description:
+    'Platform-wide configuration: general, security and notification settings, the integration marketplace, and tax & invoicing.',
+  endpoints: [
+    { method: 'GET', path: '/settings', summary: 'Platform settings', auth: 'platform.view', response: resource(ref('PlatformSettings')) },
+    {
+      method: 'PATCH',
+      path: '/settings',
+      summary: 'Update platform settings',
+      description:
+        'Any subset of fields. `primary_domain` must be a verified platform domain; `trial_days` 7–60; `dunning_retries` 1–5; `session_hours` 4/8/12/24; `idle_lock_minutes` 5/10/15/30/60.',
+      auth: 'platform.manage',
+      body: ref('PlatformSettingsUpdate'),
+      response: resource(ref('PlatformSettings')),
+      audit: { text: 'Updated platform settings: {fields}', category: 'Security' },
+      example: { body: { trial_days: 21, weekly_digest: false } },
+    },
+    {
+      method: 'GET',
+      path: '/settings/integrations',
+      summary: 'Integration marketplace policies, adoption and requests',
+      auth: 'platform.view',
+      response: resource(ref('IntegrationSettings')),
+    },
+    {
+      method: 'PUT',
+      path: '/settings/integrations/policies/{key}',
+      summary: 'Turn an integration policy on or off',
+      auth: 'platform.manage',
+      path_params: { key: { type: 'string', description: 'Policy key, e.g. `byo_processor`.' } },
+      body: { type: 'object', required: ['enabled'], properties: { enabled: { type: 'boolean' } } },
+      response: resource(ref('IntegrationSettings')),
+      errors: [404],
+      audit: { text: 'Enabled/Disabled integration policy "{label}"', category: 'Security' },
+      example: { params: { key: 'byo_processor' }, body: { enabled: true } },
+    },
+    {
+      method: 'POST',
+      path: '/settings/integrations/requests/{id}/roadmap',
+      summary: 'Add a requested integration to the roadmap',
+      auth: 'platform.manage',
+      path_params: { id: { type: 'string', description: 'Request id, e.g. `rq_kajabi`.' } },
+      response: resource(ref('IntegrationSettings')),
+      errors: [404],
+      audit: { text: 'Added "{name}" to the integration roadmap', category: 'Security' },
+      example: { params: { id: 'rq_kajabi' } },
+    },
+    {
+      method: 'GET',
+      path: '/settings/tax',
+      summary: 'Tax & invoicing settings',
+      auth: 'platform.view',
+      response: resource(ref('TaxSettings')),
+    },
+    {
+      method: 'PATCH',
+      path: '/settings/tax',
+      summary: 'Update tax & invoicing',
+      description:
+        '`invoice_prefix`: 1–8 of A–Z, 0–9 or `-`. `next_invoice_number` is sequential and gap-free; it must be at least `min_next_invoice_number`.',
+      auth: 'platform.manage',
+      body: ref('TaxSettingsUpdate'),
+      response: resource(ref('TaxSettings')),
+      audit: { text: 'Updated tax & invoicing: {changes}', category: 'Billing' },
+      example: { body: { tax_inclusive: true, invoice_prefix: 'INV-' } },
+    },
+    {
+      method: 'DELETE',
+      path: '/settings/tax/regions/{id}',
+      summary: 'Remove a tax registration',
+      description: 'Checkout stops collecting tax for the region.',
+      auth: 'platform.manage',
+      path_params: { id: { type: 'string', description: 'Tax region id, e.g. `uk`.' } },
+      response: noContent(),
+      errors: [404],
+      audit: { text: 'Removed tax registration for {region} — checkout stops collecting {kind}', category: 'Billing' },
+      example: { params: { id: 'uk' } },
+    },
+  ],
+});

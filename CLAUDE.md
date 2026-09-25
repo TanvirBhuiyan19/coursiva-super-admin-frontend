@@ -27,6 +27,7 @@ src/
     types.ts      API resource types = the contract for Laravel
     api.ts        query keys + useQuery/useMutation hooks (the ONLY place that calls `api`)
     mock.ts       MSW handlers exporting `handlers` (auto-discovered) + feature-only mock tables
+    openapi.ts    endpoint definitions for docs/openapi.yaml (one per mock route; see src/openapi/dsl.ts)
     components/   feature components
     pages/<screenId>.page.tsx   default-exported page, auto-routed by screen id (see app/screens.ts)
     *.test.tsx    integration tests against the mock API
@@ -35,6 +36,7 @@ src/
   store/ui.ts     Zustand: theme, overlays, toasts. NEVER server data.
   styles/         base.css, ui.css, shell.css
 docs/api/         API contract, one markdown file per feature — keep it in sync with types.ts and mock.ts
+docs/openapi.yaml generated OpenAPI 3.1 spec (`npm run openapi`) — never edit by hand
 ```
 
 ## Rules
@@ -60,6 +62,7 @@ docs/api/         API contract, one markdown file per feature — keep it in syn
 - Feature-only tables: `collection<Row>('name', seed)` / `singleton('name', seed)` from `@/mocks/db` inside your `mock.ts`. Shared tables live in `mocks/collections.ts` (tenants, staff, audit, tickets, invoices, overages, dsars, flags, platformStatus, platformSettings, pricing, apiRateLimits, extensionSettings, extensionInclusions, entitlementOverrides, liveRoomAllowance, rolePermissions, notifications).
 - Shared rules live in `mocks/derive.ts` — use them, never re-implement: `tenantMrr`, `tenantHealth`, `tenantHealthScore`, `planLimits`/`effectiveLimits`, `extensionPlans`, `extensionPrice`, `moduleDefaultForPlan`/`moduleOnForPlan`. The ownership table is in `docs/api/README.md`; `src/test/cross-feature.test.ts` locks it in.
 - Times are ISO strings; seed relative times with `ago({ h: 3 })` / `fromNow({ d: 4 })`.
+- **Every mock route has an entry in the feature's `openapi.ts`** (explicit paths — no `/:action` catch-alls), with an `example` so the contract test can call it. Then run `npm run openapi`; `src/test/contract.test.ts` fails on undocumented routes or responses that don't match the schema.
 
 ### Permissions
 

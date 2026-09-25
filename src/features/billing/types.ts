@@ -145,3 +145,6 @@ export interface PromoInput {
   percentOff: number;
   duration: PromoDuration;
 }
+
+/** PUT /billing/pricing request body: every key is optional; only actual changes are applied and audited. */
+export type PricingUpdateInput = Partial<PricingUpdate>;
