@@ -73,16 +73,21 @@ export default function CommandPalette() {
     return [...actions, ...screens];
   }, [can, navigate, setUi, toggleUiMode, t]);
 
-  const remote: Item[] = (wantsRemote ? (search.data ?? []) : []).map((r) => ({
-    key: `${r.type}:${r.id}`,
-    label: r.label,
-    sub: r.sublabel,
-    glyph: GLYPH[r.type],
-    group: GROUP_OF[r.type],
-    run: () => navigate(r.href),
-  }));
-
   const lower = term.toLowerCase();
+  // Until the debounced search catches up, the remote results belong to an older query: narrow them to what's typed
+  // now, so a fast "type + Enter" can never open a result that doesn't match.
+  const stale = debounced !== term;
+  const remote: Item[] = (wantsRemote ? (search.data ?? []) : [])
+    .filter((r) => !stale || `${r.label} ${r.sublabel}`.toLowerCase().includes(lower))
+    .map((r) => ({
+      key: `${r.type}:${r.id}`,
+      label: r.label,
+      sub: r.sublabel,
+      glyph: GLYPH[r.type],
+      group: GROUP_OF[r.type],
+      run: () => navigate(r.href),
+    }));
+
   let items: Item[];
   if (scope && !remoteType) items = local.filter((i) => i.group === scope && (!lower || i.label.toLowerCase().includes(lower)));
   else if (scope) items = remote;

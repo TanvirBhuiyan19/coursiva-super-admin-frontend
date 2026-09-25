@@ -54,6 +54,17 @@ export default function AppShell() {
     content.current?.scrollTo(0, 0);
   }, [screen, t]);
 
+  // Client-side navigation is silent for assistive tech: when the screen changes (not on first load, and not for
+  // in-screen routes like a tenant drawer), move focus to the content and announce the new screen.
+  const [announcement, setAnnouncement] = useState('');
+  const previousScreen = useRef(screen?.id);
+  useEffect(() => {
+    if (!screen || screen.id === previousScreen.current) return;
+    previousScreen.current = screen.id;
+    content.current?.focus({ preventScroll: true });
+    setAnnouncement(t('routeAnnouncement', { screen: screen.title }));
+  }, [screen, t]);
+
   return (
     // While idle-locked the whole app is inert (no focus, clicks or screen-reader access) behind the lock screen.
     <div className={'shell' + (mobileNav ? ' nav-open' : '')} inert={locked}>
@@ -84,6 +95,9 @@ export default function AppShell() {
         {impersonating && <ImpersonationView />}
       </Suspense>
       <Toasts />
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
       <IdleLock onLockedChange={setLocked} />
     </div>
   );

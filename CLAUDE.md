@@ -95,6 +95,12 @@ docs/openapi.yaml generated OpenAPI 3.1 spec (`npm run openapi`) — never edit 
   truncated strings). Add a language by adding a lazy loader per namespace: `defineMessages(ns, en, { bn: () => import('./i18n.bn') })`
   — missing keys fall back to English. Changing locale remounts the app (`I18nBoundary`).
 
+### Accessibility
+
+- WCAG 2.2 AA. Read `docs/accessibility.md` (gates, audit log, screen-reader script) before changing shell, dialogs or
+  focus handling. State must never be colour-only — also check `forced-colors: active` (block at the end of `ui.css`).
+- Client-side navigation focuses `#main` and announces the screen (AppShell); in-screen routes manage their own focus.
+
 ### Component catalogue (Storybook)
 
 - Every primitive in `components/ui` has a `<Name>.stories.tsx` next to it (CSF3, `satisfies Meta<typeof X>`). Add or

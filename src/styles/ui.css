@@ -933,3 +933,52 @@
 .row-link-block:hover {
   color: inherit;
 }
+
+/* ---------- Windows High Contrast / forced colours ----------
+   Forced colours strip backgrounds and box-shadows, so every state that is shown by fill alone gets a
+   system-colour border or fill instead (toggles, selected chips/segments/rows/nav, progress, status dots). */
+@media (forced-colors: active) {
+  .toggle {
+    border: 1px solid ButtonText;
+  }
+  .toggle > span {
+    background: ButtonText;
+    forced-color-adjust: none;
+  }
+  .toggle.is-on {
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+  .toggle.is-on > span {
+    background: HighlightText;
+  }
+  .chip.is-on,
+  .seg > button.is-on,
+  .trow.is-selected,
+  .sb-item.is-active,
+  [aria-pressed='true'],
+  [aria-selected='true'],
+  [aria-current='page'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .bar {
+    border: 1px solid CanvasText;
+  }
+  /* !important: fills and dot colours are inline styles (data-driven tones). */
+  .bar > span,
+  .dot {
+    background: CanvasText !important;
+    forced-color-adjust: none;
+  }
+  .badge,
+  .sb-badge {
+    border: 1px solid currentColor;
+  }
+  .skeleton {
+    border: 1px dashed GrayText;
+  }
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}

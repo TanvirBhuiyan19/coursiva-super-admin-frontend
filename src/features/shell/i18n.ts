@@ -6,6 +6,8 @@ export const { t, useT } = defineMessages('shell', {
   documentTitle: '{screen} · Coursiva console',
   documentTitleFallback: 'Coursiva console',
   skipToContent: 'Skip to content',
+  /** Announced to screen readers after client-side navigation. */
+  routeAnnouncement: '{screen} page',
   sidebar: {
     label: 'Console navigation',
     homeLabel: 'Coursiva platform console — home',

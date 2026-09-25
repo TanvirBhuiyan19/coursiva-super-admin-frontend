@@ -85,6 +85,11 @@ option {
   outline: 2px solid var(--ac);
   outline-offset: 2px;
 }
+/* Non-interactive focus targets (the content area after navigation, dialog panels) take focus only so screen
+   readers start reading there; a ring around the whole region would be noise. */
+[tabindex='-1']:focus-visible {
+  outline: none;
+}
 
 .display {
   font-family: var(--font-display);
