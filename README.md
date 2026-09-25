@@ -49,7 +49,14 @@ Copy `.env.example` to `.env.local` and adjust:
 | `VITE_API_URL`      | Laravel base URL, e.g. `https://api.coursiva.io` (empty = same origin) |
 | `VITE_API_PREFIX`   | API prefix, default `/api/v1/admin`                                    |
 | `VITE_ENABLE_MOCKS` | `true` serves the API from Mock Service Worker                         |
-| `VITE_SENTRY_DSN`   | Error reporting (hook in `src/lib/reportError.ts`)                     |
+| `VITE_SENTRY_DSN`   | Sentry DSN — enables error reporting (lazy, errors only, no PII)       |
+
+## Error reporting
+
+Set `VITE_SENTRY_DSN` to enable Sentry. The SDK (≈27 KB brotli) loads after first paint, reports errors only,
+collects no personal data (user = id + role), and scrubs auth headers, bodies and query strings. For readable stack
+traces, set the `SENTRY_AUTH_TOKEN` repository secret and `SENTRY_ORG` / `SENTRY_PROJECT` variables: CI then
+uploads the hidden source maps for each release (`VITE_RELEASE` = commit SHA).
 
 ## Stack
 

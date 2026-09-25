@@ -4,6 +4,8 @@ import { lazy, Suspense } from 'react';
 import { env } from '@/config/env';
 import { authKeys } from '@/features/auth/api';
 import { onUnauthenticated } from '@/lib/api/client';
+import { setReportingUser } from '@/lib/reportError';
+import { useSession } from '@/features/auth/api';
 import { useUi } from '@/store/ui';
 import { applyTokens } from '@/theme/themes';
 
@@ -31,11 +33,19 @@ function SessionExpiry() {
 }
 
 /** `client` is created in main.tsx before the router, so route loaders can prefetch on the very first navigation. */
+/** Tags error reports with the signed-in staff member (id + role). */
+function ReportingUser() {
+  const { data: user } = useSession();
+  useEffect(() => setReportingUser(user ? { id: user.id, role: user.role } : null), [user]);
+  return null;
+}
+
 export function AppProviders({ client, children }: { client: QueryClient; children: ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <ThemeSync />
       <SessionExpiry />
+      <ReportingUser />
       {children}
       {Devtools && (
         <Suspense fallback={null}>

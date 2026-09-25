@@ -11,6 +11,7 @@ import { AppProviders } from '@/app/providers';
 import { createRouter } from '@/app/router';
 import { useUi } from '@/store/ui';
 import { whenIdle } from '@/lib/lazy';
+import { initErrorReporting, reportError } from '@/lib/reportError';
 import { createQueryClient, setActiveQueryClient } from '@/lib/queryClient';
 import { applyTokens } from '@/theme/themes';
 
@@ -37,6 +38,10 @@ async function bootstrap() {
       </AppProviders>
     </StrictMode>,
   );
+
+  // Error reporting (Sentry, only when a DSN is configured) — loaded right after first paint.
+  void initErrorReporting();
+  window.addEventListener('unhandledrejection', (e) => reportError(e.reason, { source: 'unhandledrejection' }));
 
   // Real-user Web Vitals, loaded once the app is idle (separate chunk, off the critical path).
   whenIdle(() => void import('@/lib/vitals').then((m) => m.startVitals()));

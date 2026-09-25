@@ -28,6 +28,10 @@ jobs:
       - run: npm run build
         env:
           VITE_RELEASE: ${{ github.sha }}
+          # Optional: set these repository secrets/vars to upload source maps to Sentry.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
       - name: Bundle budgets
         run: npm run size
       - uses: actions/upload-artifact@v4

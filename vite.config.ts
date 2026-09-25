@@ -2,9 +2,10 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import babel from '@rolldown/plugin-babel';
+import { sentryVitePlugin } from '@sentry/vite-plugin';
 import react, { reactCompilerPreset } from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
-import { precompress } from './build/precompress';
+import { precompress } from './build/precompress.ts';
 
 /** Long-lived vendor chunks: they change rarely, so browsers keep them cached across app deploys. */
 const VENDOR_GROUPS = [
@@ -60,6 +61,19 @@ export default defineConfig({
     // React Compiler: automatic memoization of components and hooks (fewer re-renders, less blocking time).
     // Skipped under Vitest (Babel per lazily-imported page slows tests); Playwright e2e verifies the compiled app.
     ...(process.env.VITEST ? [] : [babel({ presets: [reactCompilerPreset({ sources: compilerSources })] })]),
+    // Uploads the hidden source maps to Sentry from CI (only when SENTRY_AUTH_TOKEN is set), then deletes them.
+    ...(process.env.SENTRY_AUTH_TOKEN
+      ? [
+          sentryVitePlugin({
+            org: process.env.SENTRY_ORG,
+            project: process.env.SENTRY_PROJECT,
+            authToken: process.env.SENTRY_AUTH_TOKEN,
+            release: { name: process.env.VITE_RELEASE },
+            sourcemaps: { filesToDeleteAfterUpload: ['dist/**/*.map'] },
+            telemetry: false,
+          }),
+        ]
+      : []),
   ],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
