@@ -35,7 +35,7 @@ jobs:
           SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
       - name: Bundle budgets
         run: npm run size
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist
           path: dist
@@ -55,7 +55,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-report
@@ -77,7 +77,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build-storybook
       - run: npm run test:storybook
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: storybook
           path: storybook-static
