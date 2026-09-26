@@ -236,6 +236,9 @@
 .content {
   flex: 1;
   overflow-y: auto;
+  /* Containing block for absolute descendants (e.g. .sr-only) so they scroll with — and are clipped by — the
+     content region instead of resolving against <body> and stretching the document past 100vh. */
+  position: relative;
 }
 .menu-btn {
   display: none;
