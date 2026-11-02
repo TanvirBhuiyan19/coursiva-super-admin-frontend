@@ -47,6 +47,10 @@ A cell set equal to its plan default removes the override.
 | `cells.{i}.enabled`   | boolean                                                                               |
 
 Side effects: every tenant on that plan gets the new module default (tenant detail `modules`); the overview's `entitlement_overrides` count changes.
+
+A request that turns any cell **off** needs a password confirmed in the last 15 minutes (`423 password_confirmation_required`, see [auth.md](auth.md)); turning modules on doesn't. The console asks for the module
+name typed back in a dialog that names how many schools are on the plan (`GET /tenants?plan=…&per_page=1` → `meta.total`,
+when the viewer has `tenants.view`).
 Audit (Flags), per changed cell: `{module} added to the {plan} plan` · `{module} removed from the {plan} plan`.
 
 ## `DELETE /entitlements/overrides`
@@ -56,7 +60,9 @@ Audit (Flags): `Reset {n} entitlement override(s) to plan defaults` (only when t
 
 ## `GET /entitlements/limits`
 
-`{ data: [{ key, values: [{ plan, value }], managed_by: "media" | null }] }` for `storage_gb, staff_seats, api_per_minute, students, courses, live_room_minutes`.
+`{ data: [{ key, values: [{ plan, value }], managed_by: "media" | null }] }` for `storage_gb, staff_seats, api_per_minute, students, courses, live_room_minutes`
+(`key` is a snake_case value — the API client camelises object keys only; the console maps it with `limitKeyOf`).
+AI and SMS credits are per-tenant limits only (tenant drawer), not shown here.
 **`0` = unlimited** (for `live_room_minutes`, `0` = built-in rooms off, BYO provider only).
 `live_room_minutes` comes from the live-room policy and is edited with `PATCH /media/live-rooms` ([media.md](media.md)).
 Every limit can be overridden per tenant with `PUT /tenants/{id}/limits`.

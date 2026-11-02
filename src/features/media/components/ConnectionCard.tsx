@@ -1,5 +1,6 @@
-import { useId, useState } from 'react';
-import { ConfirmButton, Dot, FormError } from '@/components/ui';
+import { useId, useState, type ReactNode } from 'react';
+import type { UseMutationResult } from '@tanstack/react-query';
+import { ConfirmButton, Dot, FormError, Seg } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { toCamel } from '@/lib/api/case';
 import { ApiError, errorMessage } from '@/lib/api/errors';
@@ -7,33 +8,61 @@ import { timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useConnect, useDisconnect, type ConnectionKind } from '../api';
 import { useT } from '../i18n';
-import type { Connection } from '../types';
+import type { Connection, ConnectionTest, CredentialsInput } from '../types';
+
+type SaveInput = CredentialsInput & { key: string };
 
 interface Props {
-  kind: ConnectionKind;
   connection: Connection;
+  /** Connect & verify / replace credentials. */
+  save: UseMutationResult<Connection, Error, SaveInput>;
+  disconnect: UseMutationResult<Connection, Error, string>;
+  /** Re-verifies the stored credentials, when the endpoint offers it. */
+  test?: UseMutationResult<ConnectionTest, Error, string>;
   /** Show the provider's initial as a badge (DRM providers). */
   badge?: boolean;
   connectedToast: string;
   disconnectedToast: string;
+  /** Whether the viewer may change it (default: platform.manage). */
+  manage?: boolean;
+  /** Extra controls under the credentials (e.g. the Connections screen's "Available to schools" switches). */
+  children?: ReactNode;
+}
+
+/** A media connection (DRM provider or storage backend) with its media endpoints. */
+export function MediaConnectionCard({ kind, ...props }: Omit<Props, 'save' | 'disconnect' | 'test'> & { kind: ConnectionKind }) {
+  const save = useConnect(kind);
+  const disconnect = useDisconnect(kind);
+  return <ConnectionCard {...props} save={save} disconnect={disconnect} />;
 }
 
 /**
  * A connectable service with masked credential inputs. Stored values are never sent to the browser:
- * configured fields show the last four characters, and typing a value replaces it on save.
+ * configured fields show the last four characters, and typing a value replaces it on save (blank keeps it).
+ * The server verifies credentials with the provider before saving; its refusal is shown on the card.
  */
-export function ConnectionCard({ kind, connection: c, badge, connectedToast, disconnectedToast }: Props) {
+export function ConnectionCard({
+  connection: c,
+  badge,
+  connectedToast,
+  disconnectedToast,
+  save: connect,
+  disconnect,
+  test,
+  manage: manageProp,
+  children,
+}: Props) {
   const t = useT();
   const can = useCan();
-  const manage = can('platform.manage');
-  const connect = useConnect(kind);
-  const disconnect = useDisconnect(kind);
+  const manage = manageProp ?? can('platform.manage');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [shown, setShown] = useState<string[]>([]);
   const uid = useId();
   const typed = Object.values(drafts).some((v) => v.trim());
   const apiErr = connect.error instanceof ApiError && connect.error.isValidation ? connect.error : null;
   const fieldError = (key: string) => apiErr?.field(`credentials.${toCamel(key)}`);
+  // A provider refusing the credentials as a whole (e.g. "Stripe rejected these credentials: …").
+  const rejected = apiErr?.field('credentials');
 
   const save = () =>
     connect.mutate(
@@ -111,13 +140,46 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
           const vis = !fd.secret || shown.includes(fd.key);
           const err = fieldError(fd.key);
           const errId = `${uid}-${fd.key}`;
+          if (fd.options) {
+            // A fixed choice: a switch, never a text box. Picking the stored value again clears the draft.
+            const stored = fd.value ?? fd.default ?? fd.options[0]?.value ?? '';
+            return (
+              <div key={fd.key} className="hstack" style={{ gap: 9, alignItems: 'center' }}>
+                <span className="faint" style={{ fontSize: 11.5 }}>
+                  {fd.label}
+                </span>
+                <Seg
+                  label={t('connection.fieldLabel', { name: c.name, label: fd.label })}
+                  options={fd.options.map((o) => [o.value, o.label] as const)}
+                  value={drafts[fd.key] || stored}
+                  disabled={!manage}
+                  onChange={(v) =>
+                    setDrafts((m) => {
+                      const { [fd.key]: _drop, ...rest } = m;
+                      return v === stored ? rest : { ...m, [fd.key]: v };
+                    })
+                  }
+                />
+                {err && (
+                  <div id={errId} className="field-error" role="alert">
+                    {err}
+                  </div>
+                )}
+              </div>
+            );
+          }
           return (
             <div key={fd.key}>
               <div className="hstack" style={{ gap: 7 }}>
                 <input
                   className="input"
                   type={vis ? 'text' : 'password'}
-                  autoComplete="off"
+                  // Browsers ignore "off" on password inputs and fill in the signed-in user's saved login (it ended up
+                  // in API-token fields); "new-password" marks it as a new secret, and the data-* opt password managers out.
+                  autoComplete={vis ? 'off' : 'new-password'}
+                  data-1p-ignore
+                  data-lpignore="true"
+                  data-bwignore
                   value={drafts[fd.key] ?? ''}
                   placeholder={
                     fd.value
@@ -155,12 +217,30 @@ export function ConnectionCard({ kind, connection: c, badge, connectedToast, dis
           );
         })}
       </div>
+      {children}
+      {rejected && <FormError>{rejected}</FormError>}
       {connect.error && !apiErr && <FormError>{errorMessage(connect.error)}</FormError>}
       {manage && (
         <div className="hstack" style={{ gap: 8, marginTop: 'auto', paddingTop: 10 }}>
           {(!c.connected || typed) && (
             <button type="button" className="btn btn--sm" style={{ flex: 1 }} disabled={connect.isPending} onClick={save}>
               {connect.isPending ? t('connection.verifying') : c.connected ? t('connection.reverify') : t('connection.connect')}
+            </button>
+          )}
+          {c.connected && test && !typed && (
+            <button
+              type="button"
+              className="btn btn--sm"
+              style={{ flex: 1 }}
+              disabled={test.isPending}
+              onClick={() =>
+                test.mutate(c.key, {
+                  onSuccess: (r) =>
+                    toast(r.ok ? t('connection.testOk', { name: c.name, ms: r.latencyMs }) : r.message, r.ok ? 'default' : 'error'),
+                })
+              }
+            >
+              {test.isPending ? t('connection.testing') : t('connection.test')}
             </button>
           )}
           {c.connected && (

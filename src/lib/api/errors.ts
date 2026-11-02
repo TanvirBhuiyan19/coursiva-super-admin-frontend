@@ -26,6 +26,10 @@ export class ApiError extends Error {
   get isNotFound() {
     return this.status === 404;
   }
+  /** 423: the password must be confirmed before this change (step-up authentication). */
+  get isPasswordConfirmationRequired() {
+    return this.status === 423;
+  }
   /** First message for a field (field names are camelCase). */
   field(name: string) {
     return this.fieldErrors[name]?.[0];

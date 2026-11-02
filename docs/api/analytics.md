@@ -78,6 +78,50 @@ Rules:
 - `top_consumers`: top 5 by `share_pct` = mean of the tenant's share of each of the four meters.
   `overage` is the tenant's first **unbilled** overage (same table as Revenue), else `null`.
 
+## `GET /analytics/live`
+
+Analytics → **Live usage** (`/analytics/live`). Query: `period` = `YYYY-MM`, one of the last 12 months (default this
+month; `422` otherwise).
+
+```json
+{
+  "data": {
+    "period": "2026-11-01",
+    "periods": ["2026-11-01", "2026-10-01"],
+    "totals": {
+      "room_minutes": 18400,
+      "sessions": 42,
+      "attendees": 960,
+      "participant_minutes": 37100,
+      "peak_concurrency": 86,
+      "schools": 7
+    },
+    "trend": [{ "period": "2026-06-01", "room_minutes": 9100, "sessions": 20, "attendees": 410 }],
+    "daily": [{ "date": "2026-11-01", "sessions": 3, "peak_concurrency": 40 }],
+    "tenants": [
+      {
+        "tenant_id": "tn_amplify",
+        "name": "Amplify Coaching",
+        "room_minutes": 5200,
+        "allowance": 10000,
+        "used_pct": 52,
+        "sessions": 12,
+        "attendees": 300,
+        "participant_minutes": 11000,
+        "peak_concurrency": 86
+      }
+    ]
+  }
+}
+```
+
+- `room_minutes`: the `live_room_minutes` billing meter (participant-minutes in built-in rooms, learners and hosts);
+  `allowance` is the plan's included minutes (0 = none, then `used_pct` is `null`).
+- `sessions`, `attendees`, `participant_minutes`, `peak_concurrency` (most learners in one school's rooms in one minute)
+  come from the schools' daily live rollup, measured hourly.
+- `trend`: six months ending with `period`; `daily`: each day of the month up to today (sessions, busiest school's
+  peak); `tenants`: top 20 by room minutes.
+
 ## System health
 
 ### `GET /analytics/health`
@@ -92,7 +136,9 @@ Rules:
 }
 ```
 
-`status`: `Operational · Degraded · Outage`. Uptime is over 90 days; deliverability over 7 days.
+`status`: `Operational · Degraded · Outage`. Uptime is over 90 days; deliverability over 7 days. The bounce and
+complaint percentages are of the mail sent in those 7 days, counted from the providers' bounce/complaint webhooks
+(Postmark, SendGrid — backend docs/communications.md → Bounces and complaints); 0 until any arrive.
 The platform incident banner is **not** part of this resource. The page reads `GET /status` (shell), which is already cached.
 
 ### `POST /analytics/health/queues/{queue}/retry`
@@ -110,33 +156,45 @@ category of the Flags & system status screen, which covers platform operations.
 {
   "data": {
     "settings": { "monthly_cap": 2500, "routing_policy": "cost_first" },
-    "pricing": { "cost_per_1k": 0.42, "billed_per_1k": 0.6, "allowances": [{ "plan": "Launch", "tokens_k": 150 }] },
-    "totals": { "spend": 1598.94, "tokens_k": 3807, "tenants": 7, "throttled": 0, "cap_used_pct": 64 },
+    "pricing": { "cost_per_1k": 0.42, "billed_per_1k": 0.6, "allowances": [{ "plan": "Launch", "tokens_k": 50 }] },
+    "totals": { "spend": 1808.94, "tokens_k": 4307, "tenants": 7, "throttled": 0, "model_cost": 1335.17, "cap_used_pct": 72 },
     "tenants": [
       {
         "tenant_id": "tn_devpath",
         "name": "DevPath Bootcamp",
         "plan": "Scale",
-        "tokens_k": 1980,
-        "allowance_k": 1500,
-        "cost": 831.6,
+        "tokens_k": 2480,
+        "allowance_k": 2000,
+        "cost": 1041.6,
         "billed": 288,
+        "model_cost": 768.8,
         "margin_pct": 30,
         "top_feature": "summaries",
         "throttled": false
       }
     ],
-    "by_feature": [{ "feature": "summaries", "cost": 579.6, "share_pct": 36 }]
+    "by_feature": [{ "feature": "summaries", "cost": 695.1, "share_pct": 38 }]
   }
 }
 ```
+
+Units: the backend meters AI as **credits** on the school's `ai_credits` meter (1 credit ≈ 1 token-equivalent at
+fixed per-task rates), so every `tokens_k` / `allowance_k` / `*_per_1k` here is in **thousands of credits** — the field
+names are kept for compatibility. Plan allowances (`pricing.allowances`, the `ai_credits` plan limits): Launch 50,000 ·
+Growth 600,000 · Scale 2,000,000 credits (`tokens_k` 50 · 600 · 2,000).
 
 Rules (per tenant, this month):
 
 - `allowance_k` comes from the tenant's plan (`pricing.allowances`). `cost = tokens_k × cost_per_1k`.
 - `billed = max(0, tokens_k − allowance_k) × billed_per_1k`.
+- `model_cost` is what the model calls **really** cost in USD (the backend sums `cost_micros` of every AI studio
+  charge in `ai_usage` this month, ÷ 1,000,000, rounded to cents), shown beside `cost` (the credit cost at
+  `cost_per_1k`); `totals.model_cost` is the sum of the tenant rows, rounded to cents. It does not feed `margin_pct`.
+  The mock has no per-call rows, so it uses one blended rate: `model_cost = tokens_k × 0.31`
+  (`AI_MODEL_COST_PER_1K` in `src/features/analytics/mock.ts`). The screen shows it as the "Model cost · MTD" KPI and
+  the "Model cost" column (next to "Credit cost").
 - `margin_pct = (MRR + billed − cost) ÷ (MRR + billed)`, using the tenant's paying MRR (`tenantMrr`). `null` when revenue is 0 (trial or suspended).
-- `feature`: `outlines · quizzes · summaries · chat`. `by_feature` splits each tenant's tokens 55 % to their `top_feature` and the rest 20/15/10 %.
+- `feature`: `outlines · quizzes · summaries · chat`. `by_feature` splits each tenant's credits 55 % to their `top_feature` and the rest 20/15/10 %.
 - `routing_policy`: `cost_first · balanced · quality_first`.
 
 ### `PUT /analytics/ai/settings`

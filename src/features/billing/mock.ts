@@ -4,7 +4,20 @@ import { PLANS, type Plan } from '@/lib/domain';
 import { invoices, liveRoomAllowance, overages, platformSettings, pricing, tenants, type InvoiceRow } from '@/mocks/collections';
 import { ago, collection, id } from '@/mocks/db';
 import { tenantMrr } from '@/mocks/derive';
-import { authorize, handle, invalid, noContent, notFound, ok, paginate, query, readBody, recordAudit, route } from '@/mocks/http';
+import {
+  authorize,
+  handle,
+  HttpError,
+  invalid,
+  noContent,
+  notFound,
+  ok,
+  paginate,
+  query,
+  readBody,
+  recordAudit,
+  route,
+} from '@/mocks/http';
 import { PLAN_LIMITS } from '@/mocks/reference';
 import {
   PROMO_DURATIONS,
@@ -69,11 +82,6 @@ export const promoCodes = collection<PromoRow>('promoCodes', () => [
 ]);
 
 // ---------- Reference (config in Laravel) ----------
-const PLAN_HIGHLIGHT: Record<Plan, string> = {
-  Launch: '“Powered by Coursiva” branding',
-  Growth: 'White-label + custom domain',
-  Scale: 'SSO (SAML) & priority support',
-};
 /** Movement as a signed share of MRR for the last closed month (seeded; Laravel reads the MRR ledger). */
 const MOVEMENTS = [
   { kind: 'new', label: 'New business', share: 0.08 },
@@ -111,7 +119,10 @@ const toInvoice = (v: InvoiceRow): Invoice => ({
   attempts: v.attempts,
   nextRetryAt: v.dunningPaused ? null : v.nextRetryAt,
   dunningPaused: v.dunningPaused,
+  provider: v.provider ?? null,
 });
+
+const PROVIDER_NAMES = { paddle: 'Paddle', lemon_squeezy: 'Lemon Squeezy' } as const;
 
 const sortedInvoices = () => [...invoices.all()].sort((a, b) => b.issuedAt.localeCompare(a.issuedAt) || b.number.localeCompare(a.number));
 
@@ -120,9 +131,16 @@ function findInvoice(invoiceId: string | readonly string[] | undefined) {
   if (!v) throw notFound('Invoice');
   return v;
 }
+/** Coursiva can only act on its own past-due invoices: a merchant of record retries its invoices itself. */
 function requirePastDue(v: InvoiceRow) {
   if (v.status !== 'Past due') throw invalid({ status: `Invoice ${v.number} is already ${v.status.toLowerCase()}.` });
+  if (v.provider) {
+    const name = PROVIDER_NAMES[v.provider];
+    throw invalid({ status: `${v.number} is billed by ${name}, which retries it on its own schedule. Manage it in ${name}.` });
+  }
 }
+/** The school's merchant of record (a real backend reads its subscription; the mock looks at its invoices). */
+const billedBy = (tenantId: string) => invoices.where((v) => v.tenantId === tenantId && !!v.provider)[0]?.provider ?? null;
 /** A tenant leaves dunning once it has no past-due invoices left. */
 function settleTenant(tenantId: string) {
   const t = tenants.find(tenantId);
@@ -162,7 +180,8 @@ function pricingConfig(): PricingConfig {
         payingTenants: rows.filter((t) => tenantMrr(t) > 0).length,
         mrr: rows.reduce((s, t) => s + tenantMrr(t), 0),
         limits: { staffSeats: limits.staffSeats, students: limits.students, storageGb: limits.storageGb, liveRoomMinutes: live[plan] },
-        highlight: PLAN_HIGHLIGHT[plan],
+        // Laravel PlatformBillingController: a boolean, true for the recommended plan.
+        highlight: plan === 'Growth',
       };
     }),
     annualDiscountPct,
@@ -195,12 +214,14 @@ export const handlers = [
         contraction: '1 downgrade',
         churn: '2 cancellations',
       };
+      // Laravel lists the month's largest movements (≤ 12, biggest first, each with its id) and counts them all.
       const movements = MOVEMENTS.map((m) => ({
+        id: `mv_${m.kind}`,
         kind: m.kind,
         label: m.label,
         detail: details[m.kind],
         amount: Math.round(mrr * m.share),
-      }));
+      })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
       const body: RevenueSummary = {
         mrr,
         arr: mrr * 12,
@@ -208,6 +229,7 @@ export const handlers = [
         pastDueTenants: tenants.where((t) => t.status === 'Past due').length,
         movementMonth,
         movements,
+        movementCount: movements.length,
         churnReasons: CHURN_REASONS,
         payouts: payouts(mrr),
       };
@@ -257,6 +279,12 @@ export const handlers = [
       authorize('billing.manage');
       const v = findInvoice(params.id);
       requirePastDue(v);
+      // Like Laravel's Invoicing::charge: a declined card leaves the invoice past due (200, not an error).
+      if (v.cardDeclines) {
+        invoices.update(v.id, { attempts: v.attempts + 1 });
+        recordAudit(`Retried failed charge for ${tenantName(v.tenantId)} — declined again`, 'Billing', v.tenantId);
+        return ok(toInvoice(v));
+      }
       invoices.update(v.id, { status: 'Paid', attempts: v.attempts + 1, nextRetryAt: null, dunningPaused: false });
       settleTenant(v.tenantId);
       recordAudit(`Retried failed charge for ${tenantName(v.tenantId)} — $${v.amount} collected`, 'Billing', v.tenantId);
@@ -314,8 +342,19 @@ export const handlers = [
       const o = overages.find(params.id);
       if (!o) throw notFound('Overage');
       if (o.billedAt) throw invalid({ overage: 'This overage is already on the next invoice.' });
+      // Lemon Squeezy bills one variant per plan and cycle (reason `provider_unsupported`); on Paddle the overage
+      // becomes a one-off charge on the school's next renewal.
+      if (billedBy(o.tenantId) === 'lemon_squeezy')
+        throw new HttpError(
+          409,
+          'Overage charges aren’t available while billing goes through Lemon Squeezy, which bills plans only. Contact support to arrange them.',
+        );
       overages.update(o.id, { billedAt: new Date().toISOString() });
-      recordAudit(`Added $${o.amount} ${o.meter.toLowerCase()} overage to ${tenantName(o.tenantId)}’s next invoice`, 'Billing', o.tenantId);
+      recordAudit(
+        `Added $${o.amount} ${o.meter.replace(/_/g, ' ')} overage to ${tenantName(o.tenantId)}’s next invoice`,
+        'Billing',
+        o.tenantId,
+      );
       return ok({ ...o, tenantName: tenantName(o.tenantId) });
     }),
   ),

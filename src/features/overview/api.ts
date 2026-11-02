@@ -1,5 +1,6 @@
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
+import { live } from '@/lib/queryClient';
 import type { Resource } from '@/lib/api/types';
 import type { Overview, OverviewRange } from './types';
 
@@ -13,4 +14,6 @@ export const overviewQueries = {
     }),
 };
 
-export const useOverview = (range: OverviewRange) => useQuery({ ...overviewQueries.detail(range), placeholderData: keepPreviousData });
+/** The console home refreshes itself every minute while visible (see `live`). */
+export const useOverview = (range: OverviewRange) =>
+  useQuery({ ...overviewQueries.detail(range), placeholderData: keepPreviousData, ...live });

@@ -8,9 +8,9 @@ info:
 
     Conventions: snake_case JSON; `{ data }` resources; `{ data, meta }` pagination; 422 `{ message, errors }`; ISO-8601 UTC timestamps; USD amounts. Auth is a Laravel Sanctum SPA session cookie plus the `X-XSRF-TOKEN` header. Every endpoint enforces its `x-permission`; the server writes the `x-audit` entry on success. See docs/api/README.md.
 servers:
-  - url: https://api.coursiva.io/api/v1/admin
-    description: Production
-  - url: http://localhost:8000/api/v1/admin
+  - url: https://console.example.com/api/v1/platform
+    description: Production (same origin as the console; host is deployment-specific)
+  - url: http://localhost:8000/api/v1/platform
     description: Local Laravel
 tags:
   - name: Analytics
@@ -25,6 +25,8 @@ tags:
     description: Platform backups, point-in-time recovery, two-person restores, backup policy and per-tenant data exports. Restores move `staged` → `approved` → `running` → `completed` (or `staged` → `cancelled`) on the server.
   - name: Billing
     description: Revenue, invoices and dunning, usage overages, plans & pricing, and promo codes.
+  - name: Domains
+    description: "Domain resale: registrar settings and markup, registrations bought by schools, registrar tasks staff do in the registrar’s dashboard, and orders."
   - name: Entitlements
     description: Module × plan entitlement matrix and plan limits. Overrides are stored per module and plan; the API always exchanges arrays of cells.
   - name: Extensions
@@ -501,6 +503,54 @@ paths:
       x-audit:
         text: Requeued {n} failed jobs on the {queue} queue
         category: Flags
+  /analytics/live:
+    get:
+      operationId: getAnalyticsLive
+      tags:
+        - Analytics
+      summary: "Live usage: room minutes, sessions, attendees and peak concurrency per school"
+      description: Room minutes are the `live_room_minutes` billing meter; sessions, attendees, participant minutes and peak concurrency come from each school’s daily live rollup (measured hourly). Top 20 schools by room minutes.
+      parameters:
+        - name: period
+          in: query
+          required: false
+          description: The month, `YYYY-MM` (default this month; one of the last 12).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/LiveUsage"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `analytics.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: analytics.view
   /analytics/usage:
     get:
       operationId: getAnalyticsUsage
@@ -593,7 +643,7 @@ paths:
       tags:
         - Announcements
       summary: Send an announcement
-      description: Message is trimmed and must be 1–500 characters. `recipients` is the audience reach at send time.
+      description: Message is trimmed and must be 1–500 characters. `recipients` is the audience reach at send time. Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`). The console asks for a typed confirmation naming the reach first.
       requestBody:
         required: true
         content:
@@ -631,6 +681,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: announcements.send
@@ -841,8 +897,47 @@ paths:
         - sanctumSession: []
       x-permission: authenticated
       x-audit:
-        text: Unlocked the console after an idle lock
+        text: Confirmed their password
         category: Auth
+  /auth/forgot-password:
+    post:
+      operationId: postAuthForgotPassword
+      tags:
+        - Auth
+      summary: Email a password reset link
+      description: 'Always `{ sent: true }` with `message` "If an account exists for that email, we sent a link to reset the password." (no account enumeration). At most one email a minute per address; suspended accounts get none. The link is `{console}/reset-password?token&email`, single use, valid 60 minutes. Rate-limited (429).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PasswordResetSent"
+                additionalProperties: false
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "429":
+          description: Too many attempts — throttled; retry later.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security: []
   /auth/login:
     post:
       operationId: postAuthLogin
@@ -920,12 +1015,167 @@ paths:
       security:
         - sanctumSession: []
       x-permission: authenticated
+  /auth/password:
+    put:
+      operationId: putAuthPassword
+      tags:
+        - Auth
+      summary: Change your own password
+      description: 422 `current_password` "The current password is incorrect.". Every other session of this member ends; this one stays signed in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PasswordUpdated"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: authenticated
+      x-audit:
+        text: Changed their password
+        category: Security
+  /auth/reset-password:
+    post:
+      operationId: postAuthResetPassword
+      tags:
+        - Auth
+      summary: Set a new password from a reset link or a staff invitation
+      description: '422 `token` "This password reset link is invalid or has expired." (also for a suspended account); `password` confirmed, min 8 (production: 10 with letters, numbers, not breached). An invitation link (`&invite=1`, valid 7 days) also activates the invited member. Answers `{ reset: true }` with `message` "Your password has been reset. You can sign in now.".'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PasswordResetDone"
+                additionalProperties: false
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "429":
+          description: Too many attempts — throttled; retry later.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security: []
+      x-audit:
+        text: Reset their password
+        category: Security
+  /auth/two-factor:
+    post:
+      operationId: postAuthTwoFactor
+      tags:
+        - Auth
+      summary: Start two-factor enrolment
+      description: Stores an unconfirmed TOTP secret and returns it with its `otpauth://` URI (shown as a QR code). Needs a password confirmed in the last 15 minutes (423 `password_confirmation_required`). 409 when 2FA is already on.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/TwoFactorSetup"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: authenticated
+    delete:
+      operationId: deleteAuthTwoFactor
+      tags:
+        - Auth
+      summary: Turn two-factor authentication off
+      description: Needs a recent password confirmation (423). While the platform requires staff 2FA, the member is sent straight back to set it up.
+      responses:
+        "204":
+          description: No content.
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: authenticated
+      x-audit:
+        text: Disabled two-factor authentication
+        category: Security
   /auth/two-factor-challenge:
     post:
       operationId: postAuthTwoFactorChallenge
       tags:
         - Auth
-      summary: Complete sign-in with a TOTP code
+      summary: Complete sign-in with a TOTP code or a recovery code
+      description: "`code` is the 6-digit TOTP code, or one of the single-use recovery codes (`xxxxx-xxxxx`, consumed on use)."
       requestBody:
         required: true
         content:
@@ -937,7 +1187,7 @@ paths:
               properties:
                 code:
                   type: string
-                  pattern: ^[0-9]{6}$
+                  maxLength: 16
       responses:
         "200":
           description: OK
@@ -967,6 +1217,106 @@ paths:
       x-audit:
         text: Signed in to the platform console (2FA)
         category: Auth
+  /auth/two-factor/confirm:
+    post:
+      operationId: postAuthTwoFactorConfirm
+      tags:
+        - Auth
+      summary: Confirm two-factor enrolment with a code from the app
+      description: 2FA takes effect and the recovery codes are returned (shown once). 422 `code`; 409 "Start two-factor setup first.".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+              properties:
+                code:
+                  type: string
+                  maxLength: 16
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/RecoveryCodes"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: authenticated
+      x-audit:
+        text: Enabled two-factor authentication
+        category: Security
+  /auth/two-factor/recovery-codes:
+    post:
+      operationId: postAuthTwoFactorRecoveryCodes
+      tags:
+        - Auth
+      summary: Replace the recovery codes
+      description: The old codes stop working. Needs a recent password confirmation (423); 409 when 2FA is off.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/RecoveryCodes"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: authenticated
+      x-audit:
+        text: Regenerated two-factor recovery codes
+        category: Security
   /backup:
     get:
       operationId: getBackup
@@ -1191,6 +1541,63 @@ paths:
       x-permission: platform.manage
       x-audit:
         text: Queued {format} data export for {tenant}
+        category: Security
+  /backup/exports/{id}/download:
+    get:
+      operationId: getBackupExportsByIdDownload
+      tags:
+        - Backup
+      summary: Short-lived download URL for a ready export
+      description: 'A 15-minute signed storage URL (`Content-Disposition: attachment`). 409 "This export is not ready yet." / "This export has expired."; 404 unknown id. The "Your data export is ready" email links to `{console}/platform/backup?section=exports&export={id}`, where a signed-in member downloads it.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Export id.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ExportDownload"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Downloaded the data export of {tenant}
         category: Security
   /backup/points:
     get:
@@ -1623,9 +2030,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `support.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
-      x-permission: authenticated
+      x-permission: support.view
   /billing/dunning:
     get:
       operationId: getBillingDunning
@@ -1734,7 +2147,7 @@ paths:
       tags:
         - Billing
       summary: Pause or resume dunning retries
-      description: 422 unless the invoice is Past due. No audit entry when the state is unchanged.
+      description: 422 unless the invoice is Past due, or when a merchant of record (`provider`) bills it — it retries on its own schedule. No audit entry when the state is unchanged.
       parameters:
         - name: id
           in: path
@@ -1802,7 +2215,7 @@ paths:
       tags:
         - Billing
       summary: Retry a failed charge
-      description: Marks the invoice Paid; the tenant leaves Past due once it has no past-due invoices left. 422 unless the invoice is Past due.
+      description: Marks the invoice Paid; the tenant leaves Past due once it has no past-due invoices left. 422 unless the invoice is Past due, or when a merchant of record (`provider`) bills it.
       parameters:
         - name: id
           in: path
@@ -1859,7 +2272,7 @@ paths:
       tags:
         - Billing
       summary: Waive a past-due invoice
-      description: Marks the invoice Waived; the tenant leaves Past due once it has no past-due invoices left. 422 unless the invoice is Past due.
+      description: Marks the invoice Waived; the tenant leaves Past due once it has no past-due invoices left. 422 unless the invoice is Past due, or when a merchant of record (`provider`) bills it.
       parameters:
         - name: id
           in: path
@@ -1950,6 +2363,7 @@ paths:
       tags:
         - Billing
       summary: Add an overage to the tenant’s next invoice
+      description: "409 (`reason: provider_unsupported`) for schools billed through Lemon Squeezy, which bills plans only; for a Paddle school the overage becomes a one-off charge on its next Paddle renewal."
       parameters:
         - name: id
           in: path
@@ -1984,6 +2398,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
           content:
             application/json:
               schema:
@@ -2318,6 +2738,585 @@ paths:
       security:
         - sanctumSession: []
       x-permission: billing.view
+  /domains/orders:
+    get:
+      operationId: getDomainsOrders
+      tags:
+        - Domains
+      summary: Domain orders
+      description: Newest first. `status=problem` = failed + refunded + credited; quotes are listed only with `status=quoted`.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - quoted
+              - charging
+              - paid
+              - registering
+              - completed
+              - failed
+              - refunded
+              - credited
+              - problem
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - registration
+              - renewal
+        - name: tenant_id
+          in: query
+          required: false
+          description: Only this tenant, e.g. `tn_amplify`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DomainOrderRow"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.view
+  /domains/registrations:
+    get:
+      operationId: getDomainsRegistrations
+      tags:
+        - Domains
+      summary: Registrations
+      description: Newest first; with `expiring_within_days`, active/expiring ones expiring within N days, soonest first. `meta.counts` per status respect every filter except `status` (statuses with no rows are left out). Unknown filter values → 422.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - registering
+              - active
+              - expiring
+              - grace
+              - expired
+              - transfer_requested
+              - transferred_out
+              - failed
+        - name: tenant_id
+          in: query
+          required: false
+          description: Only this tenant, e.g. `tn_amplify`.
+          schema:
+            type: string
+        - name: expiring_within_days
+          in: query
+          required: false
+          description: 1–365.
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Domain contains.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RegistrationRow"
+                  meta:
+                    allOf:
+                      - $ref: "#/components/schemas/PaginationMeta"
+                      - type: object
+                        required:
+                          - counts
+                        properties:
+                          counts:
+                            type: array
+                            items:
+                              type: object
+                              required:
+                                - status
+                                - count
+                              properties:
+                                status:
+                                  $ref: "#/components/schemas/RegistrationStatus"
+                                count:
+                                  type: integer
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.view
+  /domains/registrations/{id}:
+    get:
+      operationId: getDomainsRegistrationsById
+      tags:
+        - Domains
+      summary: Registration detail with orders and tasks
+      description: Viewing the registrant is audited.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Registration id, e.g. `dreg_amplify`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/RegistrationDetail"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.view
+      x-audit:
+        text: Viewed the registrant contact of {domain}
+        category: Security
+  /domains/settings:
+    get:
+      operationId: getDomainsSettings
+      tags:
+        - Domains
+      summary: Registrar, markup, extensions and renewal lead time
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/DomainSettings"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.view
+    put:
+      operationId: putDomainsSettings
+      tags:
+        - Domains
+      summary: Change domain settings
+      description: Any subset of the fields; `null` resets a terms URL to its default. The registrar must be `configured` (422 “Connect this registrar first.”). Changing it affects new purchases only. Needs a password confirmed in the last 15 minutes (423).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DomainSettingsUpdate"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/DomainSettings"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Changed domain settings ({fields})
+        category: Billing
+  /domains/tasks:
+    get:
+      operationId: getDomainsTasks
+      tags:
+        - Domains
+      summary: Registrar tasks
+      description: "Open first, oldest first. `meta.counts` = open tasks per kind, respecting `tenant_id` only; `meta.open_total` = every open task on the platform (the nav badge: `per_page=1`). Unknown filter values → 422."
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: status
+          in: query
+          required: false
+          description: Default `open`.
+          schema:
+            type: string
+            enum:
+              - open
+              - done
+              - cancelled
+              - all
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - transfer_out
+              - contact_update
+              - disable_auto_renew
+              - renew
+              - registration_review
+        - name: tenant_id
+          in: query
+          required: false
+          description: Only this tenant, e.g. `tn_amplify`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RegistrarTask"
+                  meta:
+                    allOf:
+                      - $ref: "#/components/schemas/PaginationMeta"
+                      - type: object
+                        required:
+                          - counts
+                          - open_total
+                        properties:
+                          counts:
+                            type: array
+                            items:
+                              type: object
+                              required:
+                                - kind
+                                - count
+                              properties:
+                                kind:
+                                  $ref: "#/components/schemas/RegistrarTaskKind"
+                                count:
+                                  type: integer
+                          open_total:
+                            type: integer
+                            description: Every open task on the platform, whatever the filters.
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.view
+  /domains/tasks/{id}/cancel:
+    post:
+      operationId: postDomainsTasksByIdCancel
+      tags:
+        - Domains
+      summary: Cancel a task
+      description: Cancelling a `registration_review` fails the order and refunds the school; cancelling a `renew` whose renewal was paid refunds it (to the card, else account credit). Not open → 409 `task_closed`. Needs a recent password (423).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Task id, e.g. `rgt_transfer`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelTaskInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/RegistrarTask"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.manage
+      x-audit:
+        text: Cancelled {kind} task for {domain}
+        category: Tenants
+  /domains/tasks/{id}/complete:
+    post:
+      operationId: postDomainsTasksByIdComplete
+      tags:
+        - Domains
+      summary: Complete a task
+      description: "`auth_code` is required for `transfer_out` (printable ASCII without spaces, 6–64; emailed to the school’s owners, never stored, logged or audited — the registration stays `transfer_requested` until the daily sync); `expires_at` optional for `renew` (date `YYYY-MM-DD`). Not open → 409 `{ code: conflict, reason: task_closed }`. Needs a recent password (423)."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Task id, e.g. `rgt_transfer`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteTaskInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/RegistrarTask"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.manage
+      x-audit:
+        text: Completed {kind} task for {domain}
+        category: Tenants
   /entitlements:
     get:
       operationId: getEntitlements
@@ -2357,7 +3356,7 @@ paths:
       tags:
         - Entitlements
       summary: Set module × plan cells
-      description: A value equal to the plan default removes the override. Core modules cannot be changed (422). Validation errors are keyed `cells.{i}.module_id` / `.plan` / `.enabled`.
+      description: A value equal to the plan default removes the override. Core modules cannot be changed (422). Validation errors are keyed `cells.{i}.module_id` / `.plan` / `.enabled`. A request that turns any cell off (removes a module from every school on the plan) requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`); turning modules on does not.
       requestBody:
         required: true
         content:
@@ -2403,6 +3402,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: platform.manage
@@ -2912,7 +3917,7 @@ paths:
       tags:
         - Governance
       summary: Apply a signal's recommended action
-      description: "`raise_limit` doubles the tenant’s API per-minute limit; `freeze_checkout` blocks new card payments. 422 if already handled."
+      description: "`raise_limit` doubles the tenant’s API per-minute limit; `freeze_checkout` blocks new card payments (sets the tenant’s `checkout_frozen_at`; undo with `DELETE /governance/tenants/{id}/checkout-freeze`) and requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`). 422 if already handled."
       parameters:
         - name: id
           in: path
@@ -2957,6 +3962,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: governance.manage
@@ -3400,6 +4411,55 @@ paths:
       security:
         - sanctumSession: []
       x-permission: governance.view
+    post:
+      operationId: postGovernancePolicies
+      tags:
+        - Governance
+      summary: Draft a new version of a policy document
+      description: '`doc_key` tos|dpa|aup|student_terms, `version` (≤ 20, letters/numbers/dots, new for the family), `note?` (≤ 300). One draft per family: 422 `doc_key` "This document already has a draft — publish it first."; 422 `version` when the label exists.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyDraftInput"
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PolicyDocument"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `governance.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: governance.manage
+      x-audit:
+        text: Drafted {name} {version}
+        category: Tenants
   /governance/policies/{id}/acceptance:
     get:
       operationId: getGovernancePoliciesByIdAcceptance
@@ -4021,6 +5081,57 @@ paths:
       security:
         - sanctumSession: []
       x-permission: governance.view
+  /governance/tenants/{id}/checkout-freeze:
+    delete:
+      operationId: deleteGovernanceTenantsByIdCheckoutFreeze
+      tags:
+        - Tenants
+      summary: Unfreeze checkout
+      description: Lifts the abuse queue’s “Freeze checkout” (`checkout_frozen_at` back to null) so the school takes card payments again. A school that isn’t frozen is a no-op (no audit entry).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Tenant id, e.g. `tn_amplify`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/TenantDetail"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `governance.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: governance.manage
+      x-audit:
+        text: Unfroze checkout for {name} — new card payments allowed again
+        category: Security
   /media/drm:
     get:
       operationId: getMediaDrm
@@ -4110,7 +5221,7 @@ paths:
       tags:
         - Media
       summary: Connect a DRM provider or update its credentials
-      description: Send new values for any fields; omitted or blank fields keep their stored value. Every field must end up set (422 `credentials.{field}`). Credentials are stored server-side and never returned — responses carry `configured` + `last4`.
+      description: "Send new values for any fields; omitted or blank fields keep their stored value. Every required field must end up set (422 `credentials.{field}`). Credentials are stored server-side and never returned — responses carry `configured` + `last4`. Mux fields: `token_id`, `token_secret`, `signing_key_id` (letters/digits), `signing_private_key` (required secret, one line of up to 8,192 characters — other fields 500: the base64 RSA private key Mux shows once when the signing key is created, a pasted PEM also works; signs every playback URL), `webhook_secret` (optional secret of the Mux webhook endpoint `{API}/api/v1/webhooks/mux`, events `video.asset.*`), `drm_configuration_id` (optional, letters/digits; turns on Mux DRM). Optional fields may stay blank."
       parameters:
         - name: key
           in: path
@@ -4165,6 +5276,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: platform.manage
@@ -4214,6 +5331,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
           content:
             application/json:
               schema:
@@ -4432,7 +5555,7 @@ paths:
       tags:
         - Media
       summary: Connect a storage backend or update its credentials
-      description: Send new values for any fields; omitted or blank fields keep their stored value. Every field must end up set (422 `credentials.{field}`). Credentials are stored server-side and never returned — responses carry `configured` + `last4`.
+      description: 'Send new values for any fields; omitted or blank fields keep their stored value. Every required field must end up set (422 `credentials.{field}`). Credentials are stored server-side and never returned — responses carry `configured` + `last4`. `public_assets` (role "Public images"): the bucket public images are served from (school logos, course covers, product thumbnails, the platform’s brand images). Fields: `provider` (switch `r2` | `s3`, default `r2`), `account_id` (R2, 32 hex) or `region` (S3) — the provider’s one is required (422 `credentials.account_id` / `credentials.region`), `access_key_id`, `secret_access_key`, `bucket`, `public_url` (https base URL serving the bucket, no query), `acl` (switch `none` | `public-read`, default `none`). Verified by writing, reading, fetching through `public_url` and deleting a probe file.'
       parameters:
         - name: key
           in: path
@@ -4443,6 +5566,7 @@ paths:
             enum:
               - r2
               - s3
+              - public_assets
       requestBody:
         required: true
         content:
@@ -4486,6 +5610,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: platform.manage
@@ -4507,6 +5637,7 @@ paths:
             enum:
               - r2
               - s3
+              - public_assets
       responses:
         "200":
           description: OK
@@ -4534,6 +5665,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
           content:
             application/json:
               schema:
@@ -4627,9 +5764,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
-      x-permission: authenticated
+      x-permission: tenants.view
   /platform/api-keys:
     get:
       operationId: getPlatformApiKeys
@@ -4688,7 +5831,7 @@ paths:
       tags:
         - Platform
       summary: Create an API key
-      description: The response is the only time the full `secret` is returned.
+      description: The response is the only time the full `secret` is returned. Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`). A request authenticated with an API key has no session, so it can never mint another key.
       requestBody:
         required: true
         content:
@@ -4726,6 +5869,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: platform.manage
@@ -4788,6 +5937,131 @@ paths:
       x-audit:
         text: Revoked API key "{name}" ({prefix})
         category: Security
+  /platform/availability:
+    get:
+      operationId: getPlatformAvailability
+      tags:
+        - Platform
+      summary: "Feature availability: every capability with its switch, connections and reach"
+      description: "One platform switch per capability (module, extension, live provider, ad network, sign-in provider, marketplace app), above plans, extensions and per-school overrides. `available` = switch on and the `requires` connections connected (all of them; any one when `requires_any`). Unavailable capabilities are hidden from every school: `/auth/me` and the public site payload list them in `unavailable`; their API answers 403 `feature_unavailable` (`reason: platform_disabled`, `capability`). `schools_using` is cached for 5 minutes (null = not counted); `paying_schools` counts schools paying for one of its `extensions` (their billing is never changed automatically). `groups` are in display order."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Availability"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
+  /platform/availability/{key}:
+    put:
+      operationId: putPlatformAvailabilityByKey
+      tags:
+        - Platform
+      summary: Turn a capability on or off for every school
+      description: Switching off needs a password confirmed in the last 15 minutes (423 `password_confirmation_required`); switching on does not. Audited only when the switch changes. The Connections screen shows the same switches per connection (`capabilities` on each connection).
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: Capability key, e.g. `live_rooms`, `ai`, `app_slack`, `signin_google`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AvailabilityUpdate"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Capability"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Turned off {label} for all schools / Turned on {label} for all schools
+        category: Flags
+  /platform/branding:
+    get:
+      operationId: getPlatformBranding
+      tags:
+        - Auth
+      summary: Public platform branding (name, logos, favicon)
+      description: "No sign-in needed: the sign-in screen and the console shell read it. Absolute image URLs, null when not uploaded. `Cache-Control: public, max-age=300`. Rate-limit 60/min per IP."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Branding"
+                additionalProperties: false
+      security: []
   /platform/certificate-policies:
     get:
       operationId: getPlatformCertificatePolicies
@@ -5097,6 +6371,227 @@ paths:
       security:
         - sanctumSession: []
       x-permission: platform.view
+  /platform/connections:
+    get:
+      operationId: getPlatformConnections
+      tags:
+        - Platform
+      summary: Services connected with pasted credentials
+      description: "Payment providers (Stripe, Paddle, Lemon Squeezy), Cloudflare, Expo push, platform email, the ad networks’ developer tokens (`kind: ads`: Google Ads, Microsoft Advertising), the Chrome UX Report API key (`kind: insights`), the AI studio keys (`kind: ai`: Anthropic for Claude, AssemblyAI for speech-to-text), ClamAV virus scanning of uploads (`kind: security`), the Prometheus scrape token (`kind: monitoring`), Daily for the schools’ built-in live rooms (`kind: video`) and the OAuth apps schools sign in to (the backend also lists storage and DRM, shown on the Media screen). Secrets are never returned: `configured`, non-secret `value`s and `last4` (values of 12+ characters)."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PlatformConnection"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
+  /platform/connections/{key}:
+    put:
+      operationId: putPlatformConnectionsByKey
+      tags:
+        - Platform
+      summary: Connect & verify, or replace credentials
+      description: 'Blank or omitted fields keep their stored value; after merging every required field must be set (422 `credentials.{field}`). The server verifies the credentials with the provider before saving (422 `credentials` with its message, e.g. "Stripe rejected these credentials: …"). Needs a password confirmed in the last 15 minutes (423). Payment providers (`kind: payments`: Stripe, Paddle, Lemon Squeezy) also need `billing.manage`. Paddle checks the key and client-side token are one environment and reads the product; Lemon Squeezy checks the store and that each plan/cycle variant is a monthly/yearly subscription of it priced like the price book. Anthropic and AssemblyAI (`kind: ai`) check the key format, then call the provider with it. ClamAV (`kind: security`) checks the host and port, then sends clamd a PING (no PONG → 422 `credentials`: "ClamAV rejected these credentials: no clamd answered PING at {host}:{port}"). The Prometheus scrape token (`kind: monitoring`) is format-checked only (32–256 characters). Daily (`kind: video`) reads the account with the API key (`GET https://api.daily.co/v1/`); an optional pasted domain must be the account’s, and the optional webhook HMAC secret must be base64. Cloudflare’s check proves only "SSL and Certificates: Edit"; the edge also needs Cache Purge, Single Redirect: Edit and Analytics: Read. Cloudflare Registrar (`cloudflare_registrar`) checks the 32-hex account ID and a token of at least 20 characters, then reads the registrar’s extension list (refused → "Cloudflare Registrar rejected these credentials: … (the token needs Registrar: Edit on this account)").'
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: "Connection key: `stripe`, `paddle`, `lemon_squeezy`, `cloudflare`, `cloudflare_registrar`, `expo`, `postmark`, `smtp`, `google_ads`, `microsoft_ads`, `google_crux`, `anthropic`, `assemblyai`, `clamav`, `metrics`, `oauth_{provider}`."
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConnectionInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PlatformConnection"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Connected {name} / Updated credentials for {name}
+        category: Security
+    delete:
+      operationId: deletePlatformConnectionsByKey
+      tags:
+        - Platform
+      summary: Disconnect (deletes the stored credentials)
+      description: Payment providers also need `billing.manage`. 409 for `paddle` / `lemon_squeezy` while it is the billing provider (Settings → Billing & dunning) or still bills schools (“1 school is still billed through Lemon Squeezy. …”).
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: Connection key.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PlatformConnection"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Disconnected {name}
+        category: Security
+  /platform/connections/{key}/test:
+    post:
+      operationId: postPlatformConnectionsByKeyTest
+      tags:
+        - Platform
+      summary: Re-verify the stored credentials with the provider
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: Connection key.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ConnectionTestResult"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
   /platform/deliverability:
     get:
       operationId: getPlatformDeliverability
@@ -5173,11 +6668,12 @@ paths:
       tags:
         - Platform
       summary: Toggle a flag or change its rollout
+      description: Switches the feature for every school in the rollout at once. Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`).
       parameters:
         - name: key
           in: path
           required: true
-          description: Flag key, e.g. `ai_outline`.
+          description: Flag key, e.g. `multi_currency`.
           schema:
             type: string
       requestBody:
@@ -5223,6 +6719,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: flags.manage
@@ -5699,10 +7201,12 @@ paths:
       tags:
         - Shell
       summary: Global search (only record types the user may view; max 20)
+      description: "`q` is required, 2–100 characters (422 otherwise). Tenants (name/owner/domain), invoices (number), tickets (subject, tenant name or `#number`) and staff (name/email), each only with its view permission."
       parameters:
         - name: q
           in: query
-          required: false
+          required: true
+          description: 2–100 characters.
           schema:
             type: string
         - name: type
@@ -5778,7 +7282,7 @@ paths:
       tags:
         - Settings
       summary: Update platform settings
-      description: Any subset of fields. `primary_domain` must be a verified platform domain; `trial_days` 7–60; `dunning_retries` 1–5; `session_hours` 4/8/12/24; `idle_lock_minutes` 5/10/15/30/60.
+      description: "Any subset of fields. `primary_domain` must be a verified platform domain; `trial_days` 0–90 (the single source, same as `GET /billing/pricing`; 0 = pay at sign-up); `trial_requires_card` bool; `card_check_amount` 50–500 minor units of `billing_currency` (read-only, ignored here); `dunning_retries` 1–5; `session_hours` 4/8/12/24; `idle_lock_minutes` 5/10/15/30/60. `billing_provider` (`stripe` · `paddle` · `lemon_squeezy`): changing it also needs `billing.manage` (403 “Changing the billing provider needs the billing.manage permission.”) and a connected provider (422 “Connect Paddle in Platform → Connections first.”). Switching `maintenance_mode` on (every school offline) requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`); switching it off does not."
       requestBody:
         required: true
         content:
@@ -5816,70 +7320,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: platform.manage
       x-audit:
         text: "Updated platform settings: {fields}"
         category: Security
-  /settings/integrations:
-    get:
-      operationId: getSettingsIntegrations
+  /settings/brand-assets/{slot}:
+    post:
+      operationId: postSettingsBrandAssetsBySlot
       tags:
         - Settings
-      summary: Integration marketplace policies, adoption and requests
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                required:
-                  - data
-                properties:
-                  data:
-                    $ref: "#/components/schemas/IntegrationSettings"
-                additionalProperties: false
-        "401":
-          description: Not signed in or session expired.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "403":
-          description: Missing permission `platform.view`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-      security:
-        - sanctumSession: []
-      x-permission: platform.view
-  /settings/integrations/policies/{key}:
-    put:
-      operationId: putSettingsIntegrationsPoliciesByKey
-      tags:
-        - Settings
-      summary: Turn an integration policy on or off
+      summary: Upload a platform brand image
+      description: "Multipart `file`: PNG, JPEG or WebP, ≤ 2 MB (`favicon` ≤ 512 KB). SVG is refused (it can carry script — stored XSS from the platform origin). Replacing an asset deletes the previous file."
       parameters:
-        - name: key
+        - name: slot
           in: path
           required: true
-          description: Policy key, e.g. `byo_processor`.
+          description: Brand asset slot.
           schema:
             type: string
+            enum:
+              - logo
+              - logo_dark
+              - favicon
+              - og_image
       requestBody:
         required: true
         content:
-          application/json:
+          multipart/form-data:
             schema:
               type: object
               required:
-                - enabled
+                - file
               properties:
-                enabled:
-                  type: boolean
+                file:
+                  type: string
+                  format: binary
       responses:
         "200":
           description: OK
@@ -5891,7 +7374,9 @@ paths:
                   - data
                 properties:
                   data:
-                    $ref: "#/components/schemas/IntegrationSettings"
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BrandAsset"
                 additionalProperties: false
         "401":
           description: Not signed in or session expired.
@@ -5921,8 +7406,143 @@ paths:
         - sanctumSession: []
       x-permission: platform.manage
       x-audit:
-        text: Enabled/Disabled integration policy "{label}"
+        text: Uploaded the platform {slot label}
         category: Security
+    delete:
+      operationId: deleteSettingsBrandAssetsBySlot
+      tags:
+        - Settings
+      summary: Remove a platform brand image
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          description: Brand asset slot.
+          schema:
+            type: string
+            enum:
+              - logo
+              - logo_dark
+              - favicon
+              - og_image
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BrandAsset"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Removed the platform {slot label}
+        category: Security
+  /settings/email/test:
+    post:
+      operationId: postSettingsEmailTest
+      tags:
+        - Settings
+      summary: Send a test platform email to yourself
+      description: "Uses the saved email settings; sent to the signed-in staff member. Throttled: 5 per 10 minutes."
+      responses:
+        "202":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/EmailTestResult"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many attempts — throttled; retry later.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Sent a test platform email to {address}
+        category: Security
+  /settings/integrations:
+    get:
+      operationId: getSettingsIntegrations
+      tags:
+        - Settings
+      summary: Integration marketplace adoption and requests
+      description: "`policies` is always empty: what schools may connect is switched per app on Platform → Feature availability (`app_*`, `pay_stripe`, `sso`, `exams`)."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/IntegrationSettings"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
   /settings/integrations/requests/{id}/roadmap:
     post:
       operationId: postSettingsIntegrationsRequestsByIdRoadmap
@@ -5972,6 +7592,102 @@ paths:
       x-permission: platform.manage
       x-audit:
         text: Added "{name}" to the integration roadmap
+        category: Security
+  /settings/meta:
+    get:
+      operationId: getSettingsMeta
+      tags:
+        - Settings
+      summary: Shipped defaults and where each setting is read
+      description: "One entry per field: its section, its shipped default (`null` when it has none or isn’t resettable, like `primary_domain` and `billing_provider`) and where the value is read (not translated)."
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/SettingsMetaWire"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
+  /settings/sections/{section}/reset:
+    post:
+      operationId: postSettingsSectionsBySectionReset
+      tags:
+        - Settings
+      summary: Restore the defaults of a settings section
+      description: Every resettable field of the section that has a shipped default goes back to it (`billing_provider` is left as it is).
+      parameters:
+        - name: section
+          in: path
+          required: true
+          description: Settings section.
+          schema:
+            type: string
+            enum:
+              - platform
+              - signup
+              - branding
+              - legal
+              - email
+              - security
+              - billing
+              - notifications
+              - maintenance
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PlatformSettings"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Restored the default {section} settings ({fields})
         category: Security
   /settings/tax:
     get:
@@ -6258,6 +7974,7 @@ paths:
       tags:
         - Staff
       summary: Grant just-in-time Owner access (expires on its own)
+      description: Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`).
       parameters:
         - name: id
           in: path
@@ -6314,6 +8031,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: staff.manage
@@ -6794,7 +8517,7 @@ paths:
       tags:
         - Staff
       summary: Replace a role's permissions
-      description: Owner is locked (422). Nobody can remove `staff.manage` from their own role (422). One audit entry per granted/removed permission.
+      description: Owner is locked (422). Nobody can remove `staff.manage` from their own role (422). One audit entry per granted/removed permission. Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`).
       parameters:
         - name: role
           in: path
@@ -6861,6 +8584,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: staff.manage
@@ -7467,7 +9196,7 @@ paths:
       tags:
         - Tenants
       summary: Provision a tenant
-      description: Creates the workspace on `{slug}.{primary_domain}` in Trial for the platform trial length and emails the owner an invite.
+      description: Creates the workspace on `{slug}.{primary_domain}` in Trial for the platform trial length and emails the owner an invite. With a trial length of 0 the first period is invoiced at once; with no card yet the school is `Past due` and dunning follows.
       requestBody:
         required: true
         content:
@@ -7674,7 +9403,8 @@ paths:
       operationId: postTenantsByIdExtendTrial
       tags:
         - Tenants
-      summary: Extend trial by 14 days
+      summary: Extend a trial (or reopen a school paused for a missing card)
+      description: "`days` 1–90, default 14 (422 `days`). 422 `trial` unless the tenant is on a trial or paused for a missing card (`suspension_reason: payment_method_required`); a paused school gets a new trial of `days` from now and reopens. Also moved at Paddle / Lemon Squeezy for a school billed there (502/503 `provider_error`: nothing changed)."
       parameters:
         - name: id
           in: path
@@ -7682,6 +9412,12 @@ paths:
           description: Tenant id, e.g. `tn_amplify`.
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExtendTrialInput"
       responses:
         "200":
           description: OK
@@ -7723,8 +9459,8 @@ paths:
         - sanctumSession: []
       x-permission: tenants.manage
       x-audit:
-        text: Extended {name}'s trial by 14 days
-        category: Tenants
+        text: Extended {name}'s trial by {days} days
+        category: Billing
   /tenants/{id}/extensions/{key}/comp:
     post:
       operationId: postTenantsByIdExtensionsByKeyComp
@@ -7912,6 +9648,7 @@ paths:
       tags:
         - Tenants
       summary: Start a read-only impersonation session
+      description: "`reason` (5–300 characters) is required when the platform setting `impersonation_requires_reason` is on (422 `reason`). The session lasts `impersonation_max_minutes`. Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`)."
       parameters:
         - name: id
           in: path
@@ -7919,6 +9656,12 @@ paths:
           description: Tenant id, e.g. `tn_amplify`.
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImpersonationInput"
       responses:
         "200":
           description: OK
@@ -7950,11 +9693,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: tenants.impersonate
       x-audit:
-        text: Signed in as owner of {name} (read-only)
+        text: "Signed in as owner of {name} (read-only) — reason: {reason}"
         category: Security
   /tenants/{id}/limits:
     put:
@@ -8160,6 +9915,7 @@ paths:
       tags:
         - Tenants
       summary: Schedule a data purge (30-day grace)
+      description: Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`).
       parameters:
         - name: id
           in: path
@@ -8194,6 +9950,12 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
           content:
             application/json:
               schema:
@@ -8627,7 +10389,7 @@ paths:
       tags:
         - Tenants
       summary: Bulk action on tenants
-      description: "`suspend` requires `tenants.suspend`."
+      description: "`suspend` requires `tenants.suspend` and a password confirmed in the last 15 minutes (423 `password_confirmation_required`; up to 200 schools go offline at once). `watch` and `export` need no step-up."
       requestBody:
         required: true
         content:
@@ -8684,6 +10446,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: tenants.view
@@ -8693,7 +10461,7 @@ paths:
       tags:
         - Tenants
       summary: Email tenant owners
-      description: "Merge tags: `{owner_name}`, `{tenant_name}`, `{plan}`."
+      description: "Merge tags: `{owner_name}`, `{tenant_name}`, `{plan}` (filled with Markdown-escaped values). `body` is Markdown from the rich text editor, rendered safely into the branded email (raw HTML stripped, images dropped, only http(s)/mailto links)."
       requestBody:
         required: true
         content:
@@ -8712,8 +10480,11 @@ paths:
                 subject:
                   type: string
                   maxLength: 150
+                  description: Plain text.
                 body:
                   type: string
+                  maxLength: 10000
+                  description: Markdown.
       responses:
         "200":
           description: OK
@@ -8971,6 +10742,9 @@ components:
         billed:
           type: number
           description: Overage billed to the tenant above their allowance (USD).
+        model_cost:
+          type: number
+          description: What this tenant's model calls really cost this month (USD, rounded to cents).
         margin_pct:
           type:
             - number
@@ -8988,6 +10762,7 @@ components:
         - allowance_k
         - cost
         - billed
+        - model_cost
         - margin_pct
         - top_feature
         - throttled
@@ -9043,6 +10818,9 @@ components:
               type: number
             throttled:
               type: number
+            model_cost:
+              type: number
+              description: What the model calls really cost this month (USD), summed from each charge — beside `spend`, the credit cost.
             cap_used_pct:
               type: number
           required:
@@ -9050,6 +10828,7 @@ components:
             - tokens_k
             - tenants
             - throttled
+            - model_cost
             - cap_used_pct
           additionalProperties: false
         tenants:
@@ -9088,7 +10867,9 @@ components:
         message:
           type: string
         audience:
-          $ref: "#/components/schemas/AnnouncementAudience"
+          anyOf:
+            - $ref: "#/components/schemas/AnnouncementAudience"
+            - $ref: "#/components/schemas/BroadcastOnlyAudience"
         channel:
           $ref: "#/components/schemas/AnnouncementChannel"
         recipients:
@@ -9229,6 +11010,31 @@ components:
         - tenant_id
         - ip
       additionalProperties: false
+    Availability:
+      type: object
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityGroup"
+      required:
+        - capabilities
+        - groups
+      additionalProperties: false
+      description: "`GET /platform/availability`. Groups are in display order."
+    AvailabilityUpdate:
+      type: object
+      properties:
+        on:
+          type: boolean
+      required:
+        - on
+      additionalProperties: false
+      description: "`PUT /platform/availability/{key}`."
     BackupActivity:
       type: object
       properties:
@@ -9364,7 +11170,10 @@ components:
         rpo_minutes:
           type: number
         rto_minutes:
-          type: number
+          type:
+            - number
+            - "null"
+          description: From the last live restore or passed drill; null until either has happened.
         drills_passed:
           type: number
         drills_total:
@@ -9394,6 +11203,12 @@ components:
         - wal_window_days
         - destinations
       additionalProperties: false
+    BillingProvider:
+      type: string
+      enum:
+        - stripe
+        - paddle
+        - lemon_squeezy
     BlockedIp:
       type: object
       properties:
@@ -9415,6 +11230,165 @@ components:
         - blocked_at
         - blocked_by
       additionalProperties: false
+    BrandAsset:
+      type: object
+      properties:
+        slot:
+          $ref: "#/components/schemas/BrandAssetSlot"
+        url:
+          type:
+            - string
+            - "null"
+          description: Public URL, or null when not uploaded.
+        updated_at:
+          type:
+            - string
+            - "null"
+      required:
+        - slot
+        - url
+        - updated_at
+      additionalProperties: false
+      description: "A platform brand image (uploaded separately: `POST /settings/brand-assets/{slot}`)."
+    BrandAssetSlot:
+      type: string
+      enum:
+        - logo
+        - logo_dark
+        - favicon
+        - og_image
+    Branding:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The platform name (`platform_name` setting).
+        logo_url:
+          type:
+            - string
+            - "null"
+          description: Absolute URLs of the uploaded brand images, or null when not uploaded.
+        logo_dark_url:
+          type:
+            - string
+            - "null"
+        favicon_url:
+          type:
+            - string
+            - "null"
+      required:
+        - name
+        - logo_url
+        - logo_dark_url
+        - favicon_url
+      additionalProperties: false
+      description: Public platform branding (`GET /platform/branding`) — no sign-in needed, so the sign-in screen can use it too.
+    BroadcastOnlyAudience:
+      type: string
+      enum:
+        - Growth & Scale
+        - Trials only
+      description: Broadcast banners (Platform → Flags & status) are stored with announcements and can carry these audiences too.
+    CancelTaskInput:
+      type: object
+      properties:
+        note:
+          type: string
+      additionalProperties: false
+      description: "`POST /domains/tasks/{id}/cancel` body."
+    Capability:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        group:
+          type: string
+          description: Key of its group in `groups`.
+        description:
+          type: string
+          description: What schools lose when it is off.
+        surfaces:
+          type: array
+          items:
+            type: string
+          description: Short list of what disappears, for the confirm dialog.
+        modules:
+          type: array
+          items:
+            type: string
+          description: Dashboard module ids it hides.
+        extensions:
+          type: array
+          items:
+            type: string
+          description: Extension keys it hides from the store, trials and pricing.
+        requires:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapabilityRequirement"
+        requires_any:
+          type: boolean
+          description: "true: any one of `requires` is enough; false: every one must be connected."
+        on:
+          type: boolean
+          description: The owner's switch (a missing switch is on).
+        available:
+          type: boolean
+          description: "`on` and its connections are connected."
+        schools_using:
+          type:
+            - number
+            - "null"
+          description: Schools using it now (cached 5 minutes); null = not counted.
+        paying_schools:
+          type:
+            - number
+            - "null"
+          description: Schools paying for one of its extensions; null = not counted (or no extension).
+      required:
+        - key
+        - label
+        - group
+        - description
+        - surfaces
+        - modules
+        - extensions
+        - requires
+        - requires_any
+        - on
+        - available
+        - schools_using
+        - paying_schools
+      additionalProperties: false
+      description: A switchable thing schools can see (a module, an extension, a provider, an app). Unavailable = hidden from every school (dashboard, student site, API, jobs), above plans, extensions and tenant overrides.
+    CapabilityGroup:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+      required:
+        - key
+        - label
+      additionalProperties: false
+    CapabilityRequirement:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        connected:
+          type: boolean
+      required:
+        - key
+        - label
+        - connected
+      additionalProperties: false
+      description: A platform connection a capability needs.
     Certificate:
       type: object
       properties:
@@ -9470,6 +11444,35 @@ components:
         - revoked
         - orphaned
       additionalProperties: false
+    ChangePasswordInput:
+      type: object
+      properties:
+        current_password:
+          type: string
+        password:
+          type: string
+        password_confirmation:
+          type: string
+      required:
+        - current_password
+        - password
+        - password_confirmation
+      additionalProperties: false
+      description: "`PUT /auth/password` body (signed in). Other sessions of this member end; this one stays signed in."
+    CompleteTaskInput:
+      type: object
+      properties:
+        note:
+          type: string
+          description: ≤ 500 characters.
+        auth_code:
+          type: string
+          description: "transfer_out only (required for it): 6–64 printable characters. Emailed to the school's owners, never stored."
+        expires_at:
+          type: string
+          description: "renew only: a date YYYY-MM-DD after the current expiry."
+      additionalProperties: false
+      description: "`POST /domains/tasks/{id}/complete` body."
     ComplianceSummary:
       type: object
       properties:
@@ -9530,6 +11533,122 @@ components:
         - verified_at
         - fields
       additionalProperties: false
+    ConnectionCapability:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        on:
+          type: boolean
+      required:
+        - key
+        - label
+        - on
+      additionalProperties: false
+    ConnectionField:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        secret:
+          type: boolean
+        configured:
+          type: boolean
+        last4:
+          type:
+            - string
+            - "null"
+          description: Last four characters of stored values of 12+ characters.
+        value:
+          type:
+            - string
+            - "null"
+          description: Stored value of a non-secret field; always null for secrets.
+        options:
+          anyOf:
+            - type: array
+              items:
+                type: object
+                properties:
+                  value:
+                    type: string
+                  label:
+                    type: string
+                required:
+                  - value
+                  - label
+                additionalProperties: false
+            - type: "null"
+          description: A fixed choice (shown as a switch instead of a text box); null for free text.
+        default:
+          type:
+            - string
+            - "null"
+          description: The value in effect while none is stored.
+      required:
+        - key
+        - label
+        - secret
+        - configured
+        - last4
+        - value
+      additionalProperties: false
+      description: "A credential field as the server shows it: never a secret."
+    ConnectionInput:
+      type: object
+      properties:
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              value:
+                type: string
+            required:
+              - field
+              - value
+            additionalProperties: false
+      required:
+        - credentials
+      additionalProperties: false
+      description: "PUT body: new values for any fields; blank or omitted fields keep their stored value."
+    ConnectionKind:
+      type: string
+      enum:
+        - payments
+        - cdn
+        - push
+        - email
+        - ads
+        - insights
+        - ai
+        - security
+        - monitoring
+        - video
+        - oauth
+        - storage
+        - drm
+    ConnectionTestResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        latency_ms:
+          type: number
+        message:
+          type: string
+      required:
+        - ok
+        - latency_ms
+        - message
+      additionalProperties: false
+      description: "`POST /platform/connections/{key}/test`."
     CreatedApiKey:
       type: object
       properties:
@@ -9587,6 +11706,27 @@ components:
             - string
             - "null"
           description: Full stored value for non-secret fields (account id, region…). Always null for secrets.
+        options:
+          anyOf:
+            - type: array
+              items:
+                type: object
+                properties:
+                  value:
+                    type: string
+                  label:
+                    type: string
+                required:
+                  - value
+                  - label
+                additionalProperties: false
+            - type: "null"
+          description: A fixed choice (shown as a switch instead of a text box); null for free text.
+        default:
+          type:
+            - string
+            - "null"
+          description: The value in effect while none is stored.
       required:
         - key
         - label
@@ -9615,6 +11755,34 @@ components:
         - credentials
       additionalProperties: false
       description: "PUT body: new values for any fields; omitted fields keep their stored value."
+    CustomDomainLink:
+      type: object
+      properties:
+        id:
+          type: string
+        domain:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - verified
+            - failed
+        is_primary:
+          type: boolean
+      required:
+        - id
+        - domain
+        - status
+        - is_primary
+      additionalProperties: false
+      description: The school's custom-domain row for a registered domain ("dom_…").
+    DataRegion:
+      type: string
+      enum:
+        - US
+        - EU
+        - APAC
     Deliverability:
       type: object
       properties:
@@ -9624,10 +11792,14 @@ components:
             sent30d:
               type: number
             bounce_rate:
-              type: number
-              description: Volume-weighted percent across every domain.
+              type:
+                - number
+                - "null"
+              description: Volume-weighted percent across every domain; null = not measured.
             complaint_rate:
-              type: number
+              type:
+                - number
+                - "null"
             domains_at_risk:
               type: number
             thresholds:
@@ -9666,7 +11838,9 @@ components:
               list:
                 type: string
               count:
-                type: number
+                type:
+                  - number
+                  - "null"
               note:
                 type: string
             required:
@@ -9674,6 +11848,7 @@ components:
               - count
               - note
             additionalProperties: false
+          description: "`count` null = not aggregated platform-wide (suppressions live in each school's database)."
       required:
         - summary
         - domains
@@ -9685,6 +11860,227 @@ components:
         - Pass
         - Fail
         - Not set
+    DomainEnvironment:
+      type: string
+      enum:
+        - live
+        - sandbox
+      description: "`sandbox`: the registrar's test environment (free test registrations, not on the internet) — shown as a \"Sandbox\" badge."
+    DomainOrderKind:
+      type: string
+      enum:
+        - registration
+        - renewal
+    DomainOrderRow:
+      type: object
+      properties:
+        id:
+          type: string
+          description: '"dord_…"'
+        tenant_id:
+          type: string
+        tenant_name:
+          type: string
+        domain:
+          type: string
+        kind:
+          $ref: "#/components/schemas/DomainOrderKind"
+        environment:
+          $ref: "#/components/schemas/DomainEnvironment"
+        status:
+          $ref: "#/components/schemas/DomainOrderStatus"
+        cost:
+          type: number
+          description: Registrar cost.
+        price:
+          type: number
+          description: Charged to the school.
+        currency:
+          type: string
+          const: USD
+        invoice_id:
+          type:
+            - string
+            - "null"
+        invoice_number:
+          type:
+            - string
+            - "null"
+        registration_id:
+          type:
+            - string
+            - "null"
+        failure_reason:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - id
+        - tenant_id
+        - tenant_name
+        - domain
+        - kind
+        - environment
+        - status
+        - cost
+        - price
+        - currency
+        - invoice_id
+        - invoice_number
+        - registration_id
+        - failure_reason
+        - created_at
+        - updated_at
+      additionalProperties: false
+    DomainOrderStatus:
+      type: string
+      enum:
+        - quoted
+        - charging
+        - paid
+        - registering
+        - completed
+        - failed
+        - refunded
+        - credited
+    DomainRounding:
+      type: string
+      enum:
+        - x99
+        - none
+      description: "`x99` rounds prices up to .99 (default)."
+    DomainSettings:
+      type: object
+      properties:
+        registrar:
+          $ref: "#/components/schemas/RegistrarKey"
+          description: The registrar new purchases go to.
+        registrars:
+          type: array
+          items:
+            $ref: "#/components/schemas/RegistrarOption"
+        markup_percent:
+          type: number
+          description: 0–200, up to 2 decimals, default 20.
+        markup_min:
+          type: number
+          description: USD 0–100, up to 2 decimals, default 3 — the minimum margin per year.
+        rounding:
+          $ref: "#/components/schemas/DomainRounding"
+        enabled_tlds:
+          type: array
+          items:
+            type: string
+          description: Without dots, lower case.
+        renewal_lead_days:
+          type: number
+          description: 7–60, default 30 — renewal is charged this many days before expiry.
+        registration_agreement_url:
+          type:
+            - string
+            - "null"
+          description: null = the registrar's own agreement.
+        registrant_benefits_url:
+          type: string
+          description: Default ICANN's "Registrant benefits and responsibilities".
+        registrant_education_url:
+          type: string
+          description: Default ICANN's "Registrant educational information".
+        terms:
+          type: array
+          items:
+            $ref: "#/components/schemas/DomainTerm"
+          description: What schools link at checkout (resolved).
+        currency:
+          type: string
+          const: USD
+          description: The billing currency (read-only).
+        example:
+          type: object
+          properties:
+            cost:
+              type: number
+            price:
+              type: number
+          required:
+            - cost
+            - price
+          additionalProperties: false
+          description: The price of a 10.00 cost under these settings.
+        environment:
+          $ref: "#/components/schemas/DomainEnvironment"
+          description: The active registrar's environment ("sandbox" → badge).
+        warnings:
+          type: array
+          items:
+            type: string
+          description: Shown as a banner (e.g. the sandbox warning).
+      required:
+        - registrar
+        - registrars
+        - markup_percent
+        - markup_min
+        - rounding
+        - enabled_tlds
+        - renewal_lead_days
+        - registration_agreement_url
+        - registrant_benefits_url
+        - registrant_education_url
+        - terms
+        - currency
+        - example
+        - environment
+        - warnings
+      additionalProperties: false
+    DomainSettingsUpdate:
+      type: object
+      properties:
+        registrar:
+          $ref: "#/components/schemas/RegistrarKey"
+        markup_percent:
+          type: number
+        markup_min:
+          type: number
+        rounding:
+          $ref: "#/components/schemas/DomainRounding"
+        enabled_tlds:
+          type: array
+          items:
+            type: string
+        renewal_lead_days:
+          type: number
+        registration_agreement_url:
+          type:
+            - string
+            - "null"
+        registrant_benefits_url:
+          type:
+            - string
+            - "null"
+        registrant_education_url:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+      description: "`PUT /domains/settings` body: any subset; `null` resets a URL to its default."
+    DomainTerm:
+      type: object
+      properties:
+        key:
+          $ref: "#/components/schemas/TermKey"
+        label:
+          type: string
+        url:
+          type: string
+      required:
+        - key
+        - label
+        - url
+      additionalProperties: false
     DrmAvailability:
       type: string
       enum:
@@ -9850,6 +12246,16 @@ components:
         - items
       additionalProperties: false
       description: GET /billing/dunning — past-due invoices and the retry policy.
+    EmailTestResult:
+      type: object
+      properties:
+        sent_to:
+          type: string
+          description: The signed-in staff member's address the test was sent to.
+      required:
+        - sent_to
+      additionalProperties: false
+      description: "`POST /settings/email/test` → 202."
     EntitlementCell:
       type: object
       properties:
@@ -10064,12 +12470,42 @@ components:
         - Winning
         - Losing
         - Inconclusive
+    ExportDownload:
+      type: object
+      properties:
+        url:
+          type: string
+        expires_at:
+          type: string
+      required:
+        - url
+        - expires_at
+      additionalProperties: false
+      description: "`GET /backup/exports/{id}/download` — a 15-minute signed URL for the archive."
     ExportFormat:
       type: string
       enum:
         - json
         - csv
         - sql
+    ExportStatus:
+      type: string
+      enum:
+        - queued
+        - running
+        - ready
+        - failed
+        - expired
+    ExtendTrialInput:
+      type: object
+      properties:
+        days:
+          type: number
+          description: Days to add, 1–90 (default 14). A paused tenant gets a new trial of this many days from now.
+          minimum: 1
+          maximum: 90
+      additionalProperties: false
+      description: "`POST /tenants/{id}/extend-trial` body."
     Extension:
       type: object
       properties:
@@ -10296,6 +12732,15 @@ components:
         rollout:
           $ref: "#/components/schemas/FlagRollout"
       additionalProperties: false
+    ForgotPasswordInput:
+      type: object
+      properties:
+        email:
+          type: string
+      required:
+        - email
+      additionalProperties: false
+      description: "`POST /auth/forgot-password` body. Always answers `{ sent: true }` (no account enumeration)."
     FunnelStage:
       type: string
       enum:
@@ -10517,6 +12962,14 @@ components:
         - url
         - expires_at
       additionalProperties: false
+    ImpersonationInput:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: What the operator is investigating, 5–300 characters. Required when the platform setting `impersonation_requires_reason` is on; appended to the audit entry.
+      additionalProperties: false
+      description: "`POST /tenants/{id}/impersonate` body."
     IntegrationAdoption:
       type: object
       properties:
@@ -10585,6 +13038,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/IntegrationPolicy"
+          description: "Always empty: replaced by Platform → Feature availability."
         adoption:
           type: array
           items:
@@ -10639,6 +13093,11 @@ components:
             - "null"
         dunning_paused:
           type: boolean
+        provider:
+          anyOf:
+            - $ref: "#/components/schemas/InvoiceProvider"
+            - type: "null"
+          description: "The merchant of record that billed it, or null for Coursiva's own (Stripe) invoices. A provider retries its invoices on its own schedule: retry, waive and pause dunning answer 422 for them — manage them at the provider."
       required:
         - id
         - number
@@ -10651,13 +13110,23 @@ components:
         - attempts
         - next_retry_at
         - dunning_paused
+        - provider
       additionalProperties: false
+    InvoiceProvider:
+      type: string
+      enum:
+        - paddle
+        - lemon_squeezy
+      description: Merchants of record that bill schools themselves (the console's `billing_provider` setting picks one for new checkouts).
     InvoiceStatus:
       type: string
       enum:
         - Paid
         - Past due
         - Waived
+        - Void
+        - Open
+      description: Laravel BillingPresenter::adminInvoice. `Open` = issued, not charged yet; `Void` = cancelled.
     JobQueue:
       type: object
       properties:
@@ -10672,20 +13141,21 @@ components:
         - depth
         - failed
       additionalProperties: false
-    LimitKey:
+    LimitKeyWire:
       type: string
       enum:
-        - storageGb
-        - staffSeats
-        - apiPerMinute
+        - storage_gb
+        - staff_seats
+        - api_per_minute
         - students
         - courses
-        - liveRoomMinutes
+        - live_room_minutes
+        - ai_credits
+        - sms_credits
+        - live_sessions
     LiveRoomPolicyKey:
       type: string
       enum:
-        - byo_providers
-        - built_in_rooms
         - pull_recordings
         - fallback_to_built_in
     LiveRoomSettings:
@@ -10791,6 +13261,133 @@ components:
         - used_minutes
         - allowance_minutes
         - status
+      additionalProperties: false
+    LiveTenantUsage:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+        name:
+          type: string
+        room_minutes:
+          type: number
+          description: "The billing meter (`live_room_minutes`): participant-minutes in built-in rooms, learners and staff."
+        allowance:
+          type: number
+          description: Included minutes on the school's plan (0 = none included).
+        used_pct:
+          type:
+            - number
+            - "null"
+          description: roomMinutes ÷ allowance (null without an allowance).
+        sessions:
+          type: number
+          description: Live classes that ended in the month.
+        attendees:
+          type: number
+        participant_minutes:
+          type: number
+          description: Attendees' minutes in the room.
+        peak_concurrency:
+          type: number
+          description: The most learners in the school's rooms in one minute.
+      required:
+        - tenant_id
+        - name
+        - room_minutes
+        - allowance
+        - used_pct
+        - sessions
+        - attendees
+        - participant_minutes
+        - peak_concurrency
+      additionalProperties: false
+      description: One school's live usage in the month.
+    LiveUsage:
+      type: object
+      properties:
+        period:
+          type: string
+          description: First day of the month the figures cover (ISO date).
+        periods:
+          type: array
+          items:
+            type: string
+          description: The months the picker offers (first days, newest first).
+        totals:
+          type: object
+          properties:
+            room_minutes:
+              type: number
+            sessions:
+              type: number
+            attendees:
+              type: number
+            participant_minutes:
+              type: number
+            peak_concurrency:
+              type: number
+              description: The highest school peak in the month.
+            schools:
+              type: number
+              description: Schools with room minutes or sessions.
+          required:
+            - room_minutes
+            - sessions
+            - attendees
+            - participant_minutes
+            - peak_concurrency
+            - schools
+          additionalProperties: false
+        trend:
+          type: array
+          items:
+            type: object
+            properties:
+              period:
+                type: string
+              room_minutes:
+                type: number
+              sessions:
+                type: number
+              attendees:
+                type: number
+            required:
+              - period
+              - room_minutes
+              - sessions
+              - attendees
+            additionalProperties: false
+          description: Six months ending with the chosen one.
+        daily:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+              sessions:
+                type: number
+              peak_concurrency:
+                type: number
+            required:
+              - date
+              - sessions
+              - peak_concurrency
+            additionalProperties: false
+          description: "Each day of the month (to today): sessions and the busiest school's peak."
+        tenants:
+          type: array
+          items:
+            $ref: "#/components/schemas/LiveTenantUsage"
+          description: Top 20 schools by room minutes.
+      required:
+        - period
+        - periods
+        - totals
+        - trend
+        - daily
+        - tenants
       additionalProperties: false
     LoginInput:
       type: object
@@ -10988,11 +13585,18 @@ components:
         tenant_name:
           type: string
         meter:
-          type: string
+          $ref: "#/components/schemas/OverageMeter"
         usage:
-          type: string
+          type: number
+          description: Units used this month (credits, minutes).
+        allowance:
+          type: number
+          description: Units included in the tenant's plan (or its override).
         rate:
-          type: string
+          type: number
+          description: Price in dollars per `per` units over the allowance.
+        per:
+          type: number
         amount:
           type: number
         billed_at:
@@ -11005,7 +13609,9 @@ components:
         - tenant_name
         - meter
         - usage
+        - allowance
         - rate
+        - per
         - amount
         - billed_at
       additionalProperties: false
@@ -11027,6 +13633,12 @@ components:
         - items
       additionalProperties: false
       description: GET /billing/overages — the current metering period.
+    OverageMeter:
+      type: string
+      enum:
+        - ai_credits
+        - live_room_minutes
+        - sms_credits
     Overview:
       type: object
       properties:
@@ -11038,11 +13650,14 @@ components:
             value:
               type: number
             delta_pct:
-              type: number
+              type:
+                - number
+                - "null"
           required:
             - value
             - delta_pct
           additionalProperties: false
+          description: "`deltaPct` is null when there was no MRR at the start of the range (no meaningful %)."
         tenants:
           type: object
           properties:
@@ -11256,6 +13871,33 @@ components:
           type:
             - integer
             - "null"
+    PasswordResetDone:
+      type: object
+      properties:
+        reset:
+          type: boolean
+      required:
+        - reset
+      additionalProperties: false
+      description: "`{ reset: true }` from reset-password."
+    PasswordResetSent:
+      type: object
+      properties:
+        sent:
+          type: boolean
+      required:
+        - sent
+      additionalProperties: false
+      description: "`{ sent: true }` from forgot-password."
+    PasswordUpdated:
+      type: object
+      properties:
+        updated:
+          type: boolean
+      required:
+        - updated
+      additionalProperties: false
+      description: "`{ updated: true }` from change-password."
     Permission:
       type: string
       enum:
@@ -11301,11 +13943,19 @@ components:
         - label
         - plans
       additionalProperties: false
+    PlanKey:
+      type: string
+      enum:
+        - launch
+        - growth
+        - scale
+      description: Plan key on the provisioning wire (`launch|growth|scale`; the API also accepts the display names).
     PlanLimit:
       type: object
       properties:
         key:
-          $ref: "#/components/schemas/LimitKey"
+          $ref: "#/components/schemas/LimitKeyWire"
+          description: Snake_case value (`storage_gb`), as Laravel sends it; `limitKeyOf()` gives the app key.
         values:
           type: array
           items:
@@ -11367,7 +14017,8 @@ components:
           additionalProperties: false
           description: Plan default limits. `0` = unlimited.
         highlight:
-          type: string
+          type: boolean
+          description: "The recommended plan (Laravel: Growth), badged on its card and on the marketing pricing page."
       required:
         - plan
         - price
@@ -11377,6 +14028,48 @@ components:
         - limits
         - highlight
       additionalProperties: false
+    PlatformConnection:
+      type: object
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        role:
+          type:
+            - string
+            - "null"
+        kind:
+          $ref: "#/components/schemas/ConnectionKind"
+        connected:
+          type: boolean
+        verified_at:
+          type:
+            - string
+            - "null"
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConnectionField"
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConnectionCapability"
+          description: Capabilities that need this connection, each with its "Available to schools" switch (see Feature availability).
+      required:
+        - key
+        - name
+        - description
+        - role
+        - kind
+        - connected
+        - verified_at
+        - fields
+        - capabilities
+      additionalProperties: false
+      description: A service the platform connects to with credentials pasted here (storage and DRM live on the Media screen).
     PlatformService:
       type: object
       properties:
@@ -11401,15 +14094,82 @@ components:
     PlatformSettings:
       type: object
       properties:
+        platform_name:
+          type: string
+          description: Shown in the console, platform emails and to tenants that keep platform branding. 2–60 characters.
         support_email:
           type: string
         primary_domain:
           type: string
+        help_centre_url:
+          type: string
+          description: Linked from tenant admin screens; '' hides the link. https URL.
+        default_timezone:
+          type: string
+          description: IANA zone applied to new workspaces and console date rendering.
+        public_signup:
+          type: boolean
+          description: "Self-service sign-up on the marketing site. Off: /signup refuses, the console can still create tenants."
+        reserved_subdomains:
+          type: array
+          items:
+            type: string
+          description: Extra subdomains nobody may claim (on top of the platform's built-in reserved list).
+        min_subdomain_length:
+          type: number
+          description: Shortest subdomain a new workspace may take, 3–20.
+        default_brand_color:
+          type: string
+          description: Brand colour new workspaces start with (#RRGGBB).
+        default_data_region:
+          $ref: "#/components/schemas/DataRegion"
+          description: Where new workspaces' data lives unless chosen otherwise.
+        footer_text:
+          type: string
+          description: Footer line of platform emails and pages, ≤ 300 characters.
+        brand_assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrandAsset"
+        legal_company_name:
+          type: string
+        legal_address:
+          type: string
+        terms_url:
+          type: string
+        privacy_url:
+          type: string
+        social_links:
+          type: array
+          items:
+            type: string
+          description: https profile URLs shown in platform email footers, ≤ 10.
+        mail_from_name:
+          type: string
+        mail_from_address:
+          type: string
+        mail_reply_to:
+          type: string
+          description: "'' = no Reply-To."
+        email_footer:
+          type: string
         trial_days:
           type: number
-          description: Trial length for new tenants, 7–60 days.
+          description: "Free-trial length of new schools, 0–90 days (section `signup`). The single source: the same value as `GET /billing/pricing` → `trialDays`. 0 = no free trial, schools pay the first period at sign-up."
+        trial_requires_card:
+          type: boolean
+          description: Sign-up needs a verified card before the trial starts (a refunded card check). Off restores card-less trials, which pause at the trial's end until a card is added. Section `signup`.
+        card_check_amount:
+          type: number
+          description: The card check's amount in minor units of `billingCurrency`, 50–500 (Stripe's minimum is 50 = $0.50 in USD); always refunded. Shown as `amount / 100` in that currency.
+        billing_currency:
+          type: string
+          description: Read-only ISO 4217 code Coursiva bills schools in (`USD` today; backend config). Ignored by `PATCH`.
         default_plan:
           $ref: "#/components/schemas/Plan"
+        billing_provider:
+          $ref: "#/components/schemas/BillingProvider"
+          description: Where schools check out and pay (section `billing`). Changing it needs `billing.manage` too, and a connected provider (Platform → Connections); schools already subscribed keep theirs. Not resettable.
         dunning_retries:
           type: number
           description: Failed-payment retries before a tenant is suspended, 1–5.
@@ -11425,40 +14185,150 @@ components:
         idle_lock_minutes:
           type: number
           description: "Idle lock: the console locks after this many minutes without activity (5, 10, 15, 30 or 60)."
+        console_ip_allowlist:
+          type: array
+          items:
+            type: string
+          description: IPs or CIDR ranges the console accepts sign-ins from; empty = anywhere. ≤ 50.
+        impersonation_requires_reason:
+          type: boolean
+          description: Staff must give a reason before impersonating a tenant.
+        impersonation_max_minutes:
+          type: number
+          description: Impersonation sessions end after this many minutes, 15–240.
         weekly_digest:
           type: boolean
         billing_alerts:
           type: boolean
         incident_alerts:
           type: boolean
+        maintenance_mode:
+          type: boolean
+          description: Tenant dashboards and school sites answer 503 with `maintenanceMessage`; the console keeps working.
+        maintenance_message:
+          type: string
+        maintenance_exempt_tenants:
+          type: array
+          items:
+            type: string
+          description: Tenant ids exempt from maintenance mode (e.g. for testing a fix), ≤ 100.
       required:
+        - platform_name
         - support_email
         - primary_domain
+        - help_centre_url
+        - default_timezone
+        - public_signup
+        - reserved_subdomains
+        - min_subdomain_length
+        - default_brand_color
+        - default_data_region
+        - footer_text
+        - brand_assets
+        - legal_company_name
+        - legal_address
+        - terms_url
+        - privacy_url
+        - social_links
+        - mail_from_name
+        - mail_from_address
+        - mail_reply_to
+        - email_footer
         - trial_days
+        - trial_requires_card
+        - card_check_amount
+        - billing_currency
         - default_plan
+        - billing_provider
         - dunning_retries
         - auto_suspend
         - require_staff_two_factor
         - enforce_sso
         - session_hours
         - idle_lock_minutes
+        - console_ip_allowlist
+        - impersonation_requires_reason
+        - impersonation_max_minutes
         - weekly_digest
         - billing_alerts
         - incident_alerts
+        - maintenance_mode
+        - maintenance_message
+        - maintenance_exempt_tenants
       additionalProperties: false
       description: The `platformSettings` singleton.
     PlatformSettingsUpdate:
       type: object
       properties:
+        platform_name:
+          type: string
+          description: Shown in the console, platform emails and to tenants that keep platform branding. 2–60 characters.
         support_email:
           type: string
         primary_domain:
           type: string
+        help_centre_url:
+          type: string
+          description: Linked from tenant admin screens; '' hides the link. https URL.
+        default_timezone:
+          type: string
+          description: IANA zone applied to new workspaces and console date rendering.
+        public_signup:
+          type: boolean
+          description: "Self-service sign-up on the marketing site. Off: /signup refuses, the console can still create tenants."
+        reserved_subdomains:
+          type: array
+          items:
+            type: string
+          description: Extra subdomains nobody may claim (on top of the platform's built-in reserved list).
+        min_subdomain_length:
+          type: number
+          description: Shortest subdomain a new workspace may take, 3–20.
+        default_brand_color:
+          type: string
+          description: Brand colour new workspaces start with (#RRGGBB).
+        default_data_region:
+          $ref: "#/components/schemas/DataRegion"
+          description: Where new workspaces' data lives unless chosen otherwise.
+        footer_text:
+          type: string
+          description: Footer line of platform emails and pages, ≤ 300 characters.
+        legal_company_name:
+          type: string
+        legal_address:
+          type: string
+        terms_url:
+          type: string
+        privacy_url:
+          type: string
+        social_links:
+          type: array
+          items:
+            type: string
+          description: https profile URLs shown in platform email footers, ≤ 10.
+        mail_from_name:
+          type: string
+        mail_from_address:
+          type: string
+        mail_reply_to:
+          type: string
+          description: "'' = no Reply-To."
+        email_footer:
+          type: string
         trial_days:
           type: number
-          description: Trial length for new tenants, 7–60 days.
+          description: "Free-trial length of new schools, 0–90 days (section `signup`). The single source: the same value as `GET /billing/pricing` → `trialDays`. 0 = no free trial, schools pay the first period at sign-up."
+        trial_requires_card:
+          type: boolean
+          description: Sign-up needs a verified card before the trial starts (a refunded card check). Off restores card-less trials, which pause at the trial's end until a card is added. Section `signup`.
+        card_check_amount:
+          type: number
+          description: The card check's amount in minor units of `billingCurrency`, 50–500 (Stripe's minimum is 50 = $0.50 in USD); always refunded. Shown as `amount / 100` in that currency.
         default_plan:
           $ref: "#/components/schemas/Plan"
+        billing_provider:
+          $ref: "#/components/schemas/BillingProvider"
+          description: Where schools check out and pay (section `billing`). Changing it needs `billing.manage` too, and a connected provider (Platform → Connections); schools already subscribed keep theirs. Not resettable.
         dunning_retries:
           type: number
           description: Failed-payment retries before a tenant is suspended, 1–5.
@@ -11474,12 +14344,33 @@ components:
         idle_lock_minutes:
           type: number
           description: "Idle lock: the console locks after this many minutes without activity (5, 10, 15, 30 or 60)."
+        console_ip_allowlist:
+          type: array
+          items:
+            type: string
+          description: IPs or CIDR ranges the console accepts sign-ins from; empty = anywhere. ≤ 50.
+        impersonation_requires_reason:
+          type: boolean
+          description: Staff must give a reason before impersonating a tenant.
+        impersonation_max_minutes:
+          type: number
+          description: Impersonation sessions end after this many minutes, 15–240.
         weekly_digest:
           type: boolean
         billing_alerts:
           type: boolean
         incident_alerts:
           type: boolean
+        maintenance_mode:
+          type: boolean
+          description: Tenant dashboards and school sites answer 503 with `maintenanceMessage`; the console keeps working.
+        maintenance_message:
+          type: string
+        maintenance_exempt_tenants:
+          type: array
+          items:
+            type: string
+          description: Tenant ids exempt from maintenance mode (e.g. for testing a fix), ≤ 100.
       additionalProperties: false
     PlatformStatus:
       type: object
@@ -11546,7 +14437,10 @@ components:
         state:
           $ref: "#/components/schemas/PolicyState"
         note:
-          type: string
+          type:
+            - string
+            - "null"
+          description: What changed in this version; null when none was given.
         published_at:
           type:
             - string
@@ -11581,6 +14475,29 @@ components:
         - acceptance_deadline
         - acceptance
       additionalProperties: false
+    PolicyDraftInput:
+      type: object
+      properties:
+        doc_key:
+          $ref: "#/components/schemas/PolicyFamily"
+        version:
+          type: string
+        note:
+          type:
+            - string
+            - "null"
+      required:
+        - doc_key
+        - version
+      additionalProperties: false
+      description: "`POST /governance/policies` — a new Draft version (one draft per family; the version label must be new)."
+    PolicyFamily:
+      type: string
+      enum:
+        - tos
+        - dpa
+        - aup
+        - student_terms
     PolicyOverview:
       type: object
       properties:
@@ -11641,6 +14558,7 @@ components:
           type: number
         trial_days:
           type: number
+          description: "Free-trial length of new schools, 0–90 (0 = pay at sign-up). The single source: also `GET /settings` → `trialDays`."
         addons:
           type: array
           items:
@@ -11677,6 +14595,7 @@ components:
           type: number
         trial_days:
           type: number
+          description: 0–90; saved to the same platform setting as `PATCH /settings` → `trialDays`.
         addons:
           type: array
           items:
@@ -11762,12 +14681,13 @@ components:
         owner_email:
           type: string
         plan:
-          $ref: "#/components/schemas/Plan"
+          $ref: "#/components/schemas/PlanKey"
       required:
         - name
         - owner_email
         - plan
       additionalProperties: false
+      description: "`POST /tenants` body."
     QueueRetryResult:
       type: object
       properties:
@@ -11792,19 +14712,33 @@ components:
           type: number
           description: Plan default (`api_per_minute` in the plan limits).
         peak_per_minute:
-          type: number
-          description: Highest per-tenant rate seen today on this plan.
+          type:
+            - number
+            - "null"
+          description: Highest per-tenant rate seen today on this plan; null = not sampled yet.
       required:
         - plan
         - per_minute
         - default_per_minute
         - peak_per_minute
       additionalProperties: false
+    RecoveryCodes:
+      type: object
+      properties:
+        recovery_codes:
+          type: array
+          items:
+            type: string
+      required:
+        - recovery_codes
+      additionalProperties: false
+      description: Recovery codes, shown once (`POST /auth/two-factor/confirm`, `POST /auth/two-factor/recovery-codes`).
     Region:
       type: string
       enum:
         - EU
         - US
+        - UK
         - APAC
     RegionInfo:
       type: object
@@ -11847,6 +14781,393 @@ components:
         - pending_migrations
         - sub_processors
       additionalProperties: false
+    RegistrantContact:
+      type: object
+      properties:
+        name:
+          type: string
+        organization:
+          type:
+            - string
+            - "null"
+        email:
+          type: string
+        phone:
+          type: string
+        street:
+          type: string
+        city:
+          type: string
+        state:
+          type:
+            - string
+            - "null"
+        postal_code:
+          type: string
+        country:
+          type: string
+      required:
+        - name
+        - organization
+        - email
+        - phone
+        - street
+        - city
+        - state
+        - postal_code
+        - country
+      additionalProperties: false
+      description: "Personal data: decrypted for staff; null after erasure."
+    RegistrarCapabilities:
+      type: object
+      properties:
+        renew:
+          type: boolean
+        auto_renew_toggle:
+          type: boolean
+        transfer_out:
+          type: boolean
+        contact_update:
+          type: boolean
+        dns:
+          type: boolean
+      required:
+        - renew
+        - auto_renew_toggle
+        - transfer_out
+        - contact_update
+        - dns
+      additionalProperties: false
+    RegistrarKey:
+      type: string
+      enum:
+        - cloudflare
+        - fake
+      description: "`fake` exists only outside production."
+    RegistrarOption:
+      type: object
+      properties:
+        key:
+          $ref: "#/components/schemas/RegistrarKey"
+        name:
+          type: string
+          description: e.g. "Cloudflare Registrar".
+        configured:
+          type: boolean
+          description: Its connection is saved and verified (or the env fallback is set).
+        environment:
+          $ref: "#/components/schemas/DomainEnvironment"
+          description: "Cloudflare: the connection's mode (blank = sandbox)."
+        capabilities:
+          $ref: "#/components/schemas/RegistrarCapabilities"
+      required:
+        - key
+        - name
+        - configured
+        - environment
+        - capabilities
+      additionalProperties: false
+    RegistrarTask:
+      type: object
+      properties:
+        id:
+          type: string
+          description: '"rgt_…"'
+        kind:
+          $ref: "#/components/schemas/RegistrarTaskKind"
+        status:
+          $ref: "#/components/schemas/RegistrarTaskStatus"
+        registration_id:
+          type: string
+        domain:
+          type: string
+        tenant_id:
+          type: string
+        tenant_name:
+          type: string
+        provider:
+          $ref: "#/components/schemas/RegistrarKey"
+        instructions:
+          type: string
+          description: What to do in the registrar's dashboard.
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskDetail"
+          description: Context in a fixed key order; never secrets.
+        resolution_note:
+          type:
+            - string
+            - "null"
+        completed_by:
+          type:
+            - string
+            - "null"
+          description: Staff name ("System" when closed automatically).
+        completed_at:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+      required:
+        - id
+        - kind
+        - status
+        - registration_id
+        - domain
+        - tenant_id
+        - tenant_name
+        - provider
+        - instructions
+        - details
+        - resolution_note
+        - completed_by
+        - completed_at
+        - created_at
+      additionalProperties: false
+    RegistrarTaskKind:
+      type: string
+      enum:
+        - transfer_out
+        - contact_update
+        - disable_auto_renew
+        - renew
+        - registration_review
+    RegistrarTaskStatus:
+      type: string
+      enum:
+        - open
+        - done
+        - cancelled
+    RegistrationDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          description: '"dreg_…"'
+        tenant_id:
+          type: string
+        tenant_name:
+          type: string
+        domain:
+          type: string
+        provider:
+          $ref: "#/components/schemas/RegistrarKey"
+        environment:
+          $ref: "#/components/schemas/DomainEnvironment"
+          description: '"sandbox": a test registration — never renewed nor connected.'
+        status:
+          $ref: "#/components/schemas/RegistrationStatus"
+        registered_at:
+          type:
+            - string
+            - "null"
+        expires_at:
+          type:
+            - string
+            - "null"
+        days_until_expiry:
+          type:
+            - number
+            - "null"
+        auto_renew:
+          type: boolean
+          description: The school's choice.
+        provider_auto_renew:
+          type:
+            - boolean
+            - "null"
+          description: What the registrar is set to (null = unknown).
+        renewal_price:
+          type:
+            - number
+            - "null"
+        renewal_cost:
+          type:
+            - number
+            - "null"
+          description: Registrar cost.
+        currency:
+          type: string
+          const: USD
+        open_tasks:
+          type: number
+        connected:
+          type: boolean
+          description: customDomain !== null.
+        custom_domain:
+          anyOf:
+            - $ref: "#/components/schemas/CustomDomainLink"
+            - type: "null"
+        contact_pending:
+          type: boolean
+          description: A contact change waits for a contact_update task.
+        created_at:
+          type: string
+        provider_ref:
+          type:
+            - string
+            - "null"
+        privacy:
+          type: boolean
+        transfer_locked_until:
+          type:
+            - string
+            - "null"
+        failure_reason:
+          type:
+            - string
+            - "null"
+        last_reminder:
+          type:
+            - number
+            - "null"
+          enum:
+            - 30
+            - 7
+            - 1
+            - null
+        registrant:
+          anyOf:
+            - $ref: "#/components/schemas/RegistrantContact"
+            - type: "null"
+        orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/DomainOrderRow"
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/RegistrarTask"
+      required:
+        - auto_renew
+        - connected
+        - contact_pending
+        - created_at
+        - currency
+        - custom_domain
+        - days_until_expiry
+        - domain
+        - environment
+        - expires_at
+        - failure_reason
+        - id
+        - last_reminder
+        - open_tasks
+        - orders
+        - privacy
+        - provider
+        - provider_auto_renew
+        - provider_ref
+        - registered_at
+        - registrant
+        - renewal_cost
+        - renewal_price
+        - status
+        - tasks
+        - tenant_id
+        - tenant_name
+        - transfer_locked_until
+      additionalProperties: false
+    RegistrationRow:
+      type: object
+      properties:
+        id:
+          type: string
+          description: '"dreg_…"'
+        tenant_id:
+          type: string
+        tenant_name:
+          type: string
+        domain:
+          type: string
+        provider:
+          $ref: "#/components/schemas/RegistrarKey"
+        environment:
+          $ref: "#/components/schemas/DomainEnvironment"
+          description: '"sandbox": a test registration — never renewed nor connected.'
+        status:
+          $ref: "#/components/schemas/RegistrationStatus"
+        registered_at:
+          type:
+            - string
+            - "null"
+        expires_at:
+          type:
+            - string
+            - "null"
+        days_until_expiry:
+          type:
+            - number
+            - "null"
+        auto_renew:
+          type: boolean
+          description: The school's choice.
+        provider_auto_renew:
+          type:
+            - boolean
+            - "null"
+          description: What the registrar is set to (null = unknown).
+        renewal_price:
+          type:
+            - number
+            - "null"
+        renewal_cost:
+          type:
+            - number
+            - "null"
+          description: Registrar cost.
+        currency:
+          type: string
+          const: USD
+        open_tasks:
+          type: number
+        connected:
+          type: boolean
+          description: customDomain !== null.
+        custom_domain:
+          anyOf:
+            - $ref: "#/components/schemas/CustomDomainLink"
+            - type: "null"
+        contact_pending:
+          type: boolean
+          description: A contact change waits for a contact_update task.
+        created_at:
+          type: string
+      required:
+        - id
+        - tenant_id
+        - tenant_name
+        - domain
+        - provider
+        - environment
+        - status
+        - registered_at
+        - expires_at
+        - days_until_expiry
+        - auto_renew
+        - provider_auto_renew
+        - renewal_price
+        - renewal_cost
+        - currency
+        - open_tasks
+        - connected
+        - custom_domain
+        - contact_pending
+        - created_at
+      additionalProperties: false
+    RegistrationStatus:
+      type: string
+      enum:
+        - registering
+        - active
+        - expiring
+        - grace
+        - expired
+        - transfer_requested
+        - transferred_out
+        - failed
     RegistryPolicy:
       type: object
       properties:
@@ -11893,6 +15214,24 @@ components:
         - outcome
         - message
       additionalProperties: false
+    ResetPasswordInput:
+      type: object
+      properties:
+        email:
+          type: string
+        token:
+          type: string
+        password:
+          type: string
+        password_confirmation:
+          type: string
+      required:
+        - email
+        - token
+        - password
+        - password_confirmation
+      additionalProperties: false
+      description: "`POST /auth/reset-password` body — also accepts a staff invitation (the invite link carries `invite=1`)."
     Restore:
       type: object
       properties:
@@ -11991,7 +15330,8 @@ components:
         - running
         - completed
         - cancelled
-      description: "Restore lifecycle (server-side state machine): `staged` → (second staff member approves) → `approved` → `running` → `completed`; `staged` → `cancelled`."
+        - failed
+      description: "Laravel BackupRestore: `failed` when the restore worker errors (the error is in the backup activity feed)."
     RetentionPeriod:
       type: string
       enum:
@@ -12046,7 +15386,7 @@ components:
           type: number
         net_change:
           type: number
-          description: Sum of the movement amounts for `movementMonth`.
+          description: Sum of every movement amount for `movementMonth` (not just the ones listed).
         past_due_tenants:
           type: number
         movement_month:
@@ -12057,6 +15397,8 @@ components:
           items:
             type: object
             properties:
+              id:
+                type: string
               kind:
                 $ref: "#/components/schemas/MovementKind"
               label:
@@ -12066,11 +15408,16 @@ components:
               amount:
                 type: number
             required:
+              - id
               - kind
               - label
               - detail
               - amount
             additionalProperties: false
+          description: The largest movements of the month (at most 12), biggest first; `id` is a stable key.
+        movement_count:
+          type: number
+          description: How many movements the month had in total.
         churn_reasons:
           type: array
           items:
@@ -12113,6 +15460,7 @@ components:
         - past_due_tenants
         - movement_month
         - movements
+        - movement_count
         - churn_reasons
         - payouts
       additionalProperties: false
@@ -12226,12 +15574,19 @@ components:
           type: string
           description: DMARC policy as published, e.g. `p=reject`, or `none`.
         sent30d:
-          type: number
+          type:
+            - number
+            - "null"
+          description: "Per-domain volume and rates need the mail provider's event webhooks: null = not measured."
         bounce_rate:
-          type: number
+          type:
+            - number
+            - "null"
           description: Percent, e.g. 2.9
         complaint_rate:
-          type: number
+          type:
+            - number
+            - "null"
           description: Percent, e.g. 0.31
         risk:
           $ref: "#/components/schemas/SenderRisk"
@@ -12272,6 +15627,47 @@ components:
         - Operational
         - Degraded
         - Outage
+    SettingsMetaWire:
+      type: object
+      properties:
+        fields:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              key:
+                type: string
+                pattern: ^[a-z][a-z0-9_]*$
+              section:
+                $ref: "#/components/schemas/SettingsSection"
+              default:
+                description: Shipped default (JSON), or null when the setting has none or isn't resettable (primary domain, billing provider).
+              effect:
+                type: string
+                description: Where the value is read, e.g. "Marketing sign-up (POST /signup)". Not translated.
+            required:
+              - default
+              - effect
+              - key
+              - section
+      required:
+        - fields
+      additionalProperties: false
+      description: "`GET /settings/meta` as Laravel sends it: `key` is a snake_case *value* (`public_signup`), which the API client doesn't convert (it camelises object keys only). `useSettingsMeta` maps it to `SettingsMeta`."
+    SettingsSection:
+      type: string
+      enum:
+        - platform
+        - signup
+        - branding
+        - legal
+        - email
+        - security
+        - billing
+        - notifications
+        - maintenance
+      description: Sections of `PlatformSettings` (each has its own Save, Restore defaults and "where these values are read").
     Severity:
       type: string
       enum:
@@ -12501,9 +15897,13 @@ components:
             scorm_packages:
               type: number
             xapi_statements24h:
-              type: number
+              type:
+                - number
+                - "null"
             lti_launches30d:
-              type: number
+              type:
+                - number
+                - "null"
             failed_imports:
               type: number
           required:
@@ -12512,6 +15912,7 @@ components:
             - lti_launches30d
             - failed_imports
           additionalProperties: false
+          description: "`xapiStatements24h` / `ltiLaunches30d`: null = not measured platform-wide yet."
         standards:
           type: array
           items:
@@ -12770,6 +16171,17 @@ components:
         - csat
         - views
       additionalProperties: false
+    SuspensionReason:
+      anyOf:
+        - type: string
+        - type: string
+          enum:
+            - billing
+            - canceled
+            - payment_method_required
+            - maintenance
+            - staff
+      description: Known `suspension_reason` values; staff suspensions may carry any other string.
     SystemStatus:
       type: object
       properties:
@@ -12802,6 +16214,36 @@ components:
         - status_page_url
         - services
       additionalProperties: false
+    TaskDetail:
+      type: object
+      properties:
+        key:
+          $ref: "#/components/schemas/TaskDetailKey"
+        label:
+          type: string
+          enum:
+            - Reason
+            - Details
+            - Requested
+            - Expires
+            - Order
+        value:
+          type: string
+          description: ISO-8601 for requested_at / expires_at; a readable sentence for reason.
+      required:
+        - key
+        - label
+        - value
+      additionalProperties: false
+      description: Task context as a list — never data values as keys.
+    TaskDetailKey:
+      type: string
+      enum:
+        - reason
+        - detail
+        - requested_at
+        - expires_at
+        - order_id
     TaxRegion:
       type: object
       properties:
@@ -12903,6 +16345,11 @@ components:
           type:
             - string
             - "null"
+        suspension_reason:
+          anyOf:
+            - $ref: "#/components/schemas/SuspensionReason"
+            - type: "null"
+          description: "Set only while `status` is `Suspended`, else null: `billing` (final failed payment), `canceled` (subscription ended), `payment_method_required` (**paused**: the trial ended without a card; `extend-trial` reopens it), `maintenance`, or a staff reason (any other string, e.g. `staff`). The first three are billing holds."
         watched:
           type: boolean
           description: Whether the signed-in staff member watches this tenant.
@@ -12923,6 +16370,7 @@ components:
         - created_at
         - last_active_at
         - trial_ends_at
+        - suspension_reason
         - watched
       additionalProperties: false
       description: Row in the tenant directory.
@@ -13047,11 +16495,33 @@ components:
           type:
             - string
             - "null"
+        suspension_reason:
+          anyOf:
+            - $ref: "#/components/schemas/SuspensionReason"
+            - type: "null"
+          description: "Set only while `status` is `Suspended`, else null: `billing` (final failed payment), `canceled` (subscription ended), `payment_method_required` (**paused**: the trial ended without a card; `extend-trial` reopens it), `maintenance`, or a staff reason (any other string, e.g. `staff`). The first three are billing holds."
         watched:
           type: boolean
           description: Whether the signed-in staff member watches this tenant.
         region:
           $ref: "#/components/schemas/Region"
+          description: Where the data is now.
+        region_request:
+          anyOf:
+            - type: object
+              properties:
+                region:
+                  $ref: "#/components/schemas/Region"
+                requested_at:
+                  type: string
+                requested_by:
+                  type: string
+              required:
+                - region
+                - requested_at
+              additionalProperties: false
+            - type: "null"
+          description: A requested data-residency move the platform team hasn't carried out yet (there is no automatic cutover), or null. Changing `region` via PATCH creates one; it never moves the data by itself.
         notes:
           type:
             - string
@@ -13162,6 +16632,8 @@ components:
                   - Paid
                   - Past due
                   - Waived
+                  - Void
+                  - Open
             required:
               - id
               - issued_at
@@ -13181,7 +16653,18 @@ components:
               - at
               - text
             additionalProperties: false
+        trial:
+          anyOf:
+            - $ref: "#/components/schemas/TenantTrial"
+            - type: "null"
+          description: Trial and card state of the subscription; null when the tenant has no subscription yet.
+        checkout_frozen_at:
+          type:
+            - string
+            - "null"
+          description: When the abuse queue's "Freeze checkout" blocked new card payments; null when not frozen. Lifted with `DELETE /governance/tenants/{id}/checkout-freeze` (governance.manage).
       required:
+        - checkout_frozen_at
         - created_at
         - domain
         - extensions
@@ -13201,12 +16684,15 @@ components:
         - owner_name
         - plan
         - region
+        - region_request
         - seats_used
         - stage
         - status
         - storage_used_gb
         - students
+        - suspension_reason
         - timeline
+        - trial
         - trial_ends_at
         - utilization
         - watched
@@ -13225,16 +16711,18 @@ components:
         include_media:
           type: boolean
         status:
-          type: string
-          enum:
-            - queued
-            - ready
+          $ref: "#/components/schemas/ExportStatus"
         requested_at:
           type: string
         expires_at:
           type: string
         requested_by_name:
           type: string
+        size_bytes:
+          type:
+            - number
+            - "null"
+          description: Archive size once ready, else null.
       required:
         - id
         - tenant_id
@@ -13245,6 +16733,7 @@ components:
         - requested_at
         - expires_at
         - requested_by_name
+        - size_bytes
       additionalProperties: false
     TenantExportInput:
       type: object
@@ -13272,7 +16761,8 @@ components:
       type: object
       properties:
         key:
-          $ref: "#/components/schemas/LimitKey"
+          $ref: "#/components/schemas/LimitKeyWire"
+          description: Snake_case value (`storage_gb`), as Laravel sends it; `limitKeyOf()` gives the app key.
         value:
           type: number
         plan_default:
@@ -13321,9 +16811,15 @@ components:
           type: number
         region:
           $ref: "#/components/schemas/Region"
+          description: Where the data is now. A requested move doesn't change it (there is no automatic cutover).
         migrating:
           type: boolean
-          description: A move was scheduled and the cutover (~20 min) hasn't finished.
+          description: A move was requested and the platform team hasn't migrated the data yet.
+        requested_region:
+          anyOf:
+            - $ref: "#/components/schemas/Region"
+            - type: "null"
+          description: Target of the pending move, or null.
       required:
         - tenant_id
         - name
@@ -13331,6 +16827,7 @@ components:
         - students
         - region
         - migrating
+        - requested_region
       additionalProperties: false
     TenantSegment:
       type: string
@@ -13424,6 +16921,30 @@ components:
         - learners
         - segments
       additionalProperties: false
+    TenantTrial:
+      type: object
+      properties:
+        card_verified:
+          type: boolean
+          description: A card saved with Coursiva will be charged when the trial ends.
+        requires_card:
+          type: boolean
+          description: Trialing or paused with no way to charge (no card; or a merchant-of-record school that never checked out).
+        paused:
+          type: boolean
+          description: "The trial ended without a card (`suspension_reason: payment_method_required`)."
+        trial_ends_at:
+          type:
+            - string
+            - "null"
+          description: While trialing or paused, else null.
+      required:
+        - card_verified
+        - requires_card
+        - paused
+        - trial_ends_at
+      additionalProperties: false
+      description: "`TenantDetail.trial`: the subscription's trial and card state (null: no subscription yet)."
     TenantUpdate:
       type: object
       properties:
@@ -13436,6 +16957,12 @@ components:
             - string
             - "null"
       additionalProperties: false
+    TermKey:
+      type: string
+      enum:
+        - registration_agreement
+        - registrant_benefits
+        - registrant_education
     Ticket:
       type: object
       properties:
@@ -13681,6 +17208,19 @@ components:
         - info
         - flat
         - accent
+    TwoFactorSetup:
+      type: object
+      properties:
+        secret:
+          type: string
+        otpauth_url:
+          type: string
+          description: "`otpauth://totp/…` URI for authenticator apps."
+      required:
+        - secret
+        - otpauth_url
+      additionalProperties: false
+      description: "`POST /auth/two-factor` → the unconfirmed TOTP secret, shown as a QR code and as text."
     Usage:
       type: object
       properties:
@@ -13779,6 +17319,9 @@ components:
           $ref: "#/components/schemas/Role"
         two_factor_enabled:
           type: boolean
+        two_factor_setup_required:
+          type: boolean
+          description: "The platform requires staff 2FA (`require_staff_two_factor`) and this member has none: every route but `auth/*` answers 403 `two_factor_setup_required` until they enrol, so the console keeps them on Account → Security."
         permissions:
           type: array
           items:
@@ -13792,6 +17335,7 @@ components:
         - email
         - role
         - two_factor_enabled
+        - two_factor_setup_required
         - permissions
         - idle_lock_minutes
       additionalProperties: false
@@ -13853,10 +17397,14 @@ components:
                 type:
                   - string
                   - "null"
+                description: null = a platform-level endpoint.
               url:
                 type: string
               events:
-                type: string
+                type: array
+                items:
+                  type: string
+                description: Subscribed event names; `*` = every event.
               success_rate7d:
                 type: number
               status:

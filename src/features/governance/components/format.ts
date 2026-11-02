@@ -17,7 +17,7 @@ export const strikeTone = (n: number, limit: number): Tone => (n >= limit ? 'bad
 export const monthList = (isos: string[]) => isos.map((iso) => monthName(iso, 'short')).join(', ');
 
 /** Region → dot tone (the design's region palette mapped to tokens). */
-export const REGION_TONE = { EU: 'info', US: 'good', APAC: 'warn' } as const satisfies Record<string, Tone>;
+export const REGION_TONE = { EU: 'info', US: 'good', UK: 'accent', APAC: 'warn' } as const satisfies Record<string, Tone>;
 
 /** Whether `iso` is less than 24 hours ago. */
 export const withinDay = (iso: string, now = Date.now()) => now - new Date(iso).getTime() < 86_400_000;

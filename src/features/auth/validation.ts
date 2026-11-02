@@ -12,6 +12,20 @@ export function validateCredentials(email: string, password: string): LoginError
   return errors;
 }
 
+/** A 6-digit TOTP code, or a single-use recovery code (`xxxxx-xxxxx`) — the API accepts both. */
 export function validateCode(code: string): LoginErrors {
-  return /^\d{6}$/.test(code.replace(/\s/g, '')) ? {} : { code: t('validation.code') };
+  const c = code.replace(/\s/g, '');
+  return /^\d{6}$/.test(c) || /^[a-z0-9]{5}-[a-z0-9]{5}$/i.test(c) ? {} : { code: t('validation.code') };
 }
+
+export type PasswordErrors = Partial<Record<'currentPassword' | 'password' | 'passwordConfirmation', string>>;
+
+/** New-password rules the API enforces everywhere (min 8 outside production; production adds strength checks → 422). */
+export function validateNewPassword(password: string, confirmation: string): PasswordErrors {
+  const errors: PasswordErrors = {};
+  if (password.length < 8) errors.password = t('validation.passwordMin');
+  else if (password !== confirmation) errors.passwordConfirmation = t('validation.passwordMatch');
+  return errors;
+}
+
+export const validateEmail = (email: string): LoginErrors => (EMAIL_RE.test(email.trim()) ? {} : { email: t('validation.email') });

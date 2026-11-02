@@ -1,10 +1,10 @@
+import { Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import { Badge, Card, Chip } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
-import { useImpersonate } from '@/features/tenants/api';
+import { ImpersonateAction } from '@/features/tenants';
 import { formatDate, healthTone, money, planTone, toneFg } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
-import { useUi } from '@/store/ui';
 import { useSupportOptions, useUpdateTicket } from '../api';
 import { useT } from '../i18n';
 import { statusTone } from '../sla';
@@ -17,8 +17,6 @@ export function TenantPanel({ ticket: tk }: { ticket: TicketDetail }) {
   const tc = useCommonT();
   const can = useCan();
   const ctx = tk.tenantContext;
-  const setUi = useUi((s) => s.set);
-  const impersonate = useImpersonate(ctx.id);
   const update = useUpdateTicket(tk.id);
   const options = useSupportOptions();
   const manage = can('support.manage');
@@ -54,14 +52,9 @@ export function TenantPanel({ ticket: tk }: { ticket: TicketDetail }) {
             {t('tenant.open')}
           </Link>
           {can('tenants.impersonate') && (
-            <button
-              type="button"
-              className="btn btn--sm"
-              disabled={impersonate.isPending}
-              onClick={() => impersonate.mutate(undefined, { onSuccess: () => setUi({ impersonating: ctx.id }) })}
-            >
-              {t('tenant.impersonate')}
-            </button>
+            <Suspense fallback={null}>
+              <ImpersonateAction tenantId={ctx.id} label={t('tenant.impersonate')} className="btn btn--sm" />
+            </Suspense>
           )}
         </div>
       </section>

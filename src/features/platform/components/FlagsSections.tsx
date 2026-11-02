@@ -1,7 +1,24 @@
 import { useState } from 'react';
 import { z } from 'zod';
-import { Card, Dot, Empty, ErrorState, Field, FormError, Input, Select, SkeletonRows, Spinner, Toggle } from '@/components/ui';
+import {
+  Card,
+  ConfirmDialog,
+  Dot,
+  Empty,
+  ErrorState,
+  Field,
+  FormError,
+  Input,
+  Select,
+  SkeletonRows,
+  Spinner,
+  Toggle,
+} from '@/components/ui';
+import { useChangeFlash } from '@/components/ui/freshRows';
+import { LiveStatus } from '@/components/ui/LiveStatus';
 import { useCan } from '@/features/auth/useCan';
+import { cx } from '@/lib/cx';
+import { liveState } from '@/lib/queryClient';
 import { errorMessage } from '@/lib/api/errors';
 import { timeAgo } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
@@ -25,22 +42,35 @@ export function FlagsCard() {
   const flags = useFeatureFlags();
   const update = useUpdateFlag();
   const canManage = can('flags.manage');
+  // A flag switches a feature for every school in its rollout at once: turning one off, or widening a live one to all
+  // tenants, is confirmed by typing the flag's name first.
+  const [confirming, setConfirming] = useState<{ flag: FeatureFlag; widen: boolean } | null>(null);
 
-  const toggle = (f: FeatureFlag) =>
+  const applyToggle = (f: FeatureFlag) =>
     update.mutate(
       { key: f.key, enabled: !f.enabled },
       {
-        onSuccess: (n) =>
+        onSuccess: (n) => {
+          setConfirming(null);
           toast(
             t(n.enabled ? 'flags.toastEnabled' : 'flags.toastDisabled', { name: n.name, rollout: t(`enums.rolloutPhrase.${n.rollout}`) }),
-          ),
+          );
+        },
       },
     );
-  const setRollout = (f: FeatureFlag, rollout: FeatureFlag['rollout']) =>
+  const applyRollout = (f: FeatureFlag, rollout: FeatureFlag['rollout']) =>
     update.mutate(
       { key: f.key, rollout },
-      { onSuccess: (n) => toast(t('flags.toastRollout', { name: n.name, rollout: t(`enums.rolloutPhrase.${n.rollout}`) })) },
+      {
+        onSuccess: (n) => {
+          setConfirming(null);
+          toast(t('flags.toastRollout', { name: n.name, rollout: t(`enums.rolloutPhrase.${n.rollout}`) }));
+        },
+      },
     );
+  const toggle = (f: FeatureFlag) => (f.enabled ? setConfirming({ flag: f, widen: false }) : applyToggle(f));
+  const setRollout = (f: FeatureFlag, rollout: FeatureFlag['rollout']) =>
+    f.enabled && rollout === 'All tenants' && f.rollout !== rollout ? setConfirming({ flag: f, widen: true }) : applyRollout(f, rollout);
 
   return (
     <Card title={t('flags.title')} right={!canManage && <span className="card-sub">{t('flags.viewOnly')}</span>}>
@@ -73,6 +103,24 @@ export function FlagsCard() {
             </li>
           ))}
         </ul>
+      )}
+      {confirming && (
+        <ConfirmDialog
+          title={t(confirming.widen ? 'flags.confirmWiden.title' : 'flags.confirmOff.title', { name: confirming.flag.name })}
+          phrase={confirming.flag.name}
+          confirmLabel={t(confirming.widen ? 'flags.confirmWiden.action' : 'flags.confirmOff.action')}
+          tone={confirming.widen ? 'primary' : 'danger'}
+          pending={update.isPending}
+          onConfirm={() => (confirming.widen ? applyRollout(confirming.flag, 'All tenants') : applyToggle(confirming.flag))}
+          onCancel={() => setConfirming(null)}
+        >
+          {confirming.widen
+            ? t('flags.confirmWiden.body', { name: confirming.flag.name })
+            : t('flags.confirmOff.body', { name: confirming.flag.name, rollout: t(`enums.rolloutPhrase.${confirming.flag.rollout}`) })}
+          {!confirming.widen && confirming.flag.tenantOverrides > 0 && (
+            <> {t('flags.confirmOff.overrides', { count: confirming.flag.tenantOverrides })}</>
+          )}
+        </ConfirmDialog>
       )}
     </Card>
   );
@@ -147,10 +195,31 @@ function IncidentForm({ status, onDone }: { status: SystemStatus; onDone: () => 
   );
 }
 
-export function SystemStatusCard() {
+/** One service. When a refresh moves its status, the row tints once so the change is noticed. */
+function ServiceRow({ service: sv }: { service: SystemStatus['services'][number] }) {
+  const t = useT();
+  const tone = serviceTone(sv.status);
+  const flash = useChangeFlash(sv.status);
+  return (
+    <li className={cx('row wrap', flash && 'fx-flash', flash)}>
+      <Dot tone={tone} size={9} />
+      <span style={{ fontWeight: 600, flex: 1, minWidth: 170 }}>{sv.name}</span>
+      <span className="muted t-sm">{t('status.uptime', { pct: sv.uptime90d.toFixed(2) })}</span>
+      <span
+        className={tone === 'good' ? 'fg-good' : 'fg-warn'}
+        style={{ fontSize: 11.5, fontWeight: 700, minWidth: 76, textAlign: 'right' }}
+      >
+        {t(`enums.serviceStatus.${sv.status}`)}
+      </span>
+    </li>
+  );
+}
+
+/** System status refreshes itself every minute while its section is on screen (`live`); the status line says how fresh it is. */
+export function SystemStatusCard({ visible = true }: { visible?: boolean }) {
   const t = useT();
   const can = useCan();
-  const status = useSystemStatus();
+  const status = useSystemStatus({ visible });
   const resolve = useResolveIncident();
   const [composing, setComposing] = useState(false);
   const s = status.data;
@@ -180,7 +249,8 @@ export function SystemStatusCard() {
     <Card
       title={t('status.title')}
       right={
-        <div className="hstack" style={{ gap: 12 }}>
+        <div className="hstack wrap" style={{ gap: 12 }}>
+          {s && <LiveStatus state={liveState(status)} updatedAt={status.dataUpdatedAt} />}
           {s && (
             <a className="link" href={s.statusPageUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
               {t('status.publicPage')} <span aria-hidden="true">↗</span>
@@ -207,22 +277,9 @@ export function SystemStatusCard() {
           )}
           {composing && !status.data.incident && <IncidentForm status={status.data} onDone={() => setComposing(false)} />}
           <ul className="plain-list">
-            {status.data.services.map((sv) => {
-              const tone = serviceTone(sv.status);
-              return (
-                <li key={sv.id} className="row wrap">
-                  <Dot tone={tone} size={9} />
-                  <span style={{ fontWeight: 600, flex: 1, minWidth: 170 }}>{sv.name}</span>
-                  <span className="muted t-sm">{t('status.uptime', { pct: sv.uptime90d.toFixed(2) })}</span>
-                  <span
-                    className={tone === 'good' ? 'fg-good' : 'fg-warn'}
-                    style={{ fontSize: 11.5, fontWeight: 700, minWidth: 76, textAlign: 'right' }}
-                  >
-                    {t(`enums.serviceStatus.${sv.status}`)}
-                  </span>
-                </li>
-              );
-            })}
+            {status.data.services.map((sv) => (
+              <ServiceRow key={sv.id} service={sv} />
+            ))}
           </ul>
         </>
       )}
@@ -258,7 +315,7 @@ export function BroadcastPanel() {
       { ...values, channel: 'Banner' },
       {
         onSuccess: (b) => {
-          toast(t('broadcast.sent', { audience: t(`enums.audiencePhrase.${b.audience}`), count: b.recipients }));
+          toast(t('broadcast.sent', { audience: t(`enums.audiencePhrase.${values.audience}`), count: b.recipients }));
           form.reset({ message: '', audience: values.audience });
         },
         onError: (err) => {

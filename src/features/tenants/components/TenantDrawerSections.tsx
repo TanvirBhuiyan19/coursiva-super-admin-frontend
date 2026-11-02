@@ -1,24 +1,25 @@
 import { useState, type ReactNode } from 'react';
 import { z } from 'zod';
-import { Badge, Bar, ConfirmButton, FormError, Toggle } from '@/components/ui';
+import { Badge, Bar, ConfirmButton, CountUp, FormError, Toggle } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { ApiError, errorMessage } from '@/lib/api/errors';
-import { LIMIT_KEYS, type LimitKey } from '@/lib/domain';
-import { money, num, scoreTone, toneFg } from '@/lib/format';
+import { limitKeyOf, type LimitKey } from '@/lib/domain';
+import { money, num, scoreTone, timeAgo, toneFg } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
-import { useUi, toast } from '@/store/ui';
+import { toast } from '@/store/ui';
 import {
   useCompExtension,
-  useImpersonate,
   useResetTenantModules,
   useSetTenantFlag,
   useSetTenantModule,
   useTenantAction,
   useTransferOwnership,
+  useUnfreezeCheckout,
   useUpdateTenant,
   useUpdateTenantLimits,
 } from '../api';
 import { t as msg, useT } from '../i18n';
+import { ImpersonateAction } from './ImpersonateAction';
 import type { TenantDetail } from '../types';
 
 export function Section({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
@@ -46,8 +47,8 @@ export function HealthCard({ t: tn }: { t: TenantDetail }) {
         </Badge>
       </div>
       <div className="hstack" style={{ gap: 12, marginTop: 10 }}>
-        <span className="display" style={{ fontSize: 26, fontWeight: 800, color: toneFg(tone) }}>
-          {score}
+        <span className="display" style={{ fontSize: 26, fontWeight: 800, color: toneFg(tone), fontVariantNumeric: 'tabular-nums' }}>
+          <CountUp value={score} />
         </span>
         <Bar size="md" value={score} tone={tone} label={t('health.scoreLabel', { score })} />
       </div>
@@ -102,7 +103,7 @@ export function DomainSection({ t: tn }: { t: TenantDetail }) {
 
 export function UsageSection({ t: tn }: { t: TenantDetail }) {
   const t = useT();
-  const limitOf = (k: LimitKey) => tn.limits.find((l) => l.key === k)?.value ?? 0;
+  const limitOf = (k: LimitKey) => tn.limits.find((l) => limitKeyOf(l.key) === k)?.value ?? 0;
   const tc = useCommonT();
   const gb = (n: number) => t('drawer.gb', { value: n });
   const rows: [string, number, number, (n: number) => string][] = [
@@ -130,82 +131,105 @@ export function UsageSection({ t: tn }: { t: TenantDetail }) {
   );
 }
 
-const limitSchema = z.object(
-  Object.fromEntries(
-    LIMIT_KEYS.map((k) => [
-      k,
-      z.coerce
-        .number({ error: () => msg('limits.errors.number') })
-        .int({ error: () => msg('limits.errors.integer') })
-        .min(0, { error: () => msg('limits.errors.min') }),
-    ]),
-  ) as Record<LimitKey, z.ZodCoercedNumber>,
-);
+const limitValue = z.coerce
+  .number({ error: () => msg('limits.errors.number') })
+  .int({ error: () => msg('limits.errors.integer') })
+  .min(0, { error: () => msg('limits.errors.min') });
 
 export function LimitsSection({ t: tn }: { t: TenantDetail }) {
   const t = useT();
   const tc = useCommonT();
   const can = useCan();
   const save = useUpdateTenantLimits(tn.id);
-  const initial = Object.fromEntries(tn.limits.map((l) => [l.key, String(l.value)])) as Record<LimitKey, string>;
+  // Rows carry Laravel's snake_case key as a value; the form works on app keys (`storageGb`).
+  const draftOf = (rows: TenantDetail['limits']) =>
+    Object.fromEntries(rows.map((l) => [limitKeyOf(l.key), String(l.value)])) as Record<LimitKey, string>;
+  const initial = draftOf(tn.limits);
   const [draft, setDraft] = useState(initial);
   const [errors, setErrors] = useState<Partial<Record<LimitKey, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const dirty = LIMIT_KEYS.some((k) => draft[k] !== initial[k]);
+  // Only the limits the API returned have an input; the form validates and sends just those.
+  const visible = tn.limits.map((l) => limitKeyOf(l.key));
+  const dirty = visible.some((k) => draft[k] !== initial[k]);
   const disabled = !can('tenants.manage');
 
+  // Errors land under their input; one for a limit without an input (or for `limits` itself) becomes the form error,
+  // so a failed Apply is never silent.
+  const showErrors = (errs: Record<string, string>) => {
+    const field: Partial<Record<LimitKey, string>> = {};
+    const orphans: string[] = [];
+    for (const [k, v] of Object.entries(errs)) {
+      if ((visible as string[]).includes(k)) field[k as LimitKey] = v;
+      else orphans.push(v);
+    }
+    setErrors(field);
+    setFormError(orphans.length ? orphans.join(' ') : null);
+  };
+  const onSaveError = (err: unknown) => {
+    if (err instanceof ApiError && err.isValidation) {
+      showErrors(Object.fromEntries(Object.entries(err.fieldErrors).map(([k, v]) => [k.replace(/^limits\./, ''), v[0] ?? err.message])));
+    } else {
+      setErrors({});
+      setFormError(errorMessage(err));
+    }
+  };
+
   const apply = () => {
-    const parsed = limitSchema.safeParse(draft);
-    if (!parsed.success) {
-      setErrors(Object.fromEntries(parsed.error.issues.map((i) => [i.path[0], i.message])) as Partial<Record<LimitKey, string>>);
+    const values: Partial<Record<LimitKey, number>> = {};
+    const invalid: Record<string, string> = {};
+    for (const k of visible) {
+      const r = limitValue.safeParse(draft[k]);
+      if (r.success) values[k] = r.data;
+      else invalid[k] = r.error.issues[0]?.message ?? msg('limits.errors.number');
+    }
+    if (Object.keys(invalid).length) {
+      showErrors(invalid);
       return;
     }
     setErrors({});
     setFormError(null);
-    const changed = Object.fromEntries(LIMIT_KEYS.filter((k) => draft[k] !== initial[k]).map((k) => [k, parsed.data[k]]));
+    const changed = Object.fromEntries(visible.filter((k) => draft[k] !== initial[k]).map((k) => [k, values[k]]));
     save.mutate(changed, {
       onSuccess: () => toast(t('limits.updated', { name: tn.name })),
-      onError: (err) => {
-        if (err instanceof ApiError && err.isValidation) {
-          setErrors(Object.fromEntries(Object.entries(err.fieldErrors).map(([k, v]) => [k.replace('limits.', ''), v[0]])));
-        } else setFormError(errorMessage(err));
-      },
+      onError: onSaveError,
     });
   };
 
   return (
     <Section title={t('limits.title')} right={<span className="t-xs faint">{t('limits.unlimitedHint')}</span>}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-        {tn.limits.map((l) => (
-          <label key={l.key}>
-            <span className="faint" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
-              {tc(`enums.limit.${l.key}`)}
-              {l.overridden && (
-                <span className="fg-warn" title={t('limits.planDefault', { value: l.planDefault })}>
-                  {' '}
-                  •
+        {tn.limits
+          .map((row) => ({ ...row, key: limitKeyOf(row.key) }))
+          .map((l) => (
+            <label key={l.key}>
+              <span className="faint" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>
+                {tc(`enums.limit.${l.key}`)}
+                {l.overridden && (
+                  <span className="fg-warn" title={t('limits.planDefault', { value: l.planDefault })}>
+                    {' '}
+                    •
+                  </span>
+                )}
+              </span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                value={draft[l.key]}
+                disabled={disabled}
+                aria-invalid={!!errors[l.key]}
+                style={{ fontSize: 12.5, padding: '8px 10px' }}
+                onChange={(e) => setDraft((d) => ({ ...d, [l.key]: e.target.value }))}
+              />
+              {errors[l.key] && (
+                <span className="field-error" style={{ display: 'block' }}>
+                  {errors[l.key]}
                 </span>
               )}
-            </span>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              step={1}
-              inputMode="numeric"
-              value={draft[l.key]}
-              disabled={disabled}
-              aria-invalid={!!errors[l.key]}
-              style={{ fontSize: 12.5, padding: '8px 10px' }}
-              onChange={(e) => setDraft((d) => ({ ...d, [l.key]: e.target.value }))}
-            />
-            {errors[l.key] && (
-              <span className="field-error" style={{ display: 'block' }}>
-                {errors[l.key]}
-              </span>
-            )}
-          </label>
-        ))}
+            </label>
+          ))}
       </div>
       <FormError>{formError}</FormError>
       {!disabled && (
@@ -219,11 +243,14 @@ export function LimitsSection({ t: tn }: { t: TenantDetail }) {
               className="btn btn--sm"
               disabled={save.isPending}
               onClick={() =>
-                save.mutate(Object.fromEntries(LIMIT_KEYS.map((k) => [k, null])), {
+                save.mutate(Object.fromEntries(visible.map((k) => [k, null])), {
                   onSuccess: (d) => {
-                    setDraft(Object.fromEntries(d.limits.map((l) => [l.key, String(l.value)])) as Record<LimitKey, string>);
+                    setDraft(draftOf(d.limits));
+                    setErrors({});
+                    setFormError(null);
                     toast(t('limits.reset', { plan: tc(`enums.plan.${tn.plan}`) }));
                   },
+                  onError: onSaveError,
                 })
               }
             >
@@ -529,12 +556,37 @@ export function NotesSection({ t: tn }: { t: TenantDetail }) {
   );
 }
 
+/** Shown while the abuse queue's "Freeze checkout" blocks the school's new card payments, with the way to undo it. */
+export function CheckoutFreezeNotice({ t: tn }: { t: TenantDetail }) {
+  const t = useT();
+  const can = useCan();
+  const unfreeze = useUnfreezeCheckout(tn.id);
+  if (!tn.checkoutFrozenAt) return null;
+  return (
+    <div className="callout callout--warn" role="status" style={{ marginTop: 16 }}>
+      <div style={{ fontWeight: 700 }}>{t('checkoutFreeze.title')}</div>
+      <div className="t-sm" style={{ marginTop: 2 }}>
+        {t('checkoutFreeze.body', { when: timeAgo(tn.checkoutFrozenAt) })}
+      </div>
+      {can('governance.manage') && (
+        <button
+          type="button"
+          className="btn btn--sm"
+          style={{ marginTop: 8 }}
+          disabled={unfreeze.isPending}
+          onClick={() => unfreeze.mutate(undefined, { onSuccess: () => toast(t('checkoutFreeze.unfrozen', { name: tn.name })) })}
+        >
+          {t('checkoutFreeze.unfreeze')}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function DangerZone({ t: tn }: { t: TenantDetail }) {
   const t = useT();
   const can = useCan();
   const action = useTenantAction(tn.id);
-  const impersonate = useImpersonate(tn.id);
-  const setUi = useUi((s) => s.set);
   const suspended = tn.status === 'Suspended';
   return (
     <>
@@ -565,17 +617,9 @@ export function DangerZone({ t: tn }: { t: TenantDetail }) {
           </div>
         </Section>
       )}
-      <div className="hstack" style={{ gap: 10, marginTop: 22 }}>
+      <div className="hstack wrap" style={{ gap: 10, marginTop: 22 }}>
         {can('tenants.impersonate') && (
-          <button
-            type="button"
-            className="btn btn--primary btn--lg"
-            style={{ flex: 1 }}
-            disabled={impersonate.isPending}
-            onClick={() => impersonate.mutate(undefined, { onSuccess: () => setUi({ impersonating: tn.id }) })}
-          >
-            {t('danger.signInAsOwner')}
-          </button>
+          <ImpersonateAction tenantId={tn.id} label={t('danger.signInAsOwner')} className="btn btn--primary btn--lg" style={{ flex: 1 }} />
         )}
         {can('tenants.suspend') &&
           (suspended ? (

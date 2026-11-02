@@ -13,7 +13,7 @@ test('hovering a nav link prefetches the screen’s code and data before the cli
     .poll(() => requests.some((u) => /tenants\.page-.*\.js|\/src\/features\/tenants\/pages\/tenants\.page\.tsx/.test(u)))
     .toBe(true);
   // Data is warmed too: the list request goes out on hover.
-  await expect.poll(() => requests.some((u) => u.includes('/api/v1/admin/tenants?page=1&per_page=25'))).toBe(true);
+  await expect.poll(() => requests.some((u) => u.includes('/api/v1/platform/tenants?page=1&per_page=25'))).toBe(true);
 });
 
 test('hovering a tenant row warms its drawer', async ({ page }) => {
@@ -22,7 +22,7 @@ test('hovering a tenant row warms its drawer', async ({ page }) => {
   const requests: string[] = [];
   page.on('request', (r) => requests.push(r.url()));
   await page.getByRole('row', { name: /Nordic Yoga School/ }).hover();
-  await expect.poll(() => requests.some((u) => u.endsWith('/api/v1/admin/tenants/tn_nordic'))).toBe(true);
+  await expect.poll(() => requests.some((u) => u.endsWith('/api/v1/platform/tenants/tn_nordic'))).toBe(true);
 });
 
 test('compiled form screens keep live validation and unsaved-change tracking', async ({ page }) => {
@@ -39,8 +39,8 @@ test('compiled form screens keep live validation and unsaved-change tracking', a
 
   await page.goto('/settings');
   await waitForScreen(page, 'Console settings');
-  await page.getByLabel('Trial length (days)').fill('90');
+  await page.getByLabel('Trial length (days)').fill('91');
   await page.getByRole('button', { name: 'Save changes' }).click();
-  await expect(page.getByText('The trial length must be between 7 and 60 days.')).toBeVisible();
+  await expect(page.getByText('The trial length must be between 0 and 90 days.')).toBeVisible();
   expect(errors).toEqual([]);
 });

@@ -31,7 +31,7 @@ import { ROUTING_POLICIES, type AiFeature, type AiTenantUsage, type AiUsage, typ
 
 const featureLabel = (f: AiFeature) => tPlain(`ai.feature.${f}`);
 const routingLabel = (p: RoutingPolicy) => tPlain(`ai.routing.${p}`);
-const COLS = 'minmax(0,1.7fr) minmax(0,1.2fr) minmax(0,0.9fr) minmax(0,0.8fr) minmax(0,0.7fr) minmax(0,0.8fr)';
+const COLS = 'minmax(0,1.7fr) minmax(0,1.2fr) minmax(0,0.9fr) minmax(0,0.8fr) minmax(0,0.8fr) minmax(0,0.7fr) minmax(0,0.8fr)';
 const marginTone = (m: number | null): Tone => (m == null ? 'flat' : m < 40 ? 'bad' : m < 70 ? 'warn' : 'good');
 
 const capSchema = z.object({
@@ -125,16 +125,19 @@ function TenantTable({ rows }: { rows: AiTenantUsage[] }) {
   if (!rows.length) return <Empty>{t('ai.table.empty')}</Empty>;
   return (
     <div role="table" aria-label={t('ai.table.label')}>
-      <TRow cols={COLS} min={600} head style={{ gap: 10 }}>
+      <TRow cols={COLS} min={680} head style={{ gap: 10 }}>
         <div role="columnheader">{t('ai.table.tenant')}</div>
         <div role="columnheader">{t('ai.table.heaviestFeature')}</div>
         <div role="columnheader">{t('ai.table.tokensUsed')}</div>
         <div role="columnheader">{t('ai.table.ourCost')}</div>
+        <div role="columnheader" title={t('ai.table.modelCostHint')}>
+          {t('ai.table.modelCost')}
+        </div>
         <div role="columnheader">{t('ai.table.margin')}</div>
         <div role="columnheader" aria-label={t('ai.table.modelSpeed')} />
       </TRow>
       {rows.map((r) => (
-        <TRow key={r.tenantId} cols={COLS} min={600} style={{ gap: 10, padding: '11px 0', fontSize: 12.5 }}>
+        <TRow key={r.tenantId} cols={COLS} min={680} style={{ gap: 10, padding: '11px 0', fontSize: 12.5 }}>
           <div role="cell" className="min0">
             <div className="ellipsis" style={{ fontWeight: 600 }}>
               {can('tenants.view') ? (
@@ -160,6 +163,9 @@ function TenantTable({ rows }: { rows: AiTenantUsage[] }) {
           </div>
           <div role="cell" style={{ fontWeight: 700 }}>
             {moneyFine(r.cost)}
+          </div>
+          <div role="cell" className="muted">
+            {moneyFine(r.modelCost)}
           </div>
           <div role="cell">
             <Badge tone={marginTone(r.marginPct)}>{r.marginPct == null ? t('ai.table.noRevenue') : `${r.marginPct}%`}</Badge>
@@ -257,6 +263,13 @@ export default function AiPage() {
               sub: t('ai.kpis.spendSub', { cap: moneyFine(ai.settings.monthlyCap), pct: ai.totals.capUsedPct }),
             },
             {
+              label: t('ai.kpis.modelCost'),
+              value: moneyFine(ai.totals.modelCost),
+              sub: ai.totals.spend
+                ? t('ai.kpis.modelCostSub', { pct: Math.round((ai.totals.modelCost / ai.totals.spend) * 100) })
+                : t('ai.kpis.modelCostSubEmpty'),
+            },
+            {
               label: t('ai.kpis.tokens'),
               value: t('ai.kpis.tokensValue', { tokens: ai.totals.tokensK }),
               sub: t('ai.kpis.tokensSub', { count: ai.totals.tenants }),
@@ -270,7 +283,7 @@ export default function AiPage() {
           ]}
         />
       ) : (
-        <KpiSkeletons n={4} />
+        <KpiSkeletons n={5} />
       )}
 
       {ai ? <CapCard ai={ai} /> : <SkeletonRows rows={3} h={24} />}

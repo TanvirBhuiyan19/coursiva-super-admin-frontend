@@ -1,5 +1,7 @@
-import { Card, Empty, ErrorState, QueryState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
+import { Card, CountUp, Empty, ErrorState, QueryState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { formatDate, formatDateTime, timeAgo } from '@/lib/format';
+import { useSection } from '@/lib/useSection';
 import { useBackupActivity, useBackupSettings, useBackupSummary, useRestores } from '../api';
 import { BackupPolicy } from '../components/BackupPolicy';
 import { RestoreBanner } from '../components/RestoreBanner';
@@ -7,6 +9,8 @@ import { RestorePoints } from '../components/RestorePoints';
 import { TenantExports } from '../components/TenantExports';
 import { t as tStatic, useT } from '../i18n';
 import type { BackupSummary } from '../types';
+
+const SECTIONS = ['points', 'policy', 'exports', 'activity'] as const;
 
 const duration = (min: number) =>
   min >= 60 ? tStatic('duration.hours', { count: Math.round(min / 60) }) : tStatic('duration.minutes', { count: min });
@@ -29,8 +33,9 @@ function Kpis({ s }: { s: BackupSummary | undefined }) {
         ],
         [
           t('kpi.rpoRto'),
-          t('kpi.rpoRtoValue', { rpo: duration(s.rpoMinutes), rto: duration(s.rtoMinutes) }),
-          t('kpi.pitrWindow', { days: s.walWindowDays }),
+          // RTO is measured from the last live restore or passed drill: null until there is one.
+          t('kpi.rpoRtoValue', { rpo: duration(s.rpoMinutes), rto: s.rtoMinutes === null ? t('kpi.notMeasured') : duration(s.rtoMinutes) }),
+          s.walWindowDays > 0 ? t('kpi.pitrWindow', { days: s.walWindowDays }) : t('kpi.snapshotsOnly'),
           true,
         ],
         [
@@ -47,7 +52,9 @@ function Kpis({ s }: { s: BackupSummary | undefined }) {
         ? items.map(([label, value, sub, good]) => (
             <div key={label} className="card card--tight">
               <div className="kpi-label">{label}</div>
-              <div className="kpi-value kpi-value--sm">{value}</div>
+              <div className="kpi-value kpi-value--sm">
+                <CountUp value={value} />
+              </div>
               <div className={good ? 'fg-good' : 'fg-warn'} style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>
                 {sub}
               </div>
@@ -97,31 +104,43 @@ export default function BackupPage() {
   const restores = useRestores();
   const list = restores.data ?? [];
   const active = list.find((r) => ['staged', 'approved', 'running'].includes(r.status));
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'points');
 
   return (
-    <Screen max={1000} label={t('title')}>
+    <Screen max={1120} label={t('title')}>
       {summary.error ? <ErrorState error={summary.error} onRetry={() => void summary.refetch()} /> : <Kpis s={summary.data} />}
 
       {active && <RestoreBanner restore={active} />}
       {restores.error && <ErrorState error={restores.error} onRetry={() => void restores.refetch()} />}
 
-      <RestorePoints walDays={summary.data?.walWindowDays ?? 7} restores={list} />
-
-      <div className="grid-2">
-        {settings.error ? (
-          <ErrorState error={settings.error} onRetry={() => void settings.refetch()} />
-        ) : settings.data && summary.data ? (
-          <BackupPolicy settings={settings.data} summary={summary.data} />
-        ) : (
-          <Card title={t('policy.title')}>
-            <SkeletonRows rows={6} />
-          </Card>
-        )}
-        <div className="stack" style={{ gap: 16 }}>
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({ id, label: t(`sections.${id}`) }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.nav')}
+        href={sectionHref}
+      >
+        <SectionPanel active={section === 'points'}>
+          <RestorePoints walDays={summary.data?.walWindowDays ?? 7} restores={list} />
+        </SectionPanel>
+        <SectionPanel active={section === 'policy'}>
+          {settings.error ? (
+            <ErrorState error={settings.error} onRetry={() => void settings.refetch()} />
+          ) : settings.data && summary.data ? (
+            <BackupPolicy settings={settings.data} summary={summary.data} />
+          ) : (
+            <Card title={t('policy.title')}>
+              <SkeletonRows rows={6} />
+            </Card>
+          )}
+        </SectionPanel>
+        <SectionPanel active={section === 'exports'}>
           <TenantExports />
+        </SectionPanel>
+        <SectionPanel active={section === 'activity'}>
           <Activity />
-        </div>
-      </div>
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

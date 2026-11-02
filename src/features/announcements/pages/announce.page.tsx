@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   Badge,
   Card,
+  ConfirmDialog,
   Empty,
   ErrorState,
   Field,
@@ -45,25 +46,32 @@ function Composer() {
   const audience = form.watch('audience');
   const channel = form.watch('channel');
   const tenants = reach.data?.find((r) => r.audience === audience)?.tenants;
+  // A send reaches every school in the audience at once (email can't be recalled): it is confirmed by typing first.
+  const [confirming, setConfirming] = useState<z.infer<typeof schema> | null>(null);
 
   const onSubmit = form.handleSubmit((values) => {
     setFormError(null);
+    setConfirming(values);
+  });
+
+  const sendNow = (values: z.infer<typeof schema>) =>
     send.mutate(values, {
       onSuccess: (a) => {
+        setConfirming(null);
         form.reset({ message: '', audience: values.audience, channel: values.channel });
         toast(
           t('composer.sent', {
             count: a.recipients,
-            audience: t(`audiencesInline.${a.audience}`),
+            audience: t(`audiencesInline.${values.audience}`),
             channel: t(`channelsInline.${a.channel}`),
           }),
         );
       },
       onError: (err) => {
+        setConfirming(null);
         if (!applyServerErrors(form, err)) setFormError(errorMessage(err));
       },
     });
-  });
 
   return (
     <Card title={t('composer.title')}>
@@ -129,6 +137,19 @@ function Composer() {
         </div>
         <FormError>{formError}</FormError>
       </form>
+      {confirming && (
+        <ConfirmDialog
+          title={t('composer.confirm.title', { audience: t(`audiencesInline.${confirming.audience}`) })}
+          phrase={t('composer.confirm.phrase')}
+          confirmLabel={t('composer.confirm.action')}
+          tone="primary"
+          pending={send.isPending}
+          onConfirm={() => sendNow(confirming)}
+          onCancel={() => setConfirming(null)}
+        >
+          {tenants != null ? t(`composer.confirm.reach.${confirming.channel}`, { count: tenants }) : t('composer.confirm.reachUnknown')}
+        </ConfirmDialog>
+      )}
     </Card>
   );
 }

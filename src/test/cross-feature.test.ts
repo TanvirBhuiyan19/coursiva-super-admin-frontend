@@ -3,12 +3,14 @@
 import { describe, expect, it } from 'vitest';
 import { api } from '@/lib/api/client';
 import type { Resource } from '@/lib/api/types';
+import { limitKeyOf, type LimitKey } from '@/lib/domain';
 import type { TenantDetail } from '@/features/tenants/types';
 import type { User } from '@/features/auth/types';
 import { signInAs } from './utils';
 
 const tenant = (id: string) => api.get<Resource<TenantDetail>>(`/tenants/${id}`).then((r) => r.data);
-const limit = (t: TenantDetail, key: string) => t.limits.find((l) => l.key === key)!;
+// Limit keys are snake_case values on the wire (like Laravel): map with limitKeyOf.
+const limit = (t: TenantDetail, key: LimitKey) => t.limits.find((l) => limitKeyOf(l.key) === key)!;
 
 describe('shared business rules', () => {
   it('per-plan API rate limits (Abuse & limits) drive every tenant’s default limit', async () => {

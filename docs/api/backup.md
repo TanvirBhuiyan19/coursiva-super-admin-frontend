@@ -10,15 +10,15 @@ Permissions: every `GET` needs `platform.view`; every write needs `platform.mana
 
 `{ data: BackupSummary }`
 
-| Field                                            | Notes                                                                                                                    |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `last_backup_at`, `last_backup_verified`         | Newest restore point and whether its checksum verified                                                                   |
-| `protected_gb`, `history_tb`, `tenants`          | Size of the latest full snapshot, total retained history, tenant count                                                   |
-| `rpo_minutes`                                    | Derived from the schedule: hourly → 60, every 6 h → 360, nightly only → 1440                                             |
-| `rto_minutes`                                    | Measured full-platform restore time                                                                                      |
-| `drills_passed`, `drills_total`, `last_drill_at` | Restore-drill record                                                                                                     |
-| `wal_window_days`                                | Point-in-time recovery window (continuous transaction log), currently 7                                                  |
-| `destinations`                                   | `[{ id, name, size, status, healthy }]` — primary, replica (reports "Paused" when replication is off), cold archive, WAL |
+| Field                                            | Notes                                                                                                                                                                                                    |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `last_backup_at`, `last_backup_verified`         | Newest restore point and whether its checksum verified                                                                                                                                                   |
+| `protected_gb`, `history_tb`, `tenants`          | Size of the latest full snapshot, total retained history, tenant count                                                                                                                                   |
+| `rpo_minutes`                                    | Derived from the schedule: hourly → 60, every 6 h → 360, nightly only → 1440                                                                                                                             |
+| `rto_minutes`                                    | Measured restore time (last live restore, else last passed drill); **null** until either exists — shown as "not measured"                                                                                |
+| `drills_passed`, `drills_total`, `last_drill_at` | Restore-drill record                                                                                                                                                                                     |
+| `wal_window_days`                                | Point-in-time recovery window (continuous transaction log). **0** on the snapshot-only driver: the console hides the point-in-time inputs and the API answers 422 `pitr_date` for a point-in-time target |
+| `destinations`                                   | `[{ id, name, size, status, healthy }]` — primary, replica (reports "Paused" when replication is off), cold archive, WAL                                                                                 |
 
 ### `GET /backup/points`
 
@@ -40,10 +40,10 @@ A restore is a **server-side state machine**. Nothing touches production until a
 
 ```
 staged ──approve (different staff member)──▶ approved ──worker picks up──▶ running ──ETA reached──▶ completed
-   └──cancel──▶ cancelled
+   └──cancel──▶ cancelled                                              running ──worker error──▶ failed
 ```
 
-Only one restore may be `staged`, `approved` or `running` at a time.
+Only one restore may be `staged`, `approved` or `running` at a time. `failed` restores show in the history with a red badge.
 
 `Restore`: `id, status, point_id, point_in_time, source_label, scope (platform|tenant), tenant_id, scope_label, dry_run,
 staged_by_id, staged_by_name, staged_at, approved_by_id, approved_by_name, approved_at, started_at, completed_at,
@@ -105,13 +105,21 @@ The UI turns WORM off in two steps (confirm button).
 
 ### `GET /backup/exports`
 
-Paginated `TenantExport[]`, newest first: `id, tenant_id, tenant_name, format (json|csv|sql), include_media, status (queued|ready),
-requested_at, expires_at (+7 days), requested_by_name`.
+Paginated `TenantExport[]`, newest first: `id, tenant_id, tenant_name, format (json|csv|sql), include_media,
+status (queued|running|ready|failed|expired), requested_at, expires_at (+7 days), requested_by_name, size_bytes (null until ready)`.
 
 ### `POST /backup/exports`
 
-Body `{ tenant_id, format, include_media }` → `201 { data: TenantExport }`. The download link is emailed to the requester.
+Body `{ tenant_id, format, include_media }` → `201 { data: TenantExport }`. When it's ready the requester gets the
+"Your data export is ready" email linking to `{console}/platform/backup?section=exports&export={id}` (never a bearer link).
 422 `tenant_id`, `format`, `include_media`. Audit: `Queued {format}[ + media manifests] data export for {tenant}` (with `tenant_id`).
+
+### `GET /backup/exports/{id}/download`
+
+Permission `platform.manage` → `{ data: { url, expires_at } }`: a 15-minute signed storage URL (attachment). 409
+`This export is not ready yet.` / `This export has expired.`; 404 unknown id. Audit:
+`Downloaded the data export of {tenant}` (Security). The console opens the export named by `?export=` at the top of
+the Tenant exports section with a Download button, and ready exports have a Download link in the list.
 
 ## Activity
 

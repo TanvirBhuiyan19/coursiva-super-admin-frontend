@@ -13,6 +13,7 @@ const user = (permissions: User['permissions']): User => ({
   email: 'x@coursiva.io',
   role: 'Support',
   twoFactorEnabled: true,
+  twoFactorSetupRequired: false,
   permissions,
   idleLockMinutes: 15,
 });

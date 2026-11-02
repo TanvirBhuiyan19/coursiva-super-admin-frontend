@@ -5,6 +5,9 @@ import { audit, flags, platformStatus } from '@/mocks/collections';
 import { renderApp, signInAs } from '@/test/utils';
 import { apiKeys, certificates, deliveries, imports, policies, senders } from './mock';
 
+const sectionLink = (nav: string, name: string | RegExp) =>
+  within(screen.getByRole('navigation', { name: nav })).getByRole('link', { name });
+
 const audited = (text: string | RegExp) =>
   audit.all().some((a) => (typeof text === 'string' ? a.action === text : text.test(a.action)) && a.actorName === 'Sam Ortega');
 
@@ -25,7 +28,7 @@ describe('flags & system status', () => {
 
   it('posting an incident updates the header status, and resolving clears it', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/platform/flags');
+    const { user } = renderApp('/platform/flags?section=status');
     expect(await screen.findByText('All systems operational')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: 'Post incident' }));
     const form = screen.getByRole('form', { name: 'Post an incident' });
@@ -44,7 +47,7 @@ describe('flags & system status', () => {
 
   it('validates the incident form', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/platform/flags');
+    const { user } = renderApp('/platform/flags?section=status');
     await user.click(await screen.findByRole('button', { name: 'Post incident' }));
     const form = screen.getByRole('form', { name: 'Post an incident' });
     await user.clear(within(form).getByLabelText('Incident title'));
@@ -57,7 +60,7 @@ describe('flags & system status', () => {
 
   it('validates and sends a broadcast, audited under Tenants', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/platform/flags');
+    const { user } = renderApp('/platform/flags?section=broadcast');
     const send = await screen.findByRole('button', { name: 'Send' });
     await user.click(send);
     expect(await screen.findByText('Write the announcement.')).toBeInTheDocument();
@@ -77,17 +80,66 @@ describe('flags & system status', () => {
 
   it('is view-only for a Support role, and the API refuses changes', async () => {
     signInAs('Support');
-    renderApp('/platform/flags');
+    // Broadcast isn't a section for staff who can't send announcements: its URL falls back to the first section.
+    const { user } = renderApp('/platform/flags?section=broadcast');
     expect(await screen.findByRole('switch', { name: 'Multi-currency checkout' })).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Multi-currency checkout rollout' })).toBeDisabled();
+    const nav = screen.getByRole('navigation', { name: 'Flags and status sections' });
+    expect(within(nav).queryByRole('link', { name: 'Broadcast' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Broadcast announcement')).not.toBeInTheDocument();
+    await user.click(sectionLink('Flags and status sections', 'System status'));
     expect(await screen.findByText('Video processing & CDN')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Post incident' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Broadcast announcement')).not.toBeInTheDocument();
     await expect(api.patch('/platform/flags/multi_currency', { enabled: true })).rejects.toMatchObject({ status: 403 });
     await expect(api.post('/platform/incident', { title: 'Outage now', serviceIds: ['api'] })).rejects.toMatchObject({ status: 403 });
     await expect(api.post('/announcements', { message: 'Hi', audience: 'All tenants', channel: 'Banner' })).rejects.toMatchObject({
       status: 403,
     });
+  });
+});
+
+describe('sectioned platform screens', () => {
+  it('keeps the section in the URL: links, deep links and back/forward', async () => {
+    signInAs('Owner');
+    const { user, router } = renderApp('/platform/flags');
+    expect(await screen.findByRole('switch', { name: 'Multi-currency checkout' })).toBeInTheDocument();
+    expect(sectionLink('Flags and status sections', 'System status')).toHaveAttribute('href', '?section=status');
+    await user.click(sectionLink('Flags and status sections', 'System status'));
+    expect(router.state.location.search).toBe('?section=status');
+    expect(await screen.findByRole('button', { name: 'Post incident' })).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Multi-currency checkout' })).not.toBeInTheDocument();
+    await router.navigate(-1);
+    expect(await screen.findByRole('switch', { name: 'Multi-currency checkout' })).toBeInTheDocument();
+  });
+
+  it('opens the status section from the header status pill', async () => {
+    signInAs('Owner');
+    const { user, router } = renderApp('/tenants');
+    await user.click(await screen.findByRole('button', { name: 'All systems operational' }));
+    await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe('/platform/flags?section=status'));
+    expect(await screen.findByRole('button', { name: 'Post incident' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['/platform/deliverability', 'Deliverability sections', 'Suppression list', '?section=suppression'],
+    ['/platform/certificates', 'Certificate sections', 'Registry policy', '?section=policy'],
+    ['/platform/standards', 'Standards sections', 'Accessibility', '?section=a11y'],
+    ['/platform/api', 'API sections', 'Webhook endpoints', '?section=webhooks'],
+    ['/platform/connections', 'Connection types', 'Custom domains', '?section=cdn'],
+  ])('%s opens "%s → %s" and keeps it in the URL', async (path, nav, label, search) => {
+    signInAs('Owner');
+    const { user, router } = renderApp(path);
+    const link = within(await screen.findByRole('navigation', { name: nav })).getByRole('link', { name: new RegExp(`^${label}`) });
+    await user.click(link);
+    expect(router.state.location.search).toBe(search);
+    expect(link).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('counts failed webhook deliveries in the section nav', async () => {
+    signInAs('Owner');
+    renderApp('/platform/api');
+    const nav = await screen.findByRole('navigation', { name: 'API sections' });
+    expect(await within(nav).findByText(/^\d+ failed deliver(y|ies)$/)).toBeInTheDocument();
   });
 });
 
@@ -148,27 +200,38 @@ describe('certificate authority', () => {
     const { user } = renderApp('/platform/certificates');
     await user.click(await screen.findByRole('button', { name: 'Copy verify link for AC-2026-0341' }));
     expect(await navigator.clipboard.readText()).toBe('https://verify.coursiva.io/AC-2026-0341');
+    await user.click(sectionLink('Certificate sections', 'Registry policy'));
     await user.click(await screen.findByRole('switch', { name: 'Publish as Open Badges 3.0' }));
     await waitFor(() => expect(policies.find('ob3')!.enabled).toBe(true));
   });
 
   it('hides revoke without platform.manage', async () => {
     signInAs('Support');
-    renderApp('/platform/certificates');
+    const { user } = renderApp('/platform/certificates');
     const table = await screen.findByRole('table', { name: 'Certificates' });
     await within(table).findByText('AC-2026-0341');
     expect(within(table).queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
+    await user.click(sectionLink('Certificate sections', 'Registry policy'));
     expect(await screen.findByRole('switch', { name: 'Publish as Open Badges 3.0' })).toBeDisabled();
     await expect(api.post('/platform/certificates/AC-2026-0341/revoke')).rejects.toMatchObject({ status: 403 });
   });
 });
 
 describe('standards & conformance', () => {
+  it('shows unmeasured xAPI/LTI counts as a dash, never as 0 (Laravel sends null)', async () => {
+    signInAs('Owner');
+    renderApp('/platform/standards');
+    const xapi = (await screen.findByText('xAPI statements · 24h')).closest('.card') as HTMLElement;
+    expect(within(xapi).getByText('—')).toBeInTheDocument();
+    expect(within(xapi).queryByText('0')).not.toBeInTheDocument();
+  });
+
   it('re-processes a failed import and removes it from the queue', async () => {
     signInAs('Owner');
     const { user } = renderApp('/platform/standards');
     expect(await screen.findByRole('table', { name: 'Supported standards' })).toBeInTheDocument();
     expect(await screen.findByText('LTI 1.3 / Advantage')).toBeInTheDocument();
+    await user.click(sectionLink('Standards sections', /^Failed imports/));
     await user.click(await screen.findByRole('button', { name: 'Re-process chef-basics-scorm2004.zip' }));
     expect(await screen.findByText(/chef-basics-scorm2004.zip imported and converted/)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('chef-basics-scorm2004.zip')).not.toBeInTheDocument());
@@ -178,7 +241,7 @@ describe('standards & conformance', () => {
 
   it('hides re-process for a Support role', async () => {
     signInAs('Support');
-    renderApp('/platform/standards');
+    renderApp('/platform/standards?section=imports');
     expect(await screen.findByText('react-module-4.zip')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Re-process/ })).not.toBeInTheDocument();
   });
@@ -195,6 +258,10 @@ describe('API & webhooks', () => {
 
     await user.type(within(dialog).getByLabelText('Key name'), 'Metabase sync');
     await user.click(within(dialog).getByRole('radio', { name: 'Full access' }));
+    // Full access names what the key can do and is confirmed by typing the scope.
+    expect(within(dialog).getByText(/can do everything you can/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /create key/i })).toBeDisabled();
+    await user.type(within(dialog).getByLabelText('Type FULL ACCESS to confirm'), 'full access');
     await user.click(within(dialog).getByRole('button', { name: /create key/i }));
 
     const secretDialog = await screen.findByRole('dialog', { name: 'Copy your new API key' });
@@ -233,6 +300,19 @@ describe('API & webhooks', () => {
     await waitFor(() => expect(apiKeys.find('ak_zapier')!.revokedAt).not.toBeNull());
     expect(await within(zapier).findByText('Revoked')).toBeInTheDocument();
 
+    // Laravel sends `events` as an array: each event is a list item, `*` reads as "All events".
+    await user.click(sectionLink('API sections', 'Webhook endpoints'));
+    const amplifyEvents = await screen.findByRole('list', { name: 'Events sent to hooks.amplifycoaching.com/coursiva' });
+    expect(
+      within(amplifyEvents)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['order.completed', 'refund.created']);
+    expect(
+      within(screen.getByRole('list', { name: 'Events sent to api.devpath.io/webhooks' })).getByText('All events'),
+    ).toBeInTheDocument();
+
+    await user.click(sectionLink('API sections', /^Failed deliveries/));
     await user.click(await screen.findByRole('button', { name: 'Retry invoice.paid to api.devpath.io/webhooks' }));
     expect(await screen.findByText('invoice.paid delivered — 200 OK')).toBeInTheDocument();
     expect(deliveries.find('dl_2')).toBeUndefined();

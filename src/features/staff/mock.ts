@@ -1,8 +1,21 @@
 // Mock implementation of /staff (Laravel: StaffController, StaffInvitationController, RolePermissionController + policies).
 import { http } from 'msw';
-import { audit, platformSettings, rolePermissions, staff, type StaffRow } from '@/mocks/collections';
+import { audit, issuePasswordReset, platformSettings, rolePermissions, staff, type StaffRow } from '@/mocks/collections';
 import { ago, collection, id } from '@/mocks/db';
-import { authorize, handle, invalid, notFound, ok, paginate, query, readBody, recordAudit, route, sortRows } from '@/mocks/http';
+import {
+  authorize,
+  handle,
+  invalid,
+  notFound,
+  ok,
+  paginate,
+  query,
+  readBody,
+  recordAudit,
+  requireRecentPassword,
+  route,
+  sortRows,
+} from '@/mocks/http';
 import { PERMISSION_LABELS, PERMISSIONS, ROLES, type Permission, type Role } from '@/features/auth/permissions';
 import {
   ASSIGNABLE_ROLES,
@@ -167,6 +180,8 @@ export const handlers = [
     route('/staff/roles/:role'),
     handle<{ role: string }>(async ({ request, params }) => {
       const actor = authorize('staff.manage');
+      // Like both backends (password.recent): role permissions apply to every member at once.
+      requireRecentPassword();
       const role = decodeURIComponent(params.role) as Role;
       if (!ROLES.includes(role)) throw notFound('Role');
       if (role === 'Owner') throw invalid({ permissions: 'Owner permissions are locked — owners always have every permission.' });
@@ -214,6 +229,8 @@ export const handlers = [
         elevatedUntil: null,
       };
       staff.insert(row);
+      // Laravel emails `/reset-password?token&email&invite=1` (7-day single-use link) that activates the account.
+      issuePasswordReset(email);
       access.insert({
         id: row.id,
         scope: body.role === 'Support' ? 'assigned' : 'all',
@@ -313,6 +330,7 @@ export const handlers = [
       const target = findStaff(params.id);
       if (target.status !== 'Invited') throw invalid({ staff: `${target.name} has already accepted their invite.` });
       access.update(accessOf(target).id, { inviteSentAt: new Date().toISOString() });
+      issuePasswordReset(target.email);
       staff.update(target.id, { location: 'Invite re-sent today' });
       recordAudit(`Re-sent the staff invite to ${target.email}`, 'Security');
       return ok(toMember(target, actor));
@@ -337,6 +355,8 @@ export const handlers = [
     route('/staff/:id/elevate'),
     handle<Params>(async ({ request, params }) => {
       const actor = authorize('staff.manage');
+      // Like both backends (password.recent): elevation mints Owner access.
+      requireRecentPassword();
       const target = findStaff(params.id);
       assertManageable(actor, target, 'elevate');
       if (target.status !== 'Active') throw invalid({ staff: `Only active staff can be elevated.` });

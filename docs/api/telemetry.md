@@ -1,6 +1,6 @@
 # Telemetry — Web Vitals (real-user monitoring)
 
-Source: `src/lib/vitals.ts`. Enabled when `VITE_VITALS_ENDPOINT` is set (e.g. `https://api.coursiva.io/api/v1/admin/telemetry/vitals`).
+Source: `src/lib/vitals.ts`. Enabled when `VITE_VITALS_ENDPOINT` is set (e.g. `/api/v1/platform/telemetry/vitals` on the console's own origin).
 
 ## `POST {VITE_VITALS_ENDPOINT}`
 

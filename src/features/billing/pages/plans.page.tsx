@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ErrorState, FormError, Screen, Seg, Skeleton, SkeletonRows, Spinner, UnsavedChangesGuard } from '@/components/ui';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import { errorMessage } from '@/lib/api/errors';
 import { useZodForm } from '@/lib/useForm';
+import { useSection } from '@/lib/useSection';
 import { toast } from '@/store/ui';
 import { usePricing, useSavePricing } from '../api';
 import { FeatureMatrix } from '../components/FeatureMatrix';
@@ -21,6 +23,7 @@ import { signedMoney } from '../format';
 import { useT } from '../i18n';
 import { ROLLOUTS, type PricingConfig } from '../types';
 
+const SECTIONS = ['pricing', 'features', 'promos'] as const;
 const DISCOUNT_ERROR_ID = 'annual-discount-error';
 const TRIAL_ERROR_ID = 'trial-days-error';
 const numInput = { padding: '7px 10px', fontWeight: 700, textAlign: 'center' } as const;
@@ -164,6 +167,7 @@ export default function PlansPage() {
   const pricing = usePricing();
   const save = useSavePricing();
   const [formError, setFormError] = useState<string | null>(null);
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'pricing');
   const config = pricing.data;
   const values = useMemo(() => (config ? toFormValues(config) : undefined), [config]);
   const form = useZodForm(pricingSchema, { mode: 'onSubmit' });
@@ -208,62 +212,75 @@ export default function PlansPage() {
       {!config ? (
         <PlansSkeleton />
       ) : (
-        // Not a <form>: the promo-code form sits inside this layout and forms can't nest. Save submits explicitly.
-        <div className="stack" style={{ gap: 16 }}>
-          <PlanCards plans={config.plans} form={form} canManage={canManage} />
-          <ImpactBanner config={config} form={form} canManage={canManage} />
-          <FeatureMatrix features={config.features} canManage={canManage} />
-          <div className="hstack wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
-            <AddonsCard config={config} form={form} canManage={canManage} />
-            <PromoCodes canManage={canManage} style={{ flex: '1.4 1 440px', minWidth: 0 }} />
-          </div>
-          <div className="card hstack wrap" style={{ padding: 18, gap: 14 }}>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <label htmlFor="trial-days" style={{ fontWeight: 700, fontSize: 13.5 }}>
-                {t('plans.trial.label')}
-              </label>
-              <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-                {t('plans.trial.hint')}
+        <SectionedPage
+          sections={SECTIONS.map((id) => ({ id, label: t(`plans.sections.${id}`) }))}
+          active={section}
+          onChange={setSection}
+          label={t('plans.sections.nav')}
+          href={sectionHref}
+        >
+          {/* Every field of the pricing form (and its one Save) is in this section, so no error can hide in another. */}
+          <SectionPanel active={section === 'pricing'}>
+            <PlanCards plans={config.plans} form={form} canManage={canManage} />
+            <ImpactBanner config={config} form={form} canManage={canManage} />
+            <div>
+              <AddonsCard config={config} form={form} canManage={canManage} />
+            </div>
+            <div className="card hstack wrap" style={{ padding: 18, gap: 14 }}>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <label htmlFor="trial-days" style={{ fontWeight: 700, fontSize: 13.5 }}>
+                  {t('plans.trial.label')}
+                </label>
+                <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+                  {t('plans.trial.hint')}
+                </div>
+                {trialErr && (
+                  <div id={TRIAL_ERROR_ID} className="field-error" role="alert">
+                    {trialErr}
+                  </div>
+                )}
               </div>
-              {trialErr && (
-                <div id={TRIAL_ERROR_ID} className="field-error" role="alert">
-                  {trialErr}
+              <div className="hstack">
+                <input
+                  id="trial-days"
+                  className="input"
+                  inputMode="numeric"
+                  style={{ ...numInput, width: 64, fontSize: 14 }}
+                  readOnly={!canManage}
+                  {...(trialErr ? { 'aria-invalid': true, 'aria-describedby': TRIAL_ERROR_ID } : {})}
+                  {...form.register('trialDays')}
+                />
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {t('plans.trial.days')}
+                </span>
+              </div>
+              {canManage && (
+                <div className="hstack" style={{ gap: 8 }}>
+                  {dirty && (
+                    <span className="t-xs fg-warn" role="status">
+                      {t('plans.unsaved')}
+                    </span>
+                  )}
+                  <button type="button" className="btn" disabled={!dirty || save.isPending} onClick={() => values && form.reset(values)}>
+                    {t('plans.discard')}
+                  </button>
+                  <button type="button" className="btn btn--primary" disabled={!dirty || save.isPending} onClick={() => void onSubmit()}>
+                    {save.isPending && <Spinner />} {t('plans.save')}
+                  </button>
                 </div>
               )}
             </div>
-            <div className="hstack">
-              <input
-                id="trial-days"
-                className="input"
-                inputMode="numeric"
-                style={{ ...numInput, width: 64, fontSize: 14 }}
-                readOnly={!canManage}
-                {...(trialErr ? { 'aria-invalid': true, 'aria-describedby': TRIAL_ERROR_ID } : {})}
-                {...form.register('trialDays')}
-              />
-              <span className="muted" style={{ fontSize: 13 }}>
-                {t('plans.trial.days')}
-              </span>
-            </div>
-            {canManage && (
-              <div className="hstack" style={{ gap: 8 }}>
-                {dirty && (
-                  <span className="t-xs fg-warn" role="status">
-                    {t('plans.unsaved')}
-                  </span>
-                )}
-                <button type="button" className="btn" disabled={!dirty || save.isPending} onClick={() => values && form.reset(values)}>
-                  {t('plans.discard')}
-                </button>
-                <button type="button" className="btn btn--primary" disabled={!dirty || save.isPending} onClick={() => void onSubmit()}>
-                  {save.isPending && <Spinner />} {t('plans.save')}
-                </button>
-              </div>
-            )}
-          </div>
-          <FormError>{formError}</FormError>
-          <UnsavedChangesGuard when={canManage && dirty && !save.isPending} />
-        </div>
+            <FormError>{formError}</FormError>
+            <UnsavedChangesGuard when={canManage && dirty && !save.isPending} />
+          </SectionPanel>
+          <SectionPanel active={section === 'features'}>
+            <FeatureMatrix features={config.features} canManage={canManage} />
+          </SectionPanel>
+          {/* Not inside the pricing section's layout either way: the promo-code <form> must not nest in another form. */}
+          <SectionPanel active={section === 'promos'}>
+            <PromoCodes canManage={canManage} />
+          </SectionPanel>
+        </SectionedPage>
       )}
     </Screen>
   );

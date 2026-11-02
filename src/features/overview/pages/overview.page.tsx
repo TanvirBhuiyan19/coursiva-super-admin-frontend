@@ -1,9 +1,16 @@
+import type { CSSProperties } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Avatar, Badge, Bar, Card, ChipGroup, Dot, ErrorState, Kpi, Screen, Skeleton, SkeletonRows } from '@/components/ui';
+import { Avatar, Badge, Bar, Card, ChipGroup, CountUp, Dot, ErrorState, Kpi, Screen, Skeleton, SkeletonRows } from '@/components/ui';
+import { useChangeFlash, useFreshRows } from '@/components/ui/freshRows';
+import { clampNum, useGrow } from '@/components/ui/grow';
+import { LiveStatus } from '@/components/ui/LiveStatus';
+import { revealRef } from '@/components/ui/motion';
 import { pathOf } from '@/app/screens';
 import { useAuditLog } from '@/features/audit/api';
 import { useCan } from '@/features/auth/useCan';
 import { useTenants } from '@/features/tenants/api';
+import { cx } from '@/lib/cx';
+import { liveState } from '@/lib/queryClient';
 import type { Tone } from '@/lib/domain';
 import { avatarColor, healthTone, initials, money, monthName, num, planTone, timeAgo } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
@@ -67,9 +74,32 @@ function queueItems(q: Overview['queue']) {
   ] satisfies { key: string; n: number; label: string; sub: string; to: string; tone: Tone }[];
 }
 
+/** One MRR column: rises from the baseline once in view, and eases to its new height when the figure changes. */
+function MrrColumn({ height, index, latest, title }: { height: number; index: number; latest: boolean; title: string }) {
+  const grow = useGrow(height, 'y');
+  return (
+    <div
+      ref={revealRef}
+      title={title}
+      className={grow.className}
+      style={
+        {
+          ...grow.style,
+          '--i': index,
+          width: '100%',
+          borderRadius: '6px 6px 2px 2px',
+          background: latest ? 'var(--ac)' : 'var(--acBar)',
+          height,
+        } as CSSProperties
+      }
+    />
+  );
+}
+
 function MrrChart({ series }: { series: Overview['mrrSeries'] }) {
   const t = useT();
-  const max = Math.max(...series.map((p) => p.mrr), 1);
+  // API figures are checked before they size anything: non-finite or negative values draw as empty columns.
+  const max = Math.max(...series.map((p) => clampNum(p.mrr, 0, Number.MAX_SAFE_INTEGER, 0)), 1);
   return (
     <figure style={{ margin: 0 }}>
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 160, marginTop: 20, minWidth: 0 }} aria-hidden="true">
@@ -77,14 +107,11 @@ function MrrChart({ series }: { series: Overview['mrrSeries'] }) {
           const label = monthName(p.month);
           return (
             <div key={p.month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0 }}>
-              <div
+              <MrrColumn
+                index={i}
+                latest={i === series.length - 1}
+                height={Math.round((clampNum(p.mrr, 0, max, 0) / max) * 140)}
                 title={t('mrrChart.barTitle', { month: label, amount: money(p.mrr) })}
-                style={{
-                  width: '100%',
-                  borderRadius: '6px 6px 2px 2px',
-                  background: i === series.length - 1 ? 'var(--ac)' : 'var(--acBar)',
-                  height: Math.round((p.mrr / max) * 140),
-                }}
               />
               <div className="faint" style={{ fontSize: 10.5 }}>
                 {label}
@@ -119,9 +146,16 @@ export default function OverviewPage() {
   const [f, setF] = useUrlState({ range: '30d' });
   const range = (OVERVIEW_RANGES as readonly string[]).includes(f.range) ? (f.range as OverviewRange) : '30d';
   const overview = useOverview(range);
-  const signups = useTenants({ sort: '-created_at', perPage: 5 });
-  const feed = useAuditLog({ perPage: 6 });
+  // The console home refreshes itself every minute while visible (lib/queryClient `live`): KPIs that change tint once,
+  // new sign-ups and activity slide in at the top, and the status line says how fresh the numbers are.
+  const signups = useTenants({ sort: '-created_at', perPage: 5 }, { live: true });
+  const feed = useAuditLog({ perPage: 6 }, { live: true });
   const o = overview.data;
+  // While the previous range's figures still show (placeholder data), nothing counts as "changed".
+  const scope = overview.isPlaceholderData ? null : range;
+  const signupRows = useFreshRows(signups.data?.data.map((tn) => tn.id) ?? [], signups.isSuccess && !signups.isPlaceholderData);
+  const feedRows = useFreshRows(feed.data?.data.map((a) => a.id) ?? [], feed.isSuccess && !feed.isPlaceholderData);
+  const atRiskFlash = useChangeFlash(o?.mrrAtRisk.amount, scope);
 
   if (overview.error)
     return (
@@ -161,7 +195,8 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      <div className="hstack" style={{ justifyContent: 'flex-end', marginBottom: -8 }}>
+      <div className="hstack wrap" style={{ justifyContent: 'space-between', gap: 10, marginBottom: -8 }}>
+        {o ? <LiveStatus state={liveState(overview)} updatedAt={overview.dataUpdatedAt} /> : <span />}
         <ChipGroup
           label={t('range.label')}
           options={OVERVIEW_RANGES.map((r) => [r, t(`range.${r}`)] as const)}
@@ -174,11 +209,17 @@ export default function OverviewPage() {
       <div className="grid-kpi">
         {o ? (
           <>
-            <Kpi label={t('kpis.mrr')} value={money(o.mrr.value)} delta={signed(o.mrr.deltaPct, '%')} />
-            <Kpi label={t('kpis.activeTenants')} value={num(o.tenants.value)} delta={signed(o.tenants.delta)} />
-            <Kpi label={t('kpis.totalStudents')} value={num(o.students.value)} delta={signed(o.students.delta)} />
+            <Kpi
+              label={t('kpis.mrr')}
+              changeScope={scope}
+              value={money(o.mrr.value)}
+              delta={o.mrr.deltaPct === null ? undefined : signed(o.mrr.deltaPct, '%')}
+            />
+            <Kpi label={t('kpis.activeTenants')} changeScope={scope} value={num(o.tenants.value)} delta={signed(o.tenants.delta)} />
+            <Kpi label={t('kpis.totalStudents')} changeScope={scope} value={num(o.students.value)} delta={signed(o.students.delta)} />
             <Kpi
               label={t('kpis.revenueChurn')}
+              changeScope={scope}
               value={`${o.revenueChurn.valuePct}%`}
               delta={t('kpis.pt', { value: signed(o.revenueChurn.deltaPts) })}
             />
@@ -205,7 +246,7 @@ export default function OverviewPage() {
             ) : (
               <ul className="stack plain-list">
                 {signups.data?.data.map((tn) => (
-                  <li key={tn.id}>
+                  <li key={tn.id} className={signupRows.cls(tn.id)} style={signupRows.style(tn.id)}>
                     <Link to={`/tenants/${tn.id}`} className="row row--click row-link-block">
                       <Avatar text={initials(tn.name)} color={avatarColor(tn.id)} size={30} radius={8} />
                       <div className="min0" style={{ flex: 1 }}>
@@ -285,8 +326,8 @@ export default function OverviewPage() {
                 <div style={{ flex: 1 }}>
                   <div className="t-xs faint">{t('queue.mrrAtRisk')}</div>
                   <div className="hstack" style={{ alignItems: 'baseline' }}>
-                    <span className="display fg-bad" style={{ fontSize: 20, fontWeight: 800 }}>
-                      {money(o.mrrAtRisk.amount)}
+                    <span className={cx('display fg-bad fx-flash', atRiskFlash)} style={{ fontSize: 20, fontWeight: 800, borderRadius: 6 }}>
+                      <CountUp value={money(o.mrrAtRisk.amount)} />
                     </span>
                     <span className="t-xs muted">
                       {t('queue.atRiskTenants', {
@@ -319,7 +360,11 @@ export default function OverviewPage() {
             ) : (
               <ul className="stack plain-list">
                 {feed.data?.data.map((a) => (
-                  <li key={a.id} className="row row--top" style={{ gap: 10, padding: '10px 0' }}>
+                  <li
+                    key={a.id}
+                    className={cx('row row--top', feedRows.cls(a.id))}
+                    style={{ gap: 10, padding: '10px 0', ...feedRows.style(a.id) }}
+                  >
                     <Dot tone={FEED_TONE[a.category] ?? 'warn'} style={{ marginTop: 6 }} />
                     <div className="min0" style={{ flex: 1 }}>
                       <div className="t-sm" style={{ lineHeight: 1.45 }}>

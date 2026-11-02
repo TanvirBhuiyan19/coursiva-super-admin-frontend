@@ -13,7 +13,6 @@ function bullets(p: PlanPricing) {
     studentsText(students),
     storageText(storageGb),
     liveRoomMinutes > 0 ? tBilling('planCards.liveRoomMinutes', { minutes: liveRoomMinutes }) : tBilling('planCards.liveRoomExternal'),
-    p.highlight,
   ];
 }
 
@@ -33,6 +32,11 @@ export function PlanCards({ plans, form, canManage }: { plans: PlanPricing[]; fo
               <h2 id={`plan-${p.plan}`} className="display" style={{ fontWeight: 700, fontSize: 16, flex: 1, margin: 0 }}>
                 {planLabel}
               </h2>
+              {p.highlight && (
+                <Badge tone="accent" pill>
+                  {t('planCards.recommended')}
+                </Badge>
+              )}
               <Badge tone="flat" pill>
                 {t('planCards.tenants', { count: p.tenants })}
               </Badge>

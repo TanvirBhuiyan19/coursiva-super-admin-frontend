@@ -15,7 +15,8 @@ export interface PolicyToggle<K extends string = string> {
 }
 
 // ---------- Live rooms ----------
-export const LIVE_ROOM_POLICIES = ['byo_providers', 'built_in_rooms', 'pull_recordings', 'fallback_to_built_in'] as const;
+// Built-in rooms and BYO providers are switched on Platform → Feature availability (`live_rooms`, `live_zoom/meet/teams`).
+export const LIVE_ROOM_POLICIES = ['pull_recordings', 'fallback_to_built_in'] as const;
 export type LiveRoomPolicyKey = (typeof LIVE_ROOM_POLICIES)[number];
 
 export interface LiveRoomUsage {
@@ -54,6 +55,10 @@ export interface CredentialField {
   last4: string | null;
   /** Full stored value for non-secret fields (account id, region…). Always null for secrets. */
   value: string | null;
+  /** A fixed choice (shown as a switch instead of a text box); null for free text. */
+  options?: { value: string; label: string }[] | null;
+  /** The value in effect while none is stored. */
+  default?: string | null;
 }
 
 export interface Connection {
@@ -65,6 +70,13 @@ export interface Connection {
   connected: boolean;
   verifiedAt: string | null;
   fields: CredentialField[];
+}
+
+/** Result of re-verifying stored credentials. */
+export interface ConnectionTest {
+  ok: boolean;
+  latencyMs: number;
+  message: string;
 }
 
 /** PUT body: new values for any fields; omitted fields keep their stored value. */

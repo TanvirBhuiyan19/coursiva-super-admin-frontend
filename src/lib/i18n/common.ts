@@ -54,6 +54,15 @@ export const { t, useT, source } = defineMessages('common', {
     justNow: 'just now',
     vsPreviousPeriod: 'vs previous period',
   },
+  /** Live status of a self-refreshing screen (overview, system status). */
+  live: {
+    status: 'Live · updated {ago}',
+    offline: 'Offline — retrying',
+    paused: 'Updates paused',
+    lastUpdated: 'Last updated {time}',
+    srOffline: 'Live updates interrupted',
+    srBack: 'Live updates restored',
+  },
   errors: {
     loadFailed: 'Couldn’t load this',
     forbidden: 'You don’t have access to this',
@@ -65,6 +74,21 @@ export const { t, useT, source } = defineMessages('common', {
     body: 'You have changes on this page that haven’t been saved. They’ll be lost if you leave.',
     keepEditing: 'Keep editing',
     discard: 'Discard and leave',
+    switchTitle: 'Switch without saving?',
+    switchBody: 'This section has changes that haven’t been saved. They’ll be lost if you switch.',
+    discardSwitch: 'Discard and switch',
+  },
+  confirmDialog: {
+    /** Label of the typed-confirmation input. */
+    typeToConfirm: 'Type {phrase} to confirm',
+  },
+  sectioned: {
+    /** Chip on a setting that differs from its shipped default. */
+    changed: 'changed',
+    changedLabel: 'Changed from default',
+    /** Arrow buttons on a section tab bar that's wider than the page. */
+    scrollBack: 'Earlier sections',
+    scrollMore: 'More sections',
   },
   pagination: {
     range: '{from}–{to} of {total} {noun}',
@@ -80,7 +104,7 @@ export const { t, useT, source } = defineMessages('common', {
     plan: { Launch: 'Launch', Growth: 'Growth', Scale: 'Scale' },
     tenantStatus: { Active: 'Active', Trial: 'Trial', 'Past due': 'Past due', Suspended: 'Suspended' },
     tenantHealth: { Healthy: 'Healthy', Watch: 'Watch', 'At risk': 'At risk' },
-    region: { EU: 'EU', US: 'US', APAC: 'APAC' },
+    region: { EU: 'EU', US: 'US', UK: 'UK', APAC: 'APAC' },
     auditCategory: { Tenants: 'Tenants', Billing: 'Billing', Flags: 'Flags', Security: 'Security', Auth: 'Auth' },
     limit: {
       storageGb: 'Storage (GB)',
@@ -88,7 +112,10 @@ export const { t, useT, source } = defineMessages('common', {
       apiPerMinute: 'API req/min',
       students: 'Students',
       courses: 'Courses',
-      liveRoomMinutes: 'Live room min/mo',
+      liveRoomMinutes: 'Live room participant-min/mo',
+      aiCredits: 'AI credits',
+      smsCredits: 'SMS credits',
+      liveSessions: 'Live sessions at once',
     },
   },
   language: {

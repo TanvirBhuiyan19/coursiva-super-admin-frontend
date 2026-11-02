@@ -9,7 +9,7 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/overview',
       summary: 'Platform overview for a comparison period',
-      auth: 'authenticated',
+      auth: 'tenants.view',
       query: { range: { type: 'string', enum: OVERVIEW_RANGES } },
       response: resource(ref('Overview')),
       example: { query: { range: '90d' } },

@@ -1,16 +1,17 @@
-import { Bar, Card, QueryState, SkeletonRows, ToggleRow } from '@/components/ui';
+import { Link } from 'react-router-dom';
+import { Bar, Card, QueryState, SkeletonRows } from '@/components/ui';
+import { pathOf } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
 import { toast } from '@/store/ui';
-import { useAddToRoadmap, useIntegrationSettings, useSetIntegrationPolicy } from '../api';
+import { useAddToRoadmap, useIntegrationSettings } from '../api';
 import { useT } from '../i18n';
 
-/** What tenants may connect. Each policy toggle saves immediately (optimistic). */
+/** Marketplace adoption and tenant requests. What tenants may connect is switched on Feature availability. */
 export function IntegrationsCard() {
   const t = useT();
   const can = useCan();
   const manage = can('platform.manage');
   const q = useIntegrationSettings();
-  const setPolicy = useSetIntegrationPolicy();
   const roadmap = useAddToRoadmap();
 
   return (
@@ -23,27 +24,14 @@ export function IntegrationsCard() {
       }
     >
       <p className="t-sm muted" style={{ marginTop: 0, lineHeight: 1.55 }}>
-        {t('integrations.intro')}
+        {t('integrations.intro')} {t('integrations.availabilityNote')}{' '}
+        <Link to={pathOf('availability')} className="link">
+          {t('integrations.availabilityLink')}
+        </Link>
       </p>
       <QueryState query={q} compact skeleton={<SkeletonRows rows={6} />}>
         {(d) => (
           <>
-            {d.policies.map((p) => (
-              <ToggleRow
-                key={p.key}
-                label={p.label}
-                sub={p.description}
-                on={p.enabled}
-                disabled={!manage}
-                onChange={(enabled) =>
-                  setPolicy.mutate(
-                    { key: p.key, enabled },
-                    { onSuccess: () => toast(t(enabled ? 'integrations.policyOn' : 'integrations.policyOff', { label: p.label })) },
-                  )
-                }
-              />
-            ))}
-
             <h3 className="eyebrow" style={{ marginTop: 16, marginBottom: 4 }}>
               {t('integrations.adoption')}
             </h3>

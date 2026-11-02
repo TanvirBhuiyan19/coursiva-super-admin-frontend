@@ -31,7 +31,7 @@ describe('usage & infrastructure', () => {
     const t = screen.getByRole('table', { name: 'Top consumers' });
     expect(within(t).getAllByRole('row')).toHaveLength(6);
     const devpath = within(t).getByRole('row', { name: /DevPath Bootcamp/ });
-    expect(within(devpath).getByText('Video storage overage · +$114')).toBeInTheDocument();
+    expect(within(devpath).getByText('AI credits overage · +$114')).toBeInTheDocument();
   });
 });
 
@@ -68,11 +68,20 @@ describe('AI usage & cost', () => {
     signInAs('Owner');
     renderApp('/analytics/ai');
     const t = await screen.findByRole('table', { name: 'AI usage by tenant' });
-    // DevPath (Scale, 1,500k allowance) used 1,980k: cost 1980 × $0.42 = $832, overage 480k × $0.60.
+    // DevPath (Scale, 2,000k-credit allowance) used 2,480k: cost 2480 × $0.42 = $1,042, overage 480k × $0.60.
     const devpath = within(t).getByRole('row', { name: /DevPath Bootcamp/ });
-    expect(within(devpath).getByText('1,980k of 1,500k')).toBeInTheDocument();
-    expect(within(devpath).getByText('$832')).toBeInTheDocument();
+    expect(within(devpath).getByText('2,480k of 2,000k')).toBeInTheDocument();
+    expect(within(devpath).getByText('$1,042')).toBeInTheDocument();
     expect(within(devpath).getByText('+$288 billed')).toBeInTheDocument();
+    // Model cost (real provider spend) sits beside the credit cost: the mock's blended 2480 × $0.31 = $768.80.
+    expect(within(t).getByRole('columnheader', { name: 'Credit cost' })).toBeInTheDocument();
+    expect(within(t).getByRole('columnheader', { name: 'Model cost' })).toBeInTheDocument();
+    expect(within(devpath).getByText(/^\$768(\.80)?$|^\$769$/)).toBeInTheDocument();
+    // The KPI totals every tenant row: 4,307k credits × $0.31 = $1,335.17.
+    expect(screen.getByText('Model cost · MTD')).toBeInTheDocument();
+    expect(screen.getByText(/^\$1,335(\.17)?$/)).toBeInTheDocument();
+    // Plan allowances mirror the backend's ai_credits limits (thousands of credits).
+    expect(screen.getByText(/Launch 50k · Growth 600k · Scale 2,?000k credits/)).toBeInTheDocument();
   });
 
   it('throttles a tenant and persists it', async () => {

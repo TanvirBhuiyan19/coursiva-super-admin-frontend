@@ -1,12 +1,19 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { Controller } from 'react-hook-form';
 import { z } from 'zod';
-import { Field, FormError, Input, Modal, Spinner, Textarea } from '@/components/ui';
+import { RichTextEditor, STANDARD, type RichTextHandle } from '@/components/editor';
+import { Field, FormError, Input, Modal, Spinner } from '@/components/ui';
 import { errorMessage } from '@/lib/api/errors';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { useEmailOwners } from '../api';
 import { t as msg, useT } from '../i18n';
+
+/** The server's limit on the Markdown body (`POST /tenants/email`). */
+const BODY_MAX = 10_000;
+/** Filled in per owner by the server (escaped, so a school name can't add formatting or links). */
+const MERGE_TAGS = ['{owner_name}', '{tenant_name}', '{plan}'] as const;
 
 const schema = z.object({
   subject: z
@@ -17,7 +24,8 @@ const schema = z.object({
   body: z
     .string()
     .trim()
-    .min(1, { error: () => msg('email.errors.bodyRequired') }),
+    .min(1, { error: () => msg('email.errors.bodyRequired') })
+    .max(BODY_MAX, { error: () => msg('email.errors.bodyMax') }),
 });
 
 export function EmailComposer({ ids, onClose, onSent }: { ids: string[]; onClose: () => void; onSent?: () => void }) {
@@ -26,7 +34,14 @@ export function EmailComposer({ ids, onClose, onSent }: { ids: string[]; onClose
   const send = useEmailOwners();
   const form = useZodForm(schema, { defaultValues: { subject: '', body: '' } });
   const [formError, setFormError] = useState<string | null>(null);
+  const editor = useRef<RichTextHandle>(null);
   const n = ids.length;
+
+  /** Merge tags go in at the caret (appended while the editor is still loading). */
+  const insert = (tag: string) => {
+    if (editor.current) editor.current.insert(tag);
+    else form.setValue('body', form.getValues('body') + tag, { shouldDirty: true });
+  };
 
   const onSubmit = form.handleSubmit((values) => {
     setFormError(null);
@@ -46,7 +61,7 @@ export function EmailComposer({ ids, onClose, onSent }: { ids: string[]; onClose
   });
 
   return (
-    <Modal onClose={onClose} width={560} label={t('email.title', { count: n })}>
+    <Modal onClose={onClose} width={620} label={t('email.title', { count: n })}>
       <form onSubmit={(e) => void onSubmit(e)} noValidate>
         <div className="hstack" style={{ justifyContent: 'space-between' }}>
           <h2 className="display" style={{ fontWeight: 700, fontSize: 16 }}>
@@ -61,12 +76,34 @@ export function EmailComposer({ ids, onClose, onSent }: { ids: string[]; onClose
             <Input {...p} {...form.register('subject')} size="lg" style={{ fontWeight: 600 }} placeholder={t('email.subjectPlaceholder')} />
           )}
         </Field>
-        <Field
-          label={t('email.message')}
-          error={form.formState.errors.body?.message}
-          hint={t('email.mergeTags', { tags: '{owner_name}, {tenant_name}, {plan}' })}
-        >
-          {(p) => <Textarea {...p} {...form.register('body')} rows={7} placeholder={t('email.messagePlaceholder')} />}
+        <div className="hstack wrap" role="group" aria-label={t('email.insertTag')} style={{ gap: 6, marginTop: 14 }}>
+          <span className="t-xs faint">{t('email.insertTag')}</span>
+          {MERGE_TAGS.map((tag) => (
+            <button key={tag} type="button" className="chip chip--xs" onClick={() => insert(tag)}>
+              {tag}
+            </button>
+          ))}
+        </div>
+        <Field label={t('email.message')} error={form.formState.errors.body?.message} hint={t('email.messageHint')}>
+          {(p) => (
+            <Controller
+              control={form.control}
+              name="body"
+              render={({ field }) => (
+                <RichTextEditor
+                  {...p}
+                  features={STANDARD}
+                  minHeight={180}
+                  maxLength={BODY_MAX}
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  handle={editor}
+                  placeholder={t('email.messagePlaceholder')}
+                />
+              )}
+            />
+          )}
         </Field>
         <FormError>{formError}</FormError>
         <div className="hstack wrap" style={{ gap: 10, marginTop: 16 }}>

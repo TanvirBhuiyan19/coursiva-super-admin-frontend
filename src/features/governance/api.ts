@@ -16,6 +16,7 @@ import type {
   ModerationSummary,
   PolicyAcceptance,
   PolicyDocument,
+  PolicyDraftInput,
   PolicyOverview,
   RateLimit,
   RegionSummary,
@@ -54,10 +55,12 @@ const get = <T>(path: string, signal: AbortSignal, query?: Record<string, string
 export const useComplianceSummary = () =>
   useQuery({ queryKey: governanceKeys.compliance, queryFn: ({ signal }) => get<ComplianceSummary>('/governance/compliance', signal) });
 
-export const useDsars = (status?: DsarStatus) =>
+/** One page of DSARs (25 a page) — the list pages instead of silently stopping at 100. */
+export const useDsars = (status?: DsarStatus, page = 1) =>
   useQuery<Paginated<Dsar>>({
-    queryKey: governanceKeys.dsars(status),
-    queryFn: ({ signal }) => api.get<Paginated<Dsar>>('/governance/dsars', { query: { status, perPage: 100 }, signal }),
+    queryKey: [...governanceKeys.dsars(status), page],
+    queryFn: ({ signal }) => api.get<Paginated<Dsar>>('/governance/dsars', { query: { status, page, perPage: 25 }, signal }),
+    placeholderData: keepPreviousData,
   });
 
 /** Fulfils a DSAR; for a Deletion request this erases the subject's data. */
@@ -145,6 +148,18 @@ export const usePolicyAcceptance = (documentId: string | undefined) =>
     queryFn: ({ signal }) => get<PolicyAcceptance[]>(`/governance/policies/${documentId ?? ''}/acceptance`, signal),
     enabled: !!documentId,
   });
+
+export function useDraftPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PolicyDraftInput) => api.post<Resource<PolicyDocument>>('/governance/policies', input).then((r) => r.data),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: governanceKeys.policies });
+      audit(qc);
+    },
+    meta: { errorToast: false },
+  });
+}
 
 export function usePublishPolicy() {
   const qc = useQueryClient();

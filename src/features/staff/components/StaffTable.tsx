@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Avatar, Badge, ConfirmButton, Empty, Select, SkeletonRows, TRow } from '@/components/ui';
+import { useEffect, useState } from 'react';
+import { Avatar, Badge, ConfirmButton, ConfirmDialog, Empty, Select, SkeletonRows, TRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { cx } from '@/lib/cx';
 import type { Tone } from '@/lib/domain';
@@ -23,6 +23,19 @@ function RowActions({ m }: { m: StaffMember }) {
   const action = useStaffAction();
   const elevate = useElevateStaff();
   const busy = action.isPending || elevate.isPending;
+  // Elevation mints Owner access: the member's name is typed back first (and the server asks for the password when it
+  // wasn't entered in the last 15 minutes). Revoking stays one click.
+  const [confirmElevate, setConfirmElevate] = useState(false);
+  const toggleElevation = () =>
+    elevate.mutate(
+      { id: m.id, elevate: !m.elevatedUntil },
+      {
+        onSuccess: () => {
+          setConfirmElevate(false);
+          toast(m.elevatedUntil ? t('toasts.elevationRevoked', { name: m.name }) : t('toasts.elevated', { name: m.name }));
+        },
+      },
+    );
   const run = (a: Parameters<typeof action.mutate>[0]['action'], message: string) =>
     action.mutate({ id: m.id, action: a }, { onSuccess: () => toast(message) });
 
@@ -63,15 +76,7 @@ function RowActions({ m }: { m: StaffMember }) {
         title={t('actions.elevateTitle')}
         disabled={busy}
         aria-label={m.elevatedUntil ? t('actions.revokeElevationFor', { name: m.name }) : t('actions.elevateFor', { name: m.name })}
-        onClick={() =>
-          elevate.mutate(
-            { id: m.id, elevate: !m.elevatedUntil },
-            {
-              onSuccess: () =>
-                toast(m.elevatedUntil ? t('toasts.elevationRevoked', { name: m.name }) : t('toasts.elevated', { name: m.name })),
-            },
-          )
-        }
+        onClick={() => (m.elevatedUntil ? toggleElevation() : setConfirmElevate(true))}
       >
         {m.elevatedUntil ? t('actions.elevatedLeft', { minutes: minutesLeft(m.elevatedUntil) }) : t('actions.elevate')}
       </button>
@@ -94,6 +99,18 @@ function RowActions({ m }: { m: StaffMember }) {
       >
         {t('actions.suspend')} <span className="sr-only">{m.name}</span>
       </ConfirmButton>
+      {confirmElevate && (
+        <ConfirmDialog
+          title={t('actions.elevateConfirm.title', { name: m.name })}
+          phrase={m.name}
+          confirmLabel={t('actions.elevateConfirm.action')}
+          pending={elevate.isPending}
+          onConfirm={toggleElevation}
+          onCancel={() => setConfirmElevate(false)}
+        >
+          {t('actions.elevateConfirm.body', { name: m.name })}
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

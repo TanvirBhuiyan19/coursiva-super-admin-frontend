@@ -2,7 +2,7 @@
 import { http } from 'msw';
 import { tenants, type TenantRow } from '@/mocks/collections';
 import { ago, collection, id } from '@/mocks/db';
-import { authorize, handle, invalid, ok, paginate, readBody, recordAudit, route } from '@/mocks/http';
+import { authorize, handle, invalid, ok, paginate, readBody, recordAudit, requireRecentPassword, route } from '@/mocks/http';
 import {
   ANNOUNCEMENT_AUDIENCES,
   ANNOUNCEMENT_CHANNELS,
@@ -15,7 +15,7 @@ import {
 
 type AnnouncementRow = Announcement;
 
-const announcements = collection<AnnouncementRow>('announcements', () => [
+export const announcements = collection<AnnouncementRow>('announcements', () => [
   {
     id: 'an_seed1',
     message: 'Checkout maintenance window · Sep 14, 02:00–03:00 UTC',
@@ -73,6 +73,8 @@ export const handlers = [
     route('/announcements'),
     handle(async ({ request }) => {
       const user = authorize('announcements.send');
+      // Like both backends: a send reaches many schools at once, so it needs a recently confirmed password.
+      requireRecentPassword();
       const body = await readBody<Partial<NewAnnouncement>>(request);
       const message = typeof body.message === 'string' ? body.message.trim() : '';
       const errors: Record<string, string> = {};

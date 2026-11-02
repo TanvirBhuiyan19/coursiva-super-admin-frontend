@@ -111,22 +111,33 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
           alignItems: 'start',
         }}
       >
-        <Field label={t('points.pitrDay')} error={errs.pitrDate?.message}>
-          {(p) => (
-            <select {...p} {...form.register('pitrDate')} className="select">
-              {days.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
-        <Field label={t('points.pitrTime')} error={errs.pitrTime?.message} hint={t('points.pitrHint', { days: walDays })}>
-          {(p) => (
-            <Input {...p} {...form.register('pitrTime')} placeholder={t('points.timePlaceholder')} inputMode="numeric" autoComplete="off" />
-          )}
-        </Field>
+        {/* No transaction-log archive (wal_window_days 0): snapshots only, the API refuses point-in-time targets. */}
+        {walDays > 0 && (
+          <>
+            <Field label={t('points.pitrDay')} error={errs.pitrDate?.message}>
+              {(p) => (
+                <select {...p} {...form.register('pitrDate')} className="select">
+                  {days.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
+            <Field label={t('points.pitrTime')} error={errs.pitrTime?.message} hint={t('points.pitrHint', { days: walDays })}>
+              {(p) => (
+                <Input
+                  {...p}
+                  {...form.register('pitrTime')}
+                  placeholder={t('points.timePlaceholder')}
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+              )}
+            </Field>
+          </>
+        )}
         <Field label={t('points.scope')} error={errs.scope?.message}>
           {(p) => (
             <select {...p} {...form.register('scope')} className="select">
@@ -156,12 +167,13 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
   );
 }
 
-const STATUS_TONE: Record<Restore['status'], 'good' | 'warn' | 'flat' | 'info'> = {
+const STATUS_TONE: Record<Restore['status'], 'good' | 'warn' | 'flat' | 'info' | 'bad'> = {
   staged: 'warn',
   approved: 'info',
   running: 'info',
   completed: 'good',
   cancelled: 'flat',
+  failed: 'bad',
 };
 
 export function RestorePoints({ walDays, restores }: { walDays: number; restores: Restore[] }) {
@@ -172,7 +184,7 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
   const drill = useRunDrill();
   const [selected, setSelected] = useState<string | null>(null);
   const active = restores.find((r) => ['staged', 'approved', 'running'].includes(r.status));
-  const history = restores.filter((r) => r.status === 'completed' || r.status === 'cancelled').slice(0, 4);
+  const history = restores.filter((r) => ['completed', 'cancelled', 'failed'].includes(r.status)).slice(0, 4);
   const selectedPoint = list.data?.find((p) => p.id === selected);
 
   return (

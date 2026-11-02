@@ -8,17 +8,24 @@ export type MovementKind = 'new' | 'expansion' | 'contraction' | 'churn';
 export interface RevenueSummary {
   mrr: number;
   arr: number;
-  /** Sum of the movement amounts for `movementMonth`. */
+  /** Sum of every movement amount for `movementMonth` (not just the ones listed). */
   netChange: number;
   pastDueTenants: number;
   /** First day (ISO date) of the last closed month the movement covers. */
   movementMonth: string;
-  movements: { kind: MovementKind; label: string; detail: string; amount: number }[];
+  /** The largest movements of the month (at most 12), biggest first; `id` is a stable key. */
+  movements: { id: string; kind: MovementKind; label: string; detail: string; amount: number }[];
+  /** How many movements the month had in total. */
+  movementCount: number;
   churnReasons: { reason: string; pct: number }[];
   payouts: { id: string; date: string; amount: number; status: 'Scheduled' | 'Paid' }[];
 }
 
-export type InvoiceStatus = 'Paid' | 'Past due' | 'Waived';
+/** Laravel BillingPresenter::adminInvoice. `Open` = issued, not charged yet; `Void` = cancelled. */
+export type InvoiceStatus = 'Paid' | 'Past due' | 'Waived' | 'Void' | 'Open';
+
+/** Merchants of record that bill schools themselves (the console's `billing_provider` setting picks one for new checkouts). */
+export type InvoiceProvider = 'paddle' | 'lemon_squeezy';
 
 export interface Invoice {
   id: string;
@@ -33,6 +40,11 @@ export interface Invoice {
   attempts: number;
   nextRetryAt: string | null;
   dunningPaused: boolean;
+  /**
+   * The merchant of record that billed it, or null for Coursiva's own (Stripe) invoices. A provider retries its
+   * invoices on its own schedule: retry, waive and pause dunning answer 422 for them — manage them at the provider.
+   */
+  provider: InvoiceProvider | null;
 }
 
 export interface InvoiceListParams {
@@ -53,13 +65,22 @@ export interface DunningQueue {
   items: Invoice[];
 }
 
+/** Metered usage billed beyond the plan allowance (Laravel `coursiva.billing.overage`). */
+export const OVERAGE_METERS = ['ai_credits', 'live_room_minutes', 'sms_credits'] as const;
+export type OverageMeter = (typeof OVERAGE_METERS)[number];
+
 export interface Overage {
   id: string;
   tenantId: string;
   tenantName: string;
-  meter: string;
-  usage: string;
-  rate: string;
+  meter: OverageMeter;
+  /** Units used this month (credits, minutes). */
+  usage: number;
+  /** Units included in the tenant's plan (or its override). */
+  allowance: number;
+  /** Price in dollars per `per` units over the allowance. */
+  rate: number;
+  per: number;
   amount: number;
   billedAt: string | null;
 }
@@ -83,7 +104,8 @@ export interface PlanPricing {
   mrr: number;
   /** Plan default limits. `0` = unlimited. */
   limits: { staffSeats: number; students: number; storageGb: number; liveRoomMinutes: number };
-  highlight: string;
+  /** The recommended plan (Laravel: Growth), badged on its card and on the marketing pricing page. */
+  highlight: boolean;
 }
 
 export interface Addon {
@@ -103,6 +125,7 @@ export interface PlanFeature {
 export interface PricingConfig {
   plans: PlanPricing[];
   annualDiscountPct: number;
+  /** Free-trial length of new schools, 0–90 (0 = pay at sign-up). The single source: also `GET /settings` → `trialDays`. */
   trialDays: number;
   addons: Addon[];
   features: PlanFeature[];
@@ -115,6 +138,7 @@ export type Rollout = (typeof ROLLOUTS)[number];
 export interface PricingUpdate {
   prices: { plan: Plan; price: number }[];
   annualDiscountPct: number;
+  /** 0–90; saved to the same platform setting as `PATCH /settings` → `trialDays`. */
   trialDays: number;
   addons: { key: string; price: number }[];
   rollout: Rollout;

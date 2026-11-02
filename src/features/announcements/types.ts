@@ -7,10 +7,13 @@ export type AnnouncementChannel = (typeof ANNOUNCEMENT_CHANNELS)[number];
 
 export const ANNOUNCEMENT_MAX_LENGTH = 500;
 
+/** Broadcast banners (Platform → Flags & status) are stored with announcements and can carry these audiences too. */
+export type BroadcastOnlyAudience = 'Growth & Scale' | 'Trials only';
+
 export interface Announcement {
   id: string;
   message: string;
-  audience: AnnouncementAudience;
+  audience: AnnouncementAudience | BroadcastOnlyAudience;
   channel: AnnouncementChannel;
   /** Tenants the announcement reached when it was sent (suspended tenants are skipped). */
   recipients: number;

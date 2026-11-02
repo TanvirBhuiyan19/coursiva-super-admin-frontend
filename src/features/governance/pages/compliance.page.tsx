@@ -5,6 +5,7 @@ import {
   Empty,
   ErrorState,
   KpiRow,
+  Pagination,
   QueryState,
   Screen,
   Select,
@@ -12,15 +13,20 @@ import {
   SkeletonRows,
   TRow,
 } from '@/components/ui';
+import { useUrlState } from '@/lib/useUrlState';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import type { Tone } from '@/lib/domain';
 import { daysUntil, formatDate, formatDateTime, timeAgo, toneFg } from '@/lib/format';
+import { useSection } from '@/lib/useSection';
 import { toast } from '@/store/ui';
 import { useComplianceSummary, useDsars, useFulfilDsar, useRetention, useSetRetention } from '../api';
 import { dueLabel } from '../components/format';
 import { SubProcessorsCard } from '../components/SubProcessorsCard';
 import { useT } from '../i18n';
 import { RETENTION_PERIODS, type Dsar, type DsarType } from '../types';
+
+const SECTIONS = ['dsars', 'retention', 'processors'] as const;
 
 const COLS = 'minmax(0,1.6fr) minmax(0,1.5fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,1fr) minmax(0,1.3fr)';
 const TYPE_TONE: Record<DsarType, Tone> = { Access: 'info', Deletion: 'bad', Portability: 'warn' };
@@ -67,7 +73,8 @@ function DsarAction({ d }: { d: Dsar }) {
 
 function DsarTable() {
   const t = useT();
-  const list = useDsars();
+  const [f, setF] = useUrlState({ dsarPage: '' });
+  const list = useDsars(undefined, Number(f.dsarPage) || 1);
   if (list.error) return <ErrorState error={list.error} onRetry={() => void list.refetch()} />;
   return (
     <Card title={t('compliance.dsars.title')} sub={t('compliance.dsars.sub')} className="table-scroll">
@@ -120,6 +127,9 @@ function DsarTable() {
           })
         )}
       </div>
+      {list.data && list.data.meta.lastPage > 1 && (
+        <Pagination meta={list.data.meta} onPage={(p) => setF({ dsarPage: String(p) })} noun={t('compliance.dsars.noun')} />
+      )}
     </Card>
   );
 }
@@ -172,6 +182,8 @@ export default function CompliancePage() {
   const summary = useComplianceSummary();
   const s = summary.data;
   const nearest = s?.nearestDueAt ? daysUntil(s.nearestDueAt) : null;
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'dsars');
+  const open = s?.openDsars ?? 0;
 
   return (
     <Screen max={1150} label={t('compliance.title')}>
@@ -213,12 +225,33 @@ export default function CompliancePage() {
         </div>
       )}
 
-      <DsarTable />
-
-      <div className="grid-2">
-        <RetentionCard />
-        <SubProcessorsCard />
-      </div>
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({
+          id,
+          label: t(`sections.compliance.${id}`),
+          ...(id === 'dsars'
+            ? {
+                badge: open,
+                badgeLabel: t('sections.compliance.openBadge', { count: open }),
+                badgeTone: s?.overdueDsars ? ('bad' as const) : ('accent' as const),
+              }
+            : {}),
+        }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.compliance.nav')}
+        href={sectionHref}
+      >
+        <SectionPanel active={section === 'dsars'}>
+          <DsarTable />
+        </SectionPanel>
+        <SectionPanel active={section === 'retention'}>
+          <RetentionCard />
+        </SectionPanel>
+        <SectionPanel active={section === 'processors'}>
+          <SubProcessorsCard />
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

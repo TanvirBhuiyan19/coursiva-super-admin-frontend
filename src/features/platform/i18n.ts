@@ -29,7 +29,15 @@ export const { t, useT } = defineMessages('platform', {
     a11yStatus: { Conformant: 'Conformant', Partial: 'Partial', 'Not conformant': 'Not conformant' },
     webhookStatus: { Healthy: 'Healthy', Failing: 'Failing' },
     // Announcement enums (owned by the announcements feature; duplicated here for the broadcast panel).
-    audience: { 'All tenants': 'All tenants', 'Launch plan': 'Launch plan', 'Growth plan': 'Growth plan', 'Scale plan': 'Scale plan' },
+    // Includes the broadcast-only audiences (`POST /platform/broadcasts`), which show up in the recent list.
+    audience: {
+      'All tenants': 'All tenants',
+      'Launch plan': 'Launch plan',
+      'Growth plan': 'Growth plan',
+      'Scale plan': 'Scale plan',
+      'Growth & Scale': 'Growth & Scale',
+      'Trials only': 'Trials only',
+    },
     audiencePhrase: {
       'All tenants': 'all tenants',
       'Launch plan': 'launch plan',
@@ -41,6 +49,125 @@ export const { t, useT } = defineMessages('platform', {
   tiles: {
     loading: 'Loading',
   },
+  /** Section nav of the long platform screens (short labels; each section's card keeps its full title). */
+  sections: {
+    flags: { nav: 'Flags and status sections', flags: 'Feature flags', status: 'System status', broadcast: 'Broadcast' },
+    connections: {
+      nav: 'Connection types',
+      payments: 'Payments',
+      cdn: 'Custom domains',
+      push: 'Push notifications',
+      email: 'Platform email',
+      ads: 'Ads & channels',
+      insights: 'Insights',
+      ai: 'AI studio',
+      security: 'Security',
+      monitoring: 'Monitoring',
+      video: 'Live video',
+      oauth: 'Sign-in apps',
+    },
+    api: {
+      nav: 'API sections',
+      keys: 'API keys',
+      webhooks: 'Webhook endpoints',
+      failed: 'Failed deliveries',
+      failedBadge: { one: '{count} failed delivery', other: '{count} failed deliveries' },
+    },
+    credentials: { nav: 'Certificate sections', certificates: 'Certificates', policy: 'Registry policy' },
+    deliver: {
+      nav: 'Deliverability sections',
+      domains: 'Sender domains',
+      suppression: 'Suppression list',
+      overBadge: { one: '{count} domain over the threshold', other: '{count} domains over the threshold' },
+    },
+    standards: {
+      nav: 'Standards sections',
+      support: 'Supported standards',
+      imports: 'Failed imports',
+      a11y: 'Accessibility',
+      importsBadge: { one: '{count} failed import', other: '{count} failed imports' },
+    },
+  },
+  connections: {
+    screenLabel: 'Connections',
+    intro:
+      'Connect the services the platform runs on by pasting their credentials. Each one is verified with the provider before it is saved, stored encrypted, and used right away — secrets are never shown again. Storage backends and DRM providers are on',
+    mediaLink: 'Video & storage.',
+    payments: 'Payments',
+    paymentsSub:
+      'School subscriptions. Stripe charges cards directly; Paddle and Lemon Squeezy bill as merchant of record (they collect, handle tax and issue the invoice). Choose which one new checkouts use in Settings → Billing & dunning. Register these webhook endpoints: /api/v1/webhooks/stripe · /api/v1/webhooks/paddle (subscription.*, transaction.completed, transaction.payment_failed) · /api/v1/webhooks/lemon-squeezy (subscription and subscription payment events).',
+    cdn: 'Custom domains',
+    cdnSub:
+      'Cloudflare for SaaS issues SSL for school domains, purges their cached pages after a publish, applies the www and HTTPS redirects and reports delivery figures. The zone token needs “SSL and Certificates: Edit”, “Cache Purge: Purge”, “Single Redirect: Edit” and “Analytics: Read”. The check below only proves the SSL permission — a missing extra one shows up later as refused purges, redirects or empty figures. Cloudflare Registrar sells domains to schools: its account token needs “Registrar: Edit” plus “DNS: Edit” and “Zone: Read” on the account’s zones; without it schools can’t buy domains (prices and tasks: Domains).',
+    push: 'Mobile app push',
+    pushSub:
+      'The schools’ white-label mobile apps send push notifications through Expo. No token is needed unless the Expo project turns on enhanced push security — then paste an Expo access token here.',
+    email: 'Platform email',
+    emailSub: 'Sign-in, invitation and billing emails. Postmark is used when connected, otherwise SMTP (TLS is always required).',
+    ads: 'Ads & channels',
+    adsSub:
+      'The platform-wide developer tokens of the ad networks, sent on every call for every school. Schools still authorise their own ad accounts with the Google and Microsoft sign-in apps. The networks can’t check a token without a school’s grant, so only the format is checked here — a wrong token shows in the first school’s account list.',
+    insights: 'Insights',
+    insightsSub:
+      'Core Web Vitals (LCP, INP, CLS) of every school site from real Chrome users, refreshed nightly. Paste a Google Cloud API key restricted to the Chrome UX Report API — only the format is checked; a wrong key shows in the first refresh.',
+    ai: 'AI studio',
+    aiSub:
+      'Claude (Anthropic) runs every school’s AI studio — outlines, quizzes, grading, copy, caption translation and the tutor — on the platform’s key, metered as AI credits on each school’s plan. AssemblyAI turns lesson audio into captions and transcripts. Both keys are verified with the provider before they are saved.',
+    security: 'Security',
+    securitySub:
+      'Every upload — media library, assignment files and SCORM packages — is scanned for viruses by a ClamAV daemon (clamd) reachable over TCP, usually on the private network. The host and port are verified with a PING before they are saved.',
+    monitoring: 'Monitoring',
+    monitoringSub:
+      'Prometheus scrapes GET /api/metrics with this bearer token. Generate a random token of at least 32 characters (for example: openssl rand -hex 32) and put the same value in the scrape config. Without it the endpoint answers 404.',
+    video: 'Live video',
+    videoSub:
+      'Schools’ built-in live rooms run on Daily: each session is a private Daily room, joined with short-lived meeting tokens, with cloud recordings imported into the school’s Media library. Until Daily is connected, schools can’t use the built-in room. For attendance, recordings and the automatic end of a session, add a webhook HMAC secret (for example: openssl rand -base64 32) and run php artisan live:daily-webhook — it points the account’s webhook at /api/v1/webhooks/daily.',
+    oauth: 'Apps schools sign in to',
+    oauthSub:
+      'Register one OAuth app per provider and paste its client ID and secret here (for X, its consumer keys); schools then connect with one click. Each card shows the redirect URI to register.',
+    connected: '{name} connected — credentials verified',
+    disconnected: '{name} disconnected — it stops working for everyone right away',
+    availableHeading: 'Available to schools',
+  },
+  availability: {
+    screenLabel: 'Feature availability',
+    intro:
+      'What schools can see at all. A switched-off capability disappears from every school’s dashboard, student site, API and background jobs — above plans, extensions and per-school overrides. A capability that needs a service is only available while that service is connected on',
+    connectionsLink: 'Connections.',
+    findLabel: 'Find a capability',
+    findPlaceholder: 'Find a capability, module or service',
+    filterLabel: 'Show',
+    filter: { all: 'All', available: 'Available', off: 'Off', notConnected: 'Not connected' },
+    filterCount: '{label} · {count}',
+    summary: 'Showing {shown} of {total} capabilities',
+    groupOn: '{on} of {total} on',
+    status: { available: 'Available', off: 'Off', notConnected: 'Not connected' },
+    connect: 'Connect {names}',
+    connectAny: 'Connect one of {names}',
+    usedBy: { one: 'Used by {count} school', other: 'Used by {count} schools' },
+    usageUnknown: 'Usage not counted',
+    paying: { one: '{count} paying school', other: '{count} paying schools' },
+    toggle: '{label} available to schools',
+    noMatches: 'No capability matches “{q}”.',
+    noMatchesFilter: 'Nothing matches this filter.',
+    clear: 'Show everything',
+    turnedOn: '{label} is available to schools again',
+    turnedOff: '{label} turned off for every school — hidden from dashboards, sites and the API',
+    confirm: {
+      title: 'Turn off {label} for every school?',
+      action: 'Turn off for all schools',
+      lead: 'This disappears for every school right away — it isn’t shown disabled, it’s gone:',
+      used: { one: '{count} school uses it now.', other: '{count} schools use it now.' },
+      usedUnknown: 'How many schools use it isn’t counted.',
+      unused: 'No school uses it now.',
+      paying: {
+        one: '{count} school pays for {ext}; their billing is unchanged — comp or cancel them from',
+        other: '{count} schools pay for {ext}; their billing is unchanged — comp or cancel them from',
+      },
+      billingLink: 'Billing if needed.',
+      reversible: 'Turning it back on restores everything; nothing is deleted.',
+    },
+  },
   flags: {
     screenLabel: 'Feature flags and status',
     title: 'Feature flags',
@@ -51,6 +178,20 @@ export const { t, useT } = defineMessages('platform', {
     toastEnabled: '{name} enabled for {rollout}',
     toastDisabled: '{name} disabled for {rollout}',
     toastRollout: '{name} now rolls out to {rollout}',
+    confirmOff: {
+      title: 'Turn {name} off?',
+      body: '{name} switches off right away for {rollout}: every school in that rollout loses it until it’s turned back on.',
+      overrides: {
+        one: '{count} school with its own override keeps its setting.',
+        other: '{count} schools with their own override keep their setting.',
+      },
+      action: 'Turn off',
+    },
+    confirmWiden: {
+      title: 'Roll {name} out to all tenants?',
+      body: '{name} switches on right away for every school on the platform.',
+      action: 'Roll out to all',
+    },
   },
   incident: {
     formLabel: 'Post an incident',
@@ -93,6 +234,7 @@ export const { t, useT } = defineMessages('platform', {
   apiKeys: {
     screenLabel: 'API and webhooks',
     title: 'API keys',
+    noun: 'keys',
     create: 'Create key',
     empty: 'No platform API keys yet.',
     created: 'Created {month}',
@@ -124,10 +266,16 @@ export const { t, useT } = defineMessages('platform', {
     saved: 'I’ve saved it',
     copiedToast: '{name} copied — store it in your secrets manager',
     copyFailed: 'Couldn’t copy — select the key and copy it manually',
+    fullAccessWarning:
+      'A full-access key can do everything you can — suspend or purge schools, change billing, mint more keys — and it keeps working after you sign out, until it’s revoked.',
+    fullAccessPhrase: 'FULL ACCESS',
+    fullAccessRequired: 'Type FULL ACCESS to create a full-access key.',
   },
   webhooks: {
     title: 'Webhook endpoints',
     empty: 'No webhook endpoints registered.',
+    eventsFor: 'Events sent to {url}',
+    allEvents: 'All events',
     successLabel: '{url} delivery success {pct}%',
     successFootnote: 'Delivery success rate, last 7 days.',
     failedTitle: 'Failed deliveries · last 24 h',
@@ -167,7 +315,7 @@ export const { t, useT } = defineMessages('platform', {
     noMatch: 'No certificate matches that search.',
     empty: 'No certificates issued yet.',
     noun: 'certificates',
-    note: 'Certificates are issued under the platform registry at verify.coursiva.io, so a learner’s credential survives a tenant closing, rebranding or being suspended.',
+    note: 'Certificates are issued under the platform registry on the platform’s verification domain, so a learner’s credential survives a tenant closing, rebranding or being suspended.',
     copyLinkLabel: 'Copy verify link for {id}',
     copyLink: 'Copy link',
     reinstate: 'Reinstate',
@@ -186,6 +334,7 @@ export const { t, useT } = defineMessages('platform', {
     tiles: {
       sent: 'Sent · 30d',
       sentSub: 'Across every tenant domain',
+      notMeasured: 'Not measured yet — needs the mail provider’s event webhooks',
       bounce: 'Bounce rate',
       bounceSub: 'Provider threshold {max}%',
       complaint: 'Complaint rate',

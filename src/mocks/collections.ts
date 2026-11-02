@@ -3,6 +3,7 @@
 // Feature-only tables live next to the feature's handlers (src/features/<f>/api/mock.ts).
 import type { AuditCategory, Limits, Plan, Region, TenantStatus } from '@/lib/domain';
 import { ROLE_PERMISSIONS, type Permission, type Role } from '@/features/auth/permissions';
+import type { PlatformSettings } from '@/features/settings/types';
 import { ago, collection, fromNow, singleton } from './db';
 import { FEATURE_FLAGS, LIST_PRICE, LIVE_ROOM_DEFAULTS, PLAN_LIMITS } from './reference';
 
@@ -21,7 +22,18 @@ export interface TenantRow {
   createdAt: string;
   lastActiveAt: string;
   trialEndsAt: string | null;
+  /**
+   * Why a `Suspended` tenant is suspended (Laravel `tenants.suspension_reason`): `payment_method_required` = a card-less
+   * trial ended and the school is paused until a card is added; `billing` = dunning; `staff` = the console's suspend.
+   */
+  suspensionReason?: string | null;
+  /** Set by the abuse queue's "Freeze checkout" (Laravel `tenants.checkout_frozen_at`); null/absent = not frozen. */
+  checkoutFrozenAt?: string | null;
+  /** A card saved with Coursiva (absent: paying tenants have one, trials don't). */
+  cardVerified?: boolean;
   region: Region;
+  /** Pending data-residency move (Laravel `tenants.region_request`); `region` stays put until the data is migrated. */
+  regionRequest?: { region: Region; requestedAt: string; requestedBy: string } | null;
   notes: string | null;
   limitOverrides: Partial<Limits>;
   /** module id → granted (true) / revoked (false). Absent = plan default. */
@@ -148,6 +160,30 @@ export interface StaffRow {
   watchlist: string[];
   /** Just-in-time Owner elevation expiry (ISO). While in the future the user has every permission. */
   elevatedUntil: string | null;
+  /** Mock only: 2FA enrolment started (`POST /auth/two-factor`) but not yet confirmed with a code. */
+  twoFactorPending?: boolean;
+  /** Mock only: unused single-use recovery codes. */
+  recoveryCodes?: string[];
+}
+
+/**
+ * Password reset / staff invitation links (Laravel `staff_password_resets`): one live token per email.
+ * The real API emails the link (`/reset-password?token&email[&invite=1]`) and stores only a hash.
+ */
+export interface PasswordResetRow {
+  /** The email address (one row per address). */
+  id: string;
+  token: string;
+  createdAt: string;
+}
+export const passwordResets = collection<PasswordResetRow>('passwordResets', () => []);
+
+/** Issues a reset/invite token for an email (the real API emails the link; the mock keeps it in `passwordResets`). */
+export function issuePasswordReset(email: string): string {
+  const token = Array.from({ length: 4 }, () => Math.random().toString(36).slice(2)).join('');
+  passwordResets.remove(email);
+  passwordResets.insert({ id: email, token, createdAt: new Date().toISOString() });
+  return token;
 }
 
 export const staff = collection<StaffRow>('staff', () => [
@@ -419,10 +455,15 @@ export interface InvoiceRow {
   plan: Plan;
   amount: number;
   issuedAt: string;
-  status: 'Paid' | 'Past due' | 'Waived';
+  /** Laravel BillingPresenter::adminInvoice: Paid · Past due · Waived · Void · Open (issued, not yet charged). */
+  status: 'Paid' | 'Past due' | 'Waived' | 'Void' | 'Open';
   attempts: number;
   nextRetryAt: string | null;
   dunningPaused: boolean;
+  /** Merchant of record that billed it (it retries on its own schedule); absent/null = Coursiva's own Stripe invoice. */
+  provider?: 'paddle' | 'lemon_squeezy' | null;
+  /** Mock only: the card on file keeps declining, so a manual retry fails (Laravel: "declined again"). */
+  cardDeclines?: boolean;
 }
 export const invoices = collection<InvoiceRow>('invoices', () => [
   {
@@ -460,6 +501,8 @@ export const invoices = collection<InvoiceRow>('invoices', () => [
     attempts: 1,
     nextRetryAt: null,
     dunningPaused: false,
+    // Amplify checked out through Paddle (merchant of record): Paddle retries and invoices it.
+    provider: 'paddle',
   },
   {
     id: 'in_20260801b',
@@ -499,44 +542,54 @@ export const invoices = collection<InvoiceRow>('invoices', () => [
   },
 ]);
 
+/** Laravel `usage_overages`: meters and rates from `coursiva.billing.overage` (rate in dollars per `per` units). */
 export interface OverageRow {
   id: string;
   tenantId: string;
-  meter: string;
-  usage: string;
-  rate: string;
+  meter: 'ai_credits' | 'live_room_minutes' | 'sms_credits';
+  usage: number;
+  allowance: number;
+  rate: number;
+  per: number;
   amount: number;
   billedAt: string | null;
 }
+// amount = ceil((usage − allowance) / per) × rate, like Laravel's Usage::computeOverages.
 export const overages = collection<OverageRow>('overages', () => [
   {
     id: 'ov_1',
     tenantId: 'tn_devpath',
-    meter: 'Video storage',
-    usage: '2.14 TB of 1 TB',
-    rate: '$10 / 100 GB',
+    meter: 'ai_credits',
+    usage: 790_000,
+    allowance: 600_000,
+    rate: 0.6,
+    per: 1000,
     amount: 114,
     billedAt: null,
   },
-  {
-    id: 'ov_2',
-    tenantId: 'tn_peak',
-    meter: 'SMS credits',
-    usage: '14,208 of 10,000 sent',
-    rate: '$15 / 1,000',
-    amount: 63,
-    billedAt: null,
-  },
+  { id: 'ov_2', tenantId: 'tn_peak', meter: 'sms_credits', usage: 4_500, allowance: 500, rate: 15, per: 1000, amount: 60, billedAt: null },
   {
     id: 'ov_3',
     tenantId: 'tn_nordic',
-    meter: 'Video transcode',
-    usage: '712k of 500k min',
-    rate: '$8 / 100k min',
+    meter: 'live_room_minutes',
+    usage: 6_250,
+    allowance: 2_000,
+    rate: 0.04,
+    per: 10,
     amount: 17,
     billedAt: null,
   },
-  { id: 'ov_4', tenantId: 'tn_atlas', meter: 'Staff seats', usage: '12 of 10 seats', rate: '$8 / seat', amount: 16, billedAt: null },
+  {
+    id: 'ov_4',
+    tenantId: 'tn_atlas',
+    meter: 'live_room_minutes',
+    usage: 14_750,
+    allowance: 10_000,
+    rate: 0.04,
+    per: 10,
+    amount: 19,
+    billedAt: null,
+  },
 ]);
 
 // ---------- Privacy requests ----------
@@ -605,36 +658,61 @@ export interface PlatformStatus {
 }
 export const platformStatus = singleton<PlatformStatus>('platformStatus', () => ({ incident: null }));
 
-export interface PlatformSettings {
-  supportEmail: string;
-  primaryDomain: string;
-  trialDays: number;
-  defaultPlan: Plan;
-  dunningRetries: number;
-  autoSuspend: boolean;
-  requireStaffTwoFactor: boolean;
-  enforceSso: boolean;
-  sessionHours: number;
-  /** Lock the console after this many minutes without activity (5, 10, 15, 30, 60). */
-  idleLockMinutes: number;
-  weeklyDigest: boolean;
-  billingAlerts: boolean;
-  incidentAlerts: boolean;
-}
+export type { PlatformSettings };
+/** Shared platform settings (owned by Settings; billing, auth, staff, tenants and platform read them). */
 export const platformSettings = singleton<PlatformSettings>('platformSettings', () => ({
+  // Platform
+  platformName: 'Coursiva',
   supportEmail: 'support@coursiva.com',
   primaryDomain: 'coursiva.io',
-  trialDays: 14,
+  helpCentreUrl: 'https://help.coursiva.io',
+  defaultTimezone: 'UTC',
+  // Signup & provisioning
+  publicSignup: true,
   defaultPlan: 'Launch',
+  trialDays: 14,
+  trialRequiresCard: true,
+  cardCheckAmount: 50,
+  billingCurrency: 'USD',
+  reservedSubdomains: ['careers', 'press'],
+  minSubdomainLength: 3,
+  // Branding
+  defaultBrandColor: '#4F46E5',
+  defaultDataRegion: 'US',
+  footerText: '',
+  brandAssets: (['logo', 'logo_dark', 'favicon', 'og_image'] as const).map((slot) => ({ slot, url: null, updatedAt: null })),
+  // Legal
+  legalCompanyName: 'Coursiva Inc.',
+  legalAddress: '548 Market St, San Francisco, CA 94104, United States',
+  termsUrl: 'https://coursiva.io/terms',
+  privacyUrl: 'https://coursiva.io/privacy',
+  socialLinks: [],
+  // Email
+  mailFromName: 'Coursiva',
+  mailFromAddress: 'no-reply@coursiva.io',
+  mailReplyTo: '',
+  emailFooter: '',
+  // Billing & dunning
+  billingProvider: 'stripe',
   dunningRetries: 3,
   autoSuspend: true,
-  requireStaffTwoFactor: true,
+  // Security
+  // Laravel's shipped default. While on, members without 2FA (Lee) only reach auth/* until they enrol.
+  requireStaffTwoFactor: false,
   enforceSso: false,
   sessionHours: 12,
   idleLockMinutes: 15,
+  consoleIpAllowlist: [],
+  impersonationRequiresReason: true,
+  impersonationMaxMinutes: 30,
+  // Notifications
   weeklyDigest: true,
   billingAlerts: true,
   incidentAlerts: true,
+  // Maintenance
+  maintenanceMode: false,
+  maintenanceMessage: '',
+  maintenanceExemptTenants: [],
 }));
 
 export interface Pricing {
@@ -715,5 +793,11 @@ export interface SessionState {
   userId: string | null;
   /** User who passed the password step and still owes a 2FA code. */
   pendingTwoFactorUserId: string | null;
+  /** When the signed-in user last entered their password (sign-in or confirmation). Sensitive changes need it within 15 minutes. */
+  passwordConfirmedAt?: string | null;
 }
-export const session = singleton<SessionState>('session', () => ({ userId: null, pendingTwoFactorUserId: null }));
+export const session = singleton<SessionState>('session', () => ({
+  userId: null,
+  pendingTwoFactorUserId: null,
+  passwordConfirmedAt: null,
+}));

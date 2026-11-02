@@ -4,6 +4,8 @@ Types: `src/features/overview/types.ts` · Mock: `src/features/overview/mock.ts`
 
 ## `GET /overview?range=30d|90d|12mo`
 
+Permission `tenants.view` (403 otherwise; every built-in role has it).
+
 Permission: signed in. Numbers only — the client builds labels and colour bands.
 
 ```json
@@ -37,4 +39,7 @@ Business rules (must match `/tenants`):
 - **MRR** = sum of each tenant's locked-in monthly price, excluding `Trial` and `Suspended` tenants.
 - `mrr_series`: 12 months, oldest first, `month` = first day of month.
 - `mrr_at_risk`: tenants whose health is `At risk` or status is `Past due`.
+- `mrr.delta_pct` is **null** when there was no MRR at the start of the range (the KPI then shows no delta).
+- `watchlist` ("Needs attention"): up to 10 tenants a health check flags (`Watch` / `At risk`, always with a `reason`),
+  the viewer's watched tenants first. Healthy tenants never appear, watched or not.
 - `privacy.due_soon`: unfulfilled DSARs due within 10 days; `overdue` ≤ 0 days; `soonest_days` smallest positive.

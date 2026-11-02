@@ -1,6 +1,9 @@
 // The first screen of every session, so it is kept deliberately light: no zod / react-hook-form
 // (≈120 KB) — the three rules below are validated by hand, and the server re-validates (422).
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import { Link } from 'react-router-dom';
+import { BrandMark } from '@/components/shell/BrandMark';
+import { useBrand } from '@/components/shell/useBrand';
 import { Field, FormError, Input, Spinner } from '@/components/ui';
 import { env } from '@/config/env';
 import { ApiError, errorMessage } from '@/lib/api/errors';
@@ -8,7 +11,7 @@ import { useLogin, useTwoFactorChallenge } from './api';
 import { useT } from './i18n';
 import { validateCode, validateCredentials, type LoginErrors as Errors } from './validation';
 
-/** Brand name and demo credentials are data, not copy. */
+/** Brand name (until the platform name loads) and demo credentials are data, not copy. */
 const BRAND = 'Coursiva';
 const DEMO_PASSWORD = 'password';
 const DEMO_CODE = '123456';
@@ -34,6 +37,7 @@ const serverErrors = (err: unknown, fields: (keyof Errors)[]): Errors | null => 
 
 export default function LoginPage() {
   const t = useT();
+  const brand = useBrand(BRAND);
   const [step, setStep] = useState<'password' | 'code'>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -115,11 +119,9 @@ export default function LoginPage() {
     <div className="auth-page">
       <main className="auth-card card" aria-labelledby="auth-title">
         <div className="hstack" style={{ gap: 10, marginBottom: 22 }}>
-          <div className="sb-logo" aria-hidden="true">
-            C
-          </div>
+          <BrandMark logo={brand.logo} name={brand.name} />
           <div>
-            <div style={{ fontWeight: 700 }}>{BRAND}</div>
+            {!brand.logo && <div style={{ fontWeight: 700 }}>{brand.name}</div>}
             <div className="t-xs muted">{t('login.product')}</div>
           </div>
         </div>
@@ -172,6 +174,9 @@ export default function LoginPage() {
             <button type="submit" className="btn btn--primary btn--lg btn--block" style={{ marginTop: 18 }} disabled={login.isPending}>
               {login.isPending && <Spinner />} {t('login.signIn')}
             </button>
+            <Link className="link link--muted t-sm" to="/forgot-password" style={{ display: 'inline-block', marginTop: 12 }}>
+              {t('login.forgot')}
+            </Link>
           </form>
         ) : (
           <form onSubmit={onCode} noValidate>
@@ -191,9 +196,10 @@ export default function LoginPage() {
                     setCode(e.target.value);
                     clearError('code');
                   }}
-                  inputMode="numeric"
                   autoComplete="one-time-code"
-                  maxLength={6}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  maxLength={11}
                   size="lg"
                   style={{ letterSpacing: '0.3em', fontWeight: 700 }}
                 />

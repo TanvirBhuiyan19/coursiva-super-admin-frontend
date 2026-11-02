@@ -66,7 +66,7 @@ export const spec = defineSpec({
       path: '/staff/roles/{role}',
       summary: "Replace a role's permissions",
       description:
-        'Owner is locked (422). Nobody can remove `staff.manage` from their own role (422). One audit entry per granted/removed permission.',
+        'Owner is locked (422). Nobody can remove `staff.manage` from their own role (422). One audit entry per granted/removed permission. Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`).',
       auth: 'staff.manage',
       path_params: { role: { type: 'string', enum: ROLES, description: 'Role name (URL-encoded), e.g. `Read-only`.' } },
       body: {
@@ -81,7 +81,7 @@ export const spec = defineSpec({
         },
       },
       response: resource(arrayOf(ref('RolePermissions'))),
-      errors: [404],
+      errors: [404, 423],
       audit: { text: 'Granted “{permission}” to the {role} role · Removed “{permission}” from the {role} role', category: 'Security' },
       example: { params: { role: 'Support' }, body: { permissions: ['tenants.view', 'support.view', 'support.manage'] } },
     },
@@ -119,7 +119,9 @@ export const spec = defineSpec({
       'Grant just-in-time Owner access (expires on its own)',
       'Elevated {name} to Owner for {minutes} minutes (just-in-time)',
       {
+        description: 'Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`).',
         body: { type: 'object', properties: { minutes: { type: 'integer', minimum: 15, maximum: 240, default: 60 } } },
+        errors: [404, 422, 423],
         example: { ...example, body: { minutes: 30 } },
       },
     ),

@@ -1,10 +1,34 @@
 // Mock implementation of /platform/* (what the Laravel platform controllers + policies will do):
 // feature flags, system status & incidents, email deliverability, certificate registry,
-// standards imports, API keys and webhooks.
+// standards imports, API keys and webhooks, connections and feature availability.
 import { http } from 'msw';
-import { flags, platformSettings, platformStatus, tenants, type FlagRow } from '@/mocks/collections';
+import { CONNECTIONS as MEDIA_CONNECTIONS, mediaStore } from '@/features/media/mock';
+import { PLANS } from '@/lib/domain';
+import { flags, invoices, platformSettings, platformStatus, tenants, type FlagRow, type TenantRow } from '@/mocks/collections';
 import { ago, collection, id, singleton } from '@/mocks/db';
-import { authorize, handle, invalid, notFound, ok, paginate, query, readBody, recordAudit, route } from '@/mocks/http';
+import { tenantModules } from '@/mocks/derive';
+import {
+  mergeCredentials,
+  prefix,
+  toConnection,
+  type CredentialDef,
+  type CredentialFieldDef,
+  type StoredCredentials,
+} from '@/mocks/credentials';
+import {
+  authorize,
+  handle,
+  HttpError,
+  invalid,
+  notFound,
+  ok,
+  paginate,
+  query,
+  readBody,
+  recordAudit,
+  requireRecentPassword,
+  route,
+} from '@/mocks/http';
 import {
   API_KEY_SCOPES,
   FLAG_ROLLOUTS,
@@ -24,6 +48,14 @@ import {
   type SystemStatus,
   type WebhookDelivery,
   type Webhooks,
+  type Availability,
+  type AvailabilityUpdate,
+  type Capability,
+  type CapabilityGroup,
+  type ConnectionCapability,
+  type ConnectionInput,
+  type ConnectionKind,
+  type PlatformConnection,
 } from './types';
 
 const tenantName = (tenantId: string) => tenants.find(tenantId)?.name ?? 'Closed tenant';
@@ -302,7 +334,7 @@ const ENDPOINTS: Webhooks['endpoints'] = [
     id: 'wh_amplify',
     tenantId: 'tn_amplify',
     url: 'hooks.amplifycoaching.com/coursiva',
-    events: 'order.completed, refund.created',
+    events: ['order.completed', 'refund.created'],
     successRate7d: 99.8,
     status: 'Healthy',
   },
@@ -310,7 +342,7 @@ const ENDPOINTS: Webhooks['endpoints'] = [
     id: 'wh_devpath',
     tenantId: 'tn_devpath',
     url: 'api.devpath.io/webhooks',
-    events: 'All events',
+    events: ['*'],
     successRate7d: 97.1,
     status: 'Healthy',
   },
@@ -318,7 +350,7 @@ const ENDPOINTS: Webhooks['endpoints'] = [
     id: 'wh_zapier',
     tenantId: null,
     url: 'zaps.zapier.com/hooks/catch/8123',
-    events: 'tenant.provisioned, invoice.paid',
+    events: ['tenant.provisioned', 'invoice.paid'],
     successRate7d: 88.4,
     status: 'Failing',
   },
@@ -439,7 +471,911 @@ type KeyParams = { key: string };
 const SENDER_ACTIONS = ['pause', 'resume', 'dns-check'] as const;
 const CERTIFICATE_ACTIONS = ['revoke', 'reinstate'] as const;
 
+// ---------- Connections (what the backend's platformconn module does) ----------
+// Services connected by pasting credentials: verified before saving (the mock refuses values containing "invalid"),
+// stored server-side only, writes need a password confirmed in the last 15 minutes (423 otherwise). Storage backends
+// and DRM providers are the Media screen's.
+/** The one redirect URI every provider's OAuth app registers. */
+export const OAUTH_REDIRECT = 'https://api.coursiva.io/api/v1/oauth/callback';
+
+interface Def extends CredentialDef {
+  kind: ConnectionKind;
+}
+
+/** The access token the mock's Expo refuses. */
+export const EXPO_REFUSED_TOKEN = 'expo-refused-token-xxxxxxxx';
+
+/** The Discord bot tokens the mock's `GET /users/@me` refuses (401) and answers as a user, not a bot. */
+export const DISCORD_REFUSED_BOT_TOKEN = 'MTAxNjQ1.refused.discord-bot-token-0123456789abcdefghij';
+export const DISCORD_USER_TOKEN = 'MTAxNjQ1.user.discord-account-token-0123456789abcdefghijk';
+
+/** The API token the mock's Cloudflare Registrar refuses (its extension list answers 403). */
+export const REGISTRAR_REFUSED_TOKEN = 'cf-registrar-refused-token-0000';
+
+/** The host where the mock's ClamAV daemon doesn't answer PING. */
+export const CLAMAV_UNREACHABLE_HOST = 'clamav.down.internal';
+
+/** FILTER_VALIDATE_IP: a dotted IPv4 address or an IPv6 address. */
+const isIp = (v: string) =>
+  /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/.test(v) || (v.includes(':') && /^[0-9a-f:.]+$/i.test(v));
+
+const f = (key: string, label: string, secret = true, check?: (v: string) => string | undefined) => ({ key, label, secret, check });
+const hex = (label: string, n: number) => (v: string) =>
+  new RegExp(`^[0-9a-f]{${n}}$`, 'i').test(v) ? undefined : `The ${label} is ${n} hexadecimal characters.`;
+const minLength = (label: string, n: number) => (v: string) =>
+  v.length < n || /[ \t]/.test(v) ? `That ${label} looks too short.` : undefined;
+const digits = (label: string) => (v: string) => (/^[1-9]\d{0,18}$/.test(v) ? undefined : `The ${label} is a number, e.g. 12345.`);
+const oneOf =
+  (label: string, ...options: string[]) =>
+  (v: string) =>
+    options.includes(v) ? undefined : `The ${label} must be ${options.join(' or ')}.`;
+
+/** OAuthProviders::names() of the backend: OAuth 2.0 families plus X (OAuth 1.0a), sorted by key. */
+const OAUTH_PROVIDERS: [key: string, name: string][] = [
+  ['canva', 'Canva'],
+  ['discord', 'Discord'],
+  ['google', 'Google'],
+  ['hubspot', 'HubSpot'],
+  ['intercom', 'Intercom'],
+  ['linkedin', 'LinkedIn'],
+  ['meta', 'Meta'],
+  ['microsoft', 'Microsoft'],
+  ['notion', 'Notion'],
+  ['paypal', 'PayPal'],
+  ['pinterest', 'Pinterest'],
+  ['quickbooks', 'Intuit QuickBooks'],
+  ['salesforce', 'Salesforce'],
+  ['slack', 'Slack'],
+  ['stripe', 'Stripe'],
+  ['tiktok', 'TikTok for Business'],
+  ['vimeo', 'Vimeo'],
+  ['x', 'X'],
+  ['xero', 'Xero'],
+  ['yandex', 'Yandex'],
+  ['zendesk', 'Zendesk'],
+  ['zoom', 'Zoom'],
+];
+
+const optional = (fd: ReturnType<typeof f>) => ({ ...fd, optional: true });
+
+/** The client fields of a provider's OAuth app (OAuthProvider clientSecretFrom / clientParams / clientFields). */
+function oauthFields(key: string) {
+  if (key === 'x') return [f('consumer_key', 'API key (consumer key)', false), f('consumer_secret', 'API key secret (consumer secret)')];
+  if (key === 'stripe') return [f('client_id', 'Client ID', false, prefix('client ID', 'ca_'))]; // Stripe Connect signs with the Stripe secret key
+  const fields: CredentialFieldDef[] = [f('client_id', 'Client ID', false), f('client_secret', 'Client secret')];
+  if (key === 'meta')
+    fields.push(
+      optional(f('config_id', 'Login for Business configuration ID', false)),
+      optional(f('pages_config_id', 'Login for Business configuration ID for Page and Instagram posting', false)),
+    );
+  // Discord role sync runs as the application's bot (DiscordBot::field()); its token is proven live.
+  if (key === 'discord')
+    fields.push({
+      ...optional(
+        f('bot_token', 'Bot token (Bot → Reset Token in the Discord developer portal)', true, (v) =>
+          /^[A-Za-z0-9_.-]{50,200}$/.test(v) ? undefined : 'A Discord bot token is 50–200 letters, digits, dots, - or _.',
+        ),
+      ),
+      maxLength: 200,
+    });
+  return fields;
+}
+
+export const CONNECTIONS: Def[] = [
+  {
+    key: 'stripe',
+    kind: 'payments',
+    name: 'Stripe',
+    description: 'Card payments for school subscriptions · webhooks settle confirmations',
+    role: null,
+    fields: [
+      f('secret_key', 'Secret key', true, prefix('secret key', 'sk_live_', 'sk_test_', 'rk_live_', 'rk_test_')),
+      f('publishable_key', 'Publishable key', false, prefix('publishable key', 'pk_live_', 'pk_test_')),
+      f('webhook_secret', 'Webhook signing secret', true, prefix('webhook signing secret', 'whsec_')),
+      // Schools' Stripe Connect events (commerce) are signed by a second endpoint's secret.
+      optional(f('connect_webhook_secret', 'Connect webhook signing secret', true, prefix('Connect webhook signing secret', 'whsec_'))),
+    ],
+  },
+  {
+    key: 'paddle',
+    kind: 'payments',
+    name: 'Paddle',
+    description: 'School subscriptions through Paddle Billing (merchant of record: Paddle collects, handles tax and issues the invoices)',
+    role: null,
+    fields: [
+      f('api_key', 'API key', true, minLength('API key', 20)),
+      f('client_token', 'Client-side token', false, prefix('client-side token', 'live_', 'test_')),
+      f('webhook_secret', 'Webhook secret key', true, prefix('webhook secret key', 'pdl_ntfset_')),
+      f('product_id', 'Product ID', false, (v) => (/^pro_[a-z0-9]{26}$/.test(v) ? undefined : 'The product ID looks like pro_01h….')),
+    ],
+    // The backend then reads the product with the key on the token's environment (missing or archived → refused).
+    verify: ({ api_key: key = '', client_token: token = '' }) => {
+      const sandbox = token.startsWith('test_');
+      if ((key.startsWith('pdl_sdbx_') && !sandbox) || (key.startsWith('pdl_live_') && sandbox))
+        return 'the API key and the client-side token are from different environments (sandbox and live)';
+      return undefined;
+    },
+  },
+  {
+    key: 'lemon_squeezy',
+    kind: 'payments',
+    name: 'Lemon Squeezy',
+    description:
+      'School subscriptions through Lemon Squeezy (merchant of record) · plans only: one subscription variant per plan and cycle',
+    role: null,
+    // The backend checks each variant is a monthly/yearly subscription of the store priced like the price book.
+    fields: [
+      f('api_key', 'API key', true, minLength('API key', 40)),
+      f('store_id', 'Store ID', false, digits('store ID')),
+      f('webhook_secret', 'Webhook signing secret', true, (v) =>
+        v.length >= 6 && v.length <= 40 ? undefined : 'The webhook signing secret is 6–40 characters.',
+      ),
+      ...PLANS.flatMap((plan) =>
+        (['monthly', 'annual'] as const).map((cycle) =>
+          f(`variant_${plan.toLowerCase()}_${cycle}`, `${plan} ${cycle} variant ID`, false, digits(`${plan} ${cycle} variant ID`)),
+        ),
+      ),
+    ],
+  },
+  {
+    key: 'cloudflare',
+    kind: 'cdn',
+    name: 'Cloudflare for SaaS',
+    description: 'Custom domains · SSL for school hostnames',
+    role: null,
+    fields: [f('api_token', 'API token'), f('zone_id', 'Zone ID', false, hex('zone ID', 32))],
+  },
+  {
+    key: 'cloudflare_registrar',
+    kind: 'cdn',
+    name: 'Cloudflare Registrar',
+    description:
+      'Domain sales to schools (search, registration, DNS of bought domains) · an account API token with Registrar and DNS permissions',
+    role: null,
+    fields: [
+      f('account_id', 'Account ID', false, (v) =>
+        /^[0-9a-f]{32}$/i.test(v)
+          ? undefined
+          : 'The account ID is 32 hexadecimal characters (Cloudflare dashboard → Account home → Account ID).',
+      ),
+      f('api_token', 'API token', true, (v) => (v.length >= 20 ? undefined : 'The API token is at least 20 characters.')),
+      // `sandbox` (blank = sandbox, the safe default: Cloudflare's Registrar Sandbox) or `live`.
+      {
+        ...optional(f('mode', 'Mode', false, oneOf('mode', 'live', 'sandbox'))),
+        options: [
+          { value: 'sandbox', label: 'Sandbox (test)' },
+          { value: 'live', label: 'Live' },
+        ],
+        default: 'sandbox',
+      },
+    ],
+    // Verified live with a read-only call on the mode's base path (the registrar's extension list); a refused token is a 401/403.
+    verify: ({ api_token: token, mode }) =>
+      token === REGISTRAR_REFUSED_TOKEN
+        ? `Authentication error (the token needs ${mode === 'live' ? 'Registrar: Edit' : 'Registrar Sandbox Domains Admin'} on this account)`
+        : undefined,
+  },
+  {
+    key: 'expo',
+    kind: 'push',
+    name: 'Expo push',
+    description: 'Push notifications of the schools’ mobile apps · only needed when the Expo project enables enhanced push security',
+    role: null,
+    fields: [f('access_token', 'Access token', true, minLength('access token', 20))],
+    // The backend checks the token against Expo's API (values containing "invalid" are refused generically).
+    verify: ({ access_token: token }) => (token === EXPO_REFUSED_TOKEN ? 'the access token was refused' : undefined),
+  },
+  {
+    key: 'postmark',
+    kind: 'email',
+    name: 'Postmark',
+    description: 'Platform email (sign-in, invitations, billing) through Postmark',
+    role: null,
+    fields: [
+      f('server_token', 'Server API token'),
+      { ...f('message_stream', 'Message stream', false), optional: true },
+      // The HTTP Basic auth password of the bounce/complaint webhook {API}/api/v1/webhooks/postmark.
+      {
+        ...f('webhook_password', 'Webhook password (Basic auth)', true, (v) =>
+          v.length >= 24 && /^[\x21-\x7E]+$/.test(v) && !v.includes(':')
+            ? undefined
+            : 'Use at least 24 characters without spaces or colons, e.g. from `openssl rand -hex 24`.',
+        ),
+        optional: true,
+      },
+    ],
+  },
+  {
+    key: 'smtp',
+    kind: 'email',
+    name: 'SMTP',
+    description: 'Platform email through any SMTP server (TLS required)',
+    role: null,
+    fields: [
+      f('host', 'Host', false, (v) =>
+        /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(v)
+          ? undefined
+          : 'The host must be a hostname, e.g. smtp.postmarkapp.com.',
+      ),
+      f('port', 'Port', false, (v) => (/^\d+$/.test(v) && +v >= 1 && +v <= 65535 ? undefined : 'The port must be between 1 and 65535.')),
+      f('security', 'Security', false, oneOf('security', 'STARTTLS', 'SSL/TLS')),
+      f('username', 'Username', false),
+      f('password', 'Password'),
+    ],
+  },
+  // The ad networks' platform-wide developer tokens (Ads & channels). Neither network can prove a token without a
+  // school's OAuth grant, so the backend only checks the format.
+  {
+    key: 'google_ads',
+    kind: 'ads',
+    name: 'Google Ads API',
+    description:
+      "Developer token of the platform's Google Ads manager account (API Center) · sent on every Google Ads call for every school; needs Basic or Standard access for production accounts",
+    role: null,
+    fields: [
+      f('developer_token', 'Developer token', true, (v) =>
+        /^[A-Za-z0-9_-]{22}$/.test(v) ? undefined : 'The developer token is 22 letters, digits, - or _ (Google Ads → Tools → API Center).',
+      ),
+    ],
+  },
+  {
+    key: 'microsoft_ads',
+    kind: 'ads',
+    name: 'Microsoft Advertising API',
+    description:
+      'Developer token from the Microsoft Advertising Developer Portal · universal: it works for every school that authorises Coursiva',
+    role: null,
+    fields: [
+      f('developer_token', 'Developer token', true, (v) =>
+        /^[A-Za-z0-9]{8,64}$/.test(v)
+          ? undefined
+          : 'The developer token is 8–64 letters and digits (Microsoft Advertising Developer Portal → Account).',
+      ),
+    ],
+  },
+  // Core Web Vitals of every school site: a Cloud API key restricted to the Chrome UX Report API (format check only).
+  {
+    key: 'google_crux',
+    kind: 'insights',
+    name: 'Chrome UX Report API',
+    description:
+      'Core Web Vitals (LCP, INP, CLS at p75) of each school site from real Chrome users · a Google Cloud API key restricted to the Chrome UX Report API',
+    role: null,
+    fields: [
+      f('api_key', 'API key', true, (v) =>
+        /^AIza[0-9A-Za-z_-]{35}$/.test(v)
+          ? undefined
+          : 'A Google API key is 39 characters starting with AIza (Google Cloud → APIs & Services → Credentials).',
+      ),
+    ],
+  },
+  // AI studio: every generation for every school goes through the platform's Claude key; caption audio is transcribed
+  // by AssemblyAI. The backend verifies both keys live with the provider.
+  {
+    key: 'anthropic',
+    kind: 'ai',
+    name: 'Anthropic',
+    description:
+      'Claude for the AI studio (outlines, quizzes, grading, copy, captions translation, tutor) · an API key from the Claude Console',
+    role: null,
+    fields: [
+      f('api_key', 'API key', true, (v) =>
+        /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(v) ? undefined : 'An Anthropic API key starts with sk-ant- (Claude Console → API keys).',
+      ),
+    ],
+  },
+  {
+    key: 'assemblyai',
+    kind: 'ai',
+    name: 'AssemblyAI',
+    description: 'Speech-to-text for AI captions and lesson transcripts',
+    role: null,
+    fields: [
+      f('api_key', 'API key', true, (v) =>
+        /^[a-f0-9]{32}$/.test(v) ? undefined : 'An AssemblyAI API key is 32 hexadecimal characters (AssemblyAI dashboard → API keys).',
+      ),
+    ],
+  },
+  // Built-in live rooms: every school's room is a private Daily room on the platform's account. The backend verifies the
+  // key live (GET https://api.daily.co/v1/ → the account's domain; a pasted domain must match it).
+  {
+    key: 'daily',
+    kind: 'video',
+    name: 'Daily',
+    description:
+      'Video for the built-in live rooms (Daily Prebuilt, private rooms, meeting tokens, cloud recording) · an API key from the Daily dashboard → Developers',
+    role: null,
+    fields: [
+      f('api_key', 'API key', true, (v) =>
+        /^[A-Za-z0-9]{32,128}$/.test(v) ? undefined : 'A Daily API key is letters and digits (Daily dashboard → Developers → API key).',
+      ),
+      optional(
+        f('domain', 'Domain', false, (v) =>
+          /^(https?:\/\/)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.daily\.co\/?$/i.test(v.trim())
+            ? undefined
+            : 'The domain looks like yourcompany.daily.co.',
+        ),
+      ),
+      optional(
+        f('webhook_secret', 'Webhook HMAC secret (base64)', true, (v) =>
+          /^[A-Za-z0-9+/]{22,}={0,2}$/.test(v.trim())
+            ? undefined
+            : 'The webhook secret is the base64 HMAC secret the webhook was created with.',
+        ),
+      ),
+    ],
+  },
+  // The bearer token Prometheus scrapes GET /api/metrics with. Nothing to call: the operator generates it and puts the
+  // same value in the scrape config, so the backend only checks the format.
+  {
+    key: 'metrics',
+    kind: 'monitoring',
+    name: 'Prometheus metrics',
+    description: 'Bearer token for scraping GET /api/metrics · without it (or METRICS_TOKEN) the endpoint answers 404',
+    role: null,
+    fields: [
+      f('token', 'Scrape token', true, (v) =>
+        /^[A-Za-z0-9._~+/=-]{32,256}$/.test(v)
+          ? undefined
+          : 'Use a random token of at least 32 characters (for example: openssl rand -hex 32).',
+      ),
+    ],
+  },
+  // Virus scanning of every upload: a clamd daemon, usually on the private network. The backend verifies it with
+  // PING → PONG; the mock's clamd answers on every host except CLAMAV_UNREACHABLE_HOST.
+  {
+    key: 'clamav',
+    kind: 'security',
+    name: 'ClamAV',
+    description: 'Virus scanning of every upload (media library, assignment files, SCORM packages) · a clamd daemon reachable over TCP',
+    role: null,
+    fields: [
+      f('host', 'Host', false, (v) =>
+        isIp(v) || /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(v)
+          ? undefined
+          : 'The host must be a hostname or an IP address, e.g. clamav.internal.',
+      ),
+      f('port', 'Port', false, (v) => (/^\d+$/.test(v) && +v >= 1 && +v <= 65535 ? undefined : 'The port must be between 1 and 65535.')),
+    ],
+    verify: ({ host = '', port = '' }) => (host === CLAMAV_UNREACHABLE_HOST ? `no clamd answered PING at ${host}:${port}` : undefined),
+  },
+  ...OAUTH_PROVIDERS.map(([key, name]): Def => ({
+    key: `oauth_${key}`,
+    kind: 'oauth',
+    name: `${name} OAuth app`,
+    description:
+      key === 'x'
+        ? `Lets schools connect their ${name} account. Register this callback URL in the ${name} app: ${OAUTH_REDIRECT}`
+        : `Lets schools connect their ${name} account. Register this redirect URI with ${name}: ${OAUTH_REDIRECT}` +
+          (key === 'discord'
+            ? ' · The bot token (same application) lets Coursiva add students to a school’s server and sync their roles by course.'
+            : ''),
+    role: null,
+    fields: oauthFields(key),
+    // DiscordBot::verify: a bot token, when given, must be accepted by GET /users/@me as a bot.
+    ...(key === 'discord' && {
+      verify: ({ bot_token: token = '' }: Record<string, string>) =>
+        token === DISCORD_REFUSED_BOT_TOKEN
+          ? 'Discord refused the bot token'
+          : token === DISCORD_USER_TOKEN
+            ? 'the token is not a bot token'
+            : undefined,
+    }),
+  })),
+];
+
+const seed = (connection: string, values: Record<string, string>, verifiedAt: string): StoredCredentials => ({
+  connection,
+  values,
+  verifiedAt,
+});
+
+export const connectionStore = singleton<{ credentials: StoredCredentials[] }>('platformConnections', () => ({
+  credentials: [
+    seed('cloudflare', { api_token: 'cf-tok-9d2a61c4e8b7f03a', zone_id: '4f1c0e2b9a8d7c6b5a4f3e2d1c0b9a8d' }, ago({ d: 34 })),
+    seed(
+      'cloudflare_registrar',
+      { account_id: '0123456789abcdef0123456789abcdef', api_token: 'cf-reg-tok-5b8e2d7a91c4f06e' },
+      ago({ d: 9 }),
+    ),
+    seed('oauth_zoom', { client_id: 'zoom-client-7Fq2', client_secret: 'zoom-secret-c01d9e8f7a6b' }, ago({ d: 12 })),
+    // Paddle (sandbox) bills one school already (see the Paddle invoice in the billing mock).
+    seed(
+      'paddle',
+      {
+        api_key: 'pdl_sdbx_apikey_01j9x4c7m2k8q5w3e6r1t0y9u8',
+        client_token: 'test_7c1e4b9a2d6f8e0c3b5a7d9f1e2',
+        webhook_secret: 'pdl_ntfset_01j9x4d2f7h3k6m9p1r4t7w0z3_mock',
+        product_id: 'pro_01j9x4b6c8d0e2f4g6h8j0k2m4',
+      },
+      ago({ d: 20 }),
+    ),
+  ],
+}));
+
+const stored = (key: string) => connectionStore.get().credentials.find((c) => c.connection === key);
+const view = (d: Def): PlatformConnection => ({
+  ...toConnection(d, stored(d.key)),
+  kind: d.kind,
+  capabilities: capabilitiesNeeding(d.key),
+});
+
+function find(key: string | readonly string[] | undefined) {
+  const d = CONNECTIONS.find((c) => c.key === key);
+  if (!d) throw notFound('Connection');
+  // Payment providers' credentials move money: they also need billing.manage.
+  if (d.kind === 'payments') authorize('billing.manage');
+  return d;
+}
+
+/** A merchant of record can't be disconnected while it is the billing provider or still bills schools. */
+function assertDisconnectable(d: Def) {
+  if (d.key !== 'paddle' && d.key !== 'lemon_squeezy') return;
+  if (platformSettings.get().billingProvider === d.key)
+    throw new HttpError(409, `${d.name} is the billing provider. Choose another one in Settings → Billing & dunning first.`);
+  // A real backend counts live subscriptions at the provider; the mock counts schools with its invoices.
+  const billed = new Set(invoices.where((v) => v.provider === d.key).map((v) => v.tenantId)).size;
+  if (billed > 0)
+    throw new HttpError(
+      409,
+      `${billed} ${billed === 1 ? 'school is' : 'schools are'} still billed through ${d.name}. Disconnecting would stop their renewals from being recorded.`,
+    );
+}
+
+type Params = { key: string };
+
+export const connectionHandlers = [
+  http.get(
+    route('/platform/connections'),
+    handle(() => {
+      authorize('platform.view');
+      return ok(CONNECTIONS.map(view));
+    }),
+  ),
+
+  http.put<Params>(
+    route('/platform/connections/:key'),
+    handle<Params>(async ({ request, params }) => {
+      authorize('platform.manage');
+      const d = find(params.key);
+      requireRecentPassword();
+      const { credentials } = await readBody<ConnectionInput>(request);
+      const before = stored(d.key);
+      const values = mergeCredentials(d, before, credentials);
+      const rest = connectionStore.get().credentials.filter((c) => c.connection !== d.key);
+      connectionStore.patch({ credentials: [...rest, { connection: d.key, values, verifiedAt: new Date().toISOString() }] });
+      recordAudit(before ? `Updated credentials for ${d.name}` : `Connected ${d.name}`, 'Security');
+      return ok(view(d));
+    }),
+  ),
+
+  http.delete<Params>(
+    route('/platform/connections/:key'),
+    handle<Params>(({ params }) => {
+      authorize('platform.manage');
+      const d = find(params.key);
+      requireRecentPassword();
+      assertDisconnectable(d);
+      if (stored(d.key)) {
+        connectionStore.patch({ credentials: connectionStore.get().credentials.filter((c) => c.connection !== d.key) });
+        recordAudit(`Disconnected ${d.name}`, 'Security');
+      }
+      return ok(view(d));
+    }),
+  ),
+
+  http.post<Params>(
+    route('/platform/connections/:key/test'),
+    handle<Params>(({ params }) => {
+      authorize('platform.manage');
+      const d = find(params.key);
+      const s = stored(d.key);
+      if (!s) throw new HttpError(409, `${d.name} is not connected.`);
+      s.verifiedAt = new Date().toISOString();
+      connectionStore.patch({ credentials: [...connectionStore.get().credentials] });
+      return ok({ ok: true, latencyMs: 184, message: `${d.name} accepted the credentials.` });
+    }),
+  ),
+];
+
+// ---------- Feature availability ----------
+// The backend's `coursiva.availability.capabilities` (Laravel) / `internal/availability` (Go): one platform switch per
+// capability, above plans, extensions and tenant overrides. Per-network, per-provider and per-app entries are generated
+// from those catalogues. A missing switch is on; a switch that is on with a missing connection is still unavailable.
+interface CapabilityDef {
+  key: string;
+  label: string;
+  group: string;
+  description: string;
+  surfaces: string[];
+  modules?: string[];
+  extensions?: string[];
+  requires?: string[];
+  requiresAny?: boolean;
+}
+
+export const CAPABILITY_GROUPS: CapabilityGroup[] = [
+  { key: 'video', label: 'Video & live' },
+  { key: 'ai', label: 'AI' },
+  { key: 'messaging', label: 'Messaging' },
+  { key: 'marketing', label: 'Marketing & growth' },
+  { key: 'learning', label: 'Learning' },
+  { key: 'commerce', label: 'Commerce' },
+  { key: 'signin', label: 'Sign-in & security' },
+  { key: 'integrations', label: 'Integrations' },
+  { key: 'other', label: 'Other modules' },
+];
+
+const cap = (
+  group: string,
+  key: string,
+  label: string,
+  description: string,
+  surfaces: string[],
+  extra: Pick<CapabilityDef, 'modules' | 'extensions' | 'requires' | 'requiresAny'> = {},
+): CapabilityDef => ({ key, label, group, description, surfaces, ...extra });
+
+/** A plain module switch: the module disappears from every school. */
+const moduleCap = (group: string, key: string, label: string, extensions: string[] = []) =>
+  cap(group, key, label, `Schools lose the ${label} module and everything in it.`, [`${label} in the dashboard nav and search`], {
+    modules: [key],
+    extensions,
+  });
+
+/** Ad networks the Channels hub connects (`channels/networks`). */
+const AD_NETWORKS: [key: string, name: string, connection: string][] = [
+  ['google', 'Google Ads', 'google_ads'],
+  ['microsoft', 'Microsoft Advertising', 'microsoft_ads'],
+  ['meta', 'Meta Ads', 'oauth_meta'],
+  ['tiktok', 'TikTok Ads', 'oauth_tiktok'],
+  ['linkedin', 'LinkedIn Ads', 'oauth_linkedin'],
+  ['pinterest', 'Pinterest Ads', 'oauth_pinterest'],
+  ['x', 'X Ads', 'oauth_x'],
+];
+/** Social sign-in providers the student site offers (SocialProviders::PROVIDERS). */
+const SIGN_IN_PROVIDERS: [key: string, name: string][] = [['google', 'Google']];
+/** Marketplace apps (the integrations catalogue); `oauth` = the platform OAuth app it signs in with. */
+const MARKETPLACE_APPS: [key: string, name: string, oauth?: string][] = [
+  ['slack', 'Slack', 'slack'],
+  ['hubspot', 'HubSpot', 'hubspot'],
+  ['salesforce', 'Salesforce', 'salesforce'],
+  ['mailchimp', 'Mailchimp'],
+  ['kit', 'Kit'],
+  ['zapier', 'Zapier'],
+  ['google-sheets', 'Google Sheets', 'google'],
+  ['notion', 'Notion', 'notion'],
+  ['intercom', 'Intercom', 'intercom'],
+  ['zendesk', 'Zendesk', 'zendesk'],
+  ['discord', 'Discord', 'discord'],
+  ['quickbooks', 'QuickBooks', 'quickbooks'],
+  ['xero', 'Xero', 'xero'],
+  ['canva', 'Canva', 'canva'],
+];
+
+export const CAPABILITIES: CapabilityDef[] = [
+  // Video & live
+  cap(
+    'video',
+    'live_classes',
+    'Live classes',
+    'Schools can’t schedule or run live classes; learners lose the Live pages and webinars.',
+    ['Live in the dashboard nav', 'Live pages and webinars on school sites', 'Live reminders and recaps'],
+    { modules: ['liveadmin'] },
+  ),
+  cap(
+    'video',
+    'live_rooms',
+    'Built-in live rooms',
+    'The in-browser room (Daily) disappears; schools use Zoom, Meet or Teams instead.',
+    ['Built-in room option when scheduling', 'Join and start for built-in sessions', 'Built-in live rooms extension in the store'],
+    { extensions: ['rooms'], requires: ['daily'] },
+  ),
+  cap('video', 'live_zoom', 'Zoom', 'Schools can’t connect Zoom or host classes on it.', ['Zoom provider option', 'Zoom join links'], {
+    requires: ['oauth_zoom'],
+  }),
+  cap(
+    'video',
+    'live_meet',
+    'Google Meet',
+    'Schools can’t connect Google Meet or host classes on it.',
+    ['Meet provider option', 'Meet join links'],
+    {
+      requires: ['oauth_google'],
+    },
+  ),
+  cap(
+    'video',
+    'live_teams',
+    'Microsoft Teams',
+    'Schools can’t connect Teams or host classes on it.',
+    ['Teams provider option', 'Teams join links'],
+    {
+      requires: ['oauth_microsoft'],
+    },
+  ),
+  cap(
+    'video',
+    'video_streaming',
+    'Video streaming (Mux)',
+    'Uploads stay plain files: no transcoding or adaptive playback.',
+    ['Transcoding of new uploads', 'Adaptive and signed playback'],
+    { requires: ['mux'] },
+  ),
+  cap(
+    'video',
+    'drm',
+    'Video DRM',
+    'Hardware DRM and its extension disappear; videos play without licence checks.',
+    ['DRM settings in the media library', 'Video DRM extension in the store'],
+    { extensions: ['drm'], requires: ['ezdrm', 'keyos', 'mux'], requiresAny: true },
+  ),
+  // AI
+  cap(
+    'ai',
+    'ai',
+    'AI (Claude)',
+    'Every AI touchpoint disappears: the AI studio, tutor, grading suggestions, live recaps and builder AI.',
+    [
+      'AI studio in the dashboard nav',
+      'AI buttons in the course and quiz builders',
+      'AI grading suggestions and live recaps',
+      'AI tutor for learners',
+    ],
+    { modules: ['aistudio'], extensions: ['ai'], requires: ['anthropic'] },
+  ),
+  cap(
+    'ai',
+    'captions',
+    'Captions & transcripts',
+    'No auto captions or transcripts, including live transcripts.',
+    ['Caption buttons on videos', 'Live transcripts'],
+    {
+      requires: ['assemblyai'],
+    },
+  ),
+  // Messaging
+  cap(
+    'messaging',
+    'sms',
+    'SMS',
+    'Schools can’t send texts; SMS reminders and automation steps are skipped.',
+    ['SMS & WhatsApp in the dashboard nav', 'SMS steps in automations and reminders'],
+    { modules: ['sms'] },
+  ),
+  cap('messaging', 'whatsapp', 'WhatsApp', 'The WhatsApp channel disappears from SMS & WhatsApp.', [
+    'WhatsApp tab',
+    'WhatsApp steps in automations',
+  ]),
+  // The Expo access token is optional (push works without it), so push needs no connection.
+  cap('messaging', 'push', 'Mobile push', 'No push notifications to the schools’ mobile apps.', ['Push channel in notifications']),
+  cap(
+    'messaging',
+    'mobile_app',
+    'Mobile app',
+    'The white-label mobile app and its extension disappear.',
+    ['Mobile app in the dashboard nav', 'White-label mobile app extension in the store'],
+    { modules: ['mobileapp'], extensions: ['app'] },
+  ),
+  moduleCap('messaging', 'inbox', 'Inbox'),
+  moduleCap('messaging', 'campaigns', 'Email campaigns'),
+  moduleCap('messaging', 'automations', 'Automations'),
+  // Marketing & growth
+  cap(
+    'marketing',
+    'channels',
+    'Ads & channels',
+    'The ads and channels hub and its extension disappear; ad syncs stop.',
+    ['Ads & channels in the dashboard nav', 'Ad syncs and social publishing', 'Ads & channels hub extension in the store'],
+    { modules: ['channels'], extensions: ['ads'] },
+  ),
+  ...AD_NETWORKS.map(([key, name, connection]) =>
+    cap('marketing', `ads_${key}`, name, `Schools can’t connect ${name} in Channels; its syncs stop.`, [`${name} in Channels`], {
+      requires: [connection],
+    }),
+  ),
+  moduleCap('marketing', 'affiliates', 'Affiliates & partners', ['aff']),
+  moduleCap('marketing', 'coupons', 'Coupons & offers'),
+  moduleCap('marketing', 'forms', 'Forms & leads'),
+  moduleCap('marketing', 'blog', 'Blog'),
+  moduleCap('marketing', 'seo', 'SEO'),
+  moduleCap('marketing', 'sitebuilder', 'Site builder'),
+  // Learning
+  moduleCap('learning', 'community', 'Community', ['spaces']),
+  cap(
+    'learning',
+    'certs',
+    'Certificates',
+    'Schools can’t issue certificates; learners lose them on the school site.',
+    ['Certificates in the dashboard nav', 'Certificates on school sites', 'Advanced credentials extension in the store'],
+    { modules: ['certs'], extensions: ['cred'] },
+  ),
+  cap(
+    'learning',
+    'scorm',
+    'SCORM & xAPI',
+    'SCORM imports and xAPI statements stop.',
+    ['SCORM import', 'SCORM & xAPI extension in the store'],
+    {
+      extensions: ['scorm'],
+    },
+  ),
+  cap(
+    'learning',
+    'exams',
+    'Proctored exams',
+    'Locked exam sessions and proctoring disappear.',
+    ['Proctoring settings on quizzes', 'Proctored exams extension in the store'],
+    { extensions: ['exam'] },
+  ),
+  moduleCap('learning', 'quizbuilder', 'Quiz builder'),
+  moduleCap('learning', 'assignments', 'Assignments'),
+  moduleCap('learning', 'reviews', 'Reviews'),
+  moduleCap('learning', 'groups', 'Groups & seats'),
+  moduleCap('learning', 'studentxp', 'Student experience'),
+  // Commerce
+  moduleCap('commerce', 'products', 'Products'),
+  moduleCap('commerce', 'bookings', 'Bookings'),
+  moduleCap('commerce', 'memberships', 'Memberships'),
+  cap('commerce', 'pay_stripe', 'Stripe payouts', 'Schools can’t connect Stripe to get paid.', ['Stripe in payout settings'], {
+    requires: ['oauth_stripe'],
+  }),
+  cap(
+    'commerce',
+    'domain_purchase',
+    'Domain purchase',
+    'Schools can’t buy a domain in the dashboard; connecting their own still works.',
+    ['Buy a domain in Branding & domain'],
+    { requires: ['cloudflare_registrar'] },
+  ),
+  // Sign-in & security
+  cap('signin', 'sso', 'Single sign-on', 'SAML, SCIM and HRIS provisioning disappear.', ['SSO settings', 'SSO sign-in on school sites']),
+  ...SIGN_IN_PROVIDERS.map(([key, name]) =>
+    cap(
+      'signin',
+      `signin_${key}`,
+      `Sign in with ${name}`,
+      `Learners can’t sign in with ${name}; their passwords still work.`,
+      [`“Continue with ${name}” on school sign-in pages`],
+      { requires: [`oauth_${key}`] },
+    ),
+  ),
+  // Integrations
+  ...MARKETPLACE_APPS.map(([key, name, oauth]) =>
+    cap(
+      'integrations',
+      `app_${key}`,
+      name,
+      `Schools can’t connect ${name}; connected schools stop syncing.`,
+      [`${name} in the integrations catalogue`],
+      {
+        requires: oauth ? [`oauth_${oauth}`] : [],
+      },
+    ),
+  ),
+  cap(
+    'integrations',
+    'api_webhooks',
+    'API keys & webhooks',
+    'School API keys stop working and webhooks stop being delivered.',
+    ['API keys and webhooks settings', 'API & webhooks extension in the store'],
+    { extensions: ['api'] },
+  ),
+  cap(
+    'integrations',
+    'i18n',
+    'Multi-language',
+    'Schools can’t translate their content.',
+    ['Translations', 'Multi-language extension in the store'],
+    {
+      extensions: ['i18n'],
+    },
+  ),
+  // Other modules
+  moduleCap('other', 'analytics', 'Analytics'),
+  moduleCap('other', 'vidanalytics', 'Video analytics'),
+  moduleCap('other', 'branding', 'Branding & domain'),
+  moduleCap('other', 'emailsettings', 'Sending & senders'),
+  moduleCap('other', 'audit', 'Audit log'),
+  moduleCap('other', 'integrations', 'Integrations & API'),
+];
+
+/**
+ * Switched-off capabilities (`platform_settings` `availability.switches`). The seed is the migration of the old
+ * Media → Live rooms policies: a stored `built_in_rooms: false` turns `live_rooms` off, `byo_providers: false` the three
+ * BYO providers.
+ */
+export const availabilityStore = singleton<{ off: string[] }>('platformAvailability', () => {
+  const old = mediaStore.get().liveRoomPoliciesOff as string[];
+  return {
+    off: [
+      ...(old.includes('built_in_rooms') ? ['live_rooms'] : []),
+      ...(old.includes('byo_providers') ? ['live_zoom', 'live_meet', 'live_teams'] : []),
+    ],
+  };
+});
+
+const connectionName = (key: string) =>
+  CONNECTIONS.find((c) => c.key === key)?.name ?? MEDIA_CONNECTIONS.find((c) => c.key === key)?.name ?? key;
+const isConnected = (key: string) => !!stored(key) || mediaStore.get().credentials.some((c) => c.connection === key);
+const switchedOn = (key: string) => !availabilityStore.get().off.includes(key);
+
+/** Whether a school uses a capability (cheap counts only; null when it can't be told, as the backend returns). */
+function usedBy(def: CapabilityDef, t: TenantRow): boolean | null {
+  if (def.modules?.length) {
+    const mods = tenantModules(t);
+    return def.modules.some((m) => mods.find((x) => x.id === m)?.enabled);
+  }
+  if (def.extensions?.length) return def.extensions.some((e) => t.paidExtensions.includes(e) || t.compedExtensions.includes(e));
+  return null;
+}
+
+function toCapability(def: CapabilityDef): Capability {
+  const requires = (def.requires ?? []).map((key) => ({ key, label: connectionName(key), connected: isConnected(key) }));
+  const connected = !requires.length || (def.requiresAny ? requires.some((r) => r.connected) : requires.every((r) => r.connected));
+  const on = switchedOn(def.key);
+  const live = tenants.where((t) => t.status !== 'Suspended');
+  const uses = live.map((t) => usedBy(def, t));
+  const exts = def.extensions ?? [];
+  return {
+    key: def.key,
+    label: def.label,
+    group: def.group,
+    description: def.description,
+    surfaces: def.surfaces,
+    modules: def.modules ?? [],
+    extensions: exts,
+    requires,
+    requiresAny: def.requiresAny ?? false,
+    on,
+    available: on && connected,
+    schoolsUsing: uses.some((u) => u === null) ? null : uses.filter(Boolean).length,
+    payingSchools: live.filter((t) => exts.some((e) => t.paidExtensions.includes(e))).length,
+  };
+}
+
+/** The capabilities a connection is required for (its "Available to schools" switches). */
+function capabilitiesNeeding(connection: string): ConnectionCapability[] {
+  return CAPABILITIES.filter((c) => c.requires?.includes(connection)).map((c) => ({ key: c.key, label: c.label, on: switchedOn(c.key) }));
+}
+
+/** Capability keys unavailable to schools (the `unavailable` list of `/auth/me` and the public site). */
+export const unavailableCapabilities = () =>
+  CAPABILITIES.map(toCapability)
+    .filter((c) => !c.available)
+    .map((c) => c.key);
+
+const availabilityHandlers = [
+  http.get(
+    route('/platform/availability'),
+    handle(() => {
+      authorize('platform.view');
+      const data: Availability = { capabilities: CAPABILITIES.map(toCapability), groups: CAPABILITY_GROUPS };
+      return ok(data);
+    }),
+  ),
+
+  http.put<KeyParams>(
+    route('/platform/availability/:key'),
+    handle<KeyParams>(async ({ request, params }) => {
+      authorize('platform.manage');
+      const def = CAPABILITIES.find((c) => c.key === params.key);
+      if (!def) throw notFound('Capability');
+      const body = await readBody<AvailabilityUpdate>(request);
+      if (typeof body.on !== 'boolean') throw invalid({ on: 'On must be true or false.' });
+      // Like both backends: switching a capability off removes it from every school at once (step-up); on doesn't.
+      if (!body.on) requireRecentPassword();
+      if (body.on !== switchedOn(def.key)) {
+        const off = availabilityStore.get().off.filter((k) => k !== def.key);
+        availabilityStore.patch({ off: body.on ? off : [...off, def.key] });
+        recordAudit(`Turned ${body.on ? 'on' : 'off'} ${def.label} for all schools`, 'Flags');
+      }
+      return ok(toCapability(def));
+    }),
+  ),
+];
+
 export const handlers = [
+  ...connectionHandlers,
   // ---------- Feature flags ----------
   http.get(
     route('/platform/flags'),
@@ -453,6 +1389,8 @@ export const handlers = [
     route('/platform/flags/:key'),
     handle<KeyParams>(async ({ request, params }) => {
       authorize('flags.manage');
+      // Like both backends: a platform flag switches a feature for every school at once (step-up).
+      requireRecentPassword();
       const f = findOr404(flags.find(params.key), 'Flag');
       const body = await readBody<FlagUpdate>(request);
       const errors: Record<string, string> = {};
@@ -520,9 +1458,11 @@ export const handlers = [
     handle(() => {
       authorize('platform.view');
       const domains = senders.all().map(toSender);
-      const sent = domains.reduce((s, d) => s + d.sent30d, 0);
-      const weighted = (pick: (d: SenderDomain) => number) =>
-        sent ? Math.round((domains.reduce((s, d) => s + pick(d) * d.sent30d, 0) / sent) * 100) / 100 : 0;
+      // The demo models a connected mail provider (measured volumes and rates). Laravel answers null for
+      // per-domain volume/rates and the bounce/complaint summary until the provider's event webhooks exist.
+      const sent = domains.reduce((s, d) => s + (d.sent30d ?? 0), 0);
+      const weighted = (pick: (d: SenderDomain) => number | null) =>
+        sent ? Math.round((domains.reduce((s, d) => s + (pick(d) ?? 0) * (d.sent30d ?? 0), 0) / sent) * 100) / 100 : 0;
       const body: Deliverability = {
         summary: {
           sent30d: sent,
@@ -646,8 +1586,9 @@ export const handlers = [
       const body: Standards = {
         summary: {
           scormPackages: 580 + imports.where((i) => i.outcome === 'imported').length,
-          xapiStatements24h: 1_200_000,
-          ltiLaunches30d: 9410,
+          // Laravel doesn't count these platform-wide yet: null = not measured.
+          xapiStatements24h: null,
+          ltiLaunches30d: null,
           failedImports: open.length,
         },
         standards: STANDARDS,
@@ -700,6 +1641,8 @@ export const handlers = [
     route('/platform/api-keys'),
     handle(async ({ request }) => {
       authorize('platform.manage');
+      // Like both backends: a key outlives the session, so minting one needs a recently confirmed password.
+      requireRecentPassword();
       const body = await readBody<ApiKeyInput>(request);
       const name = (body.name ?? '').trim();
       const errors: Record<string, string> = {};
@@ -768,4 +1711,6 @@ export const handlers = [
       return ok({ delivered: true, status: 200, delivery: null });
     }),
   ),
+
+  ...availabilityHandlers,
 ];

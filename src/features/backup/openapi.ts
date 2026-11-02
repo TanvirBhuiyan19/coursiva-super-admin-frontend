@@ -126,6 +126,19 @@ export const spec = defineSpec({
     },
     {
       method: 'GET',
+      path: '/backup/exports/{id}/download',
+      summary: 'Short-lived download URL for a ready export',
+      description:
+        'A 15-minute signed storage URL (`Content-Disposition: attachment`). 409 "This export is not ready yet." / "This export has expired."; 404 unknown id. The "Your data export is ready" email links to `{console}/platform/backup?section=exports&export={id}`, where a signed-in member downloads it.',
+      auth: 'platform.manage',
+      path_params: { id: { type: 'string', description: 'Export id.' } },
+      response: resource(ref('ExportDownload')),
+      errors: [404, 409],
+      audit: { text: 'Downloaded the data export of {tenant}', category: 'Security' },
+      example: { skip: 'Needs a ready export (covered by src/features/backup/backup.test.tsx).' },
+    },
+    {
+      method: 'GET',
       path: '/backup/activity',
       summary: 'Backup activity feed, newest first',
       auth: 'platform.view',

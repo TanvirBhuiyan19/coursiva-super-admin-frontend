@@ -1,7 +1,9 @@
 import { Badge, Card, Empty, ErrorState, Screen, SkeletonRows, TRow } from '@/components/ui';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import type { Tone } from '@/lib/domain';
 import { num, timeAgo } from '@/lib/format';
+import { useSection } from '@/lib/useSection';
 import { toast } from '@/store/ui';
 import { useDeliverability, usePauseSending, useRecheckDns } from '../api';
 import { Tiles } from '../components/Tiles';
@@ -10,11 +12,15 @@ import type { DnsCheck, SenderDomain, SenderRisk } from '../types';
 
 /** Decorative warning glyph (not text). */
 const WARN_ICON = '⚠';
+const SECTIONS = ['domains', 'suppression'] as const;
 const COLS =
   'minmax(0,1.8fr) minmax(0,0.6fr) minmax(0,0.6fr) minmax(0,0.9fr) minmax(0,0.7fr) minmax(0,0.7fr) minmax(0,0.8fr) minmax(0,2.1fr)';
 const RISK_TONE: Record<SenderRisk, Tone> = { Healthy: 'good', Watch: 'warn', 'Over threshold': 'bad' };
 const DNS_TONE: Record<DnsCheck, string> = { Pass: '', Fail: 'fg-bad', 'Not set': 'fg-warn' };
-const pctText = (n: number) => `${n}%`;
+// null = not measured yet (needs the mail provider's event webhooks): shown as a dash, never as 0.
+const NOT_MEASURED = '—';
+const pctText = (n: number | null) => (n === null ? NOT_MEASURED : `${n}%`);
+const count = (n: number | null) => (n === null ? NOT_MEASURED : num(n));
 function list(names: string[]) {
   if (names.length <= 1) return names.join('');
   if (names.length === 2) return t('deliver.listPair', { first: names[0]!, second: names[1]! });
@@ -55,7 +61,7 @@ function DomainRow({ d, canManage }: { d: SenderDomain; canManage: boolean }) {
       <div role="cell" className="muted">
         {d.dmarc}
       </div>
-      <div role="cell">{num(d.sent30d)}</div>
+      <div role="cell">{count(d.sent30d)}</div>
       <div role="cell">{pctText(d.bounceRate)}</div>
       <div role="cell" style={{ fontWeight: 700 }}>
         {pctText(d.complaintRate)}
@@ -99,6 +105,7 @@ export default function DeliverPage() {
   const q = useDeliverability();
   const d = q.data;
   const canManage = can('platform.manage');
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'domains');
   const over = d ? d.domains.filter((x) => x.risk === 'Over threshold' && !x.paused) : [];
 
   if (q.error)
@@ -117,15 +124,23 @@ export default function DeliverPage() {
             {
               label: t('deliver.tiles.bounce'),
               value: pctText(d.summary.bounceRate),
-              sub: t('deliver.tiles.bounceSub', { max: d.summary.thresholds.bounceMax }),
+              sub:
+                d.summary.bounceRate === null
+                  ? t('deliver.tiles.notMeasured')
+                  : t('deliver.tiles.bounceSub', { max: d.summary.thresholds.bounceMax }),
             },
             {
               label: t('deliver.tiles.complaint'),
               value: pctText(d.summary.complaintRate),
               sub:
-                d.summary.complaintRate >= d.summary.thresholds.complaintWatch
-                  ? t('deliver.tiles.complaintOver', { watch: d.summary.thresholds.complaintWatch })
-                  : t('deliver.tiles.complaintSub', { watch: d.summary.thresholds.complaintWatch, max: d.summary.thresholds.complaintMax }),
+                d.summary.complaintRate === null
+                  ? t('deliver.tiles.notMeasured')
+                  : d.summary.complaintRate >= d.summary.thresholds.complaintWatch
+                    ? t('deliver.tiles.complaintOver', { watch: d.summary.thresholds.complaintWatch })
+                    : t('deliver.tiles.complaintSub', {
+                        watch: d.summary.thresholds.complaintWatch,
+                        max: d.summary.thresholds.complaintMax,
+                      }),
             },
             { label: t('deliver.tiles.atRisk'), value: num(d.summary.domainsAtRisk), sub: t('deliver.tiles.atRiskSub') },
           ]
@@ -141,68 +156,85 @@ export default function DeliverPage() {
         </div>
       )}
 
-      <div className="card table-scroll" style={{ padding: '6px 18px 4px' }}>
-        <div role="table" aria-label={t('deliver.table')}>
-          <TRow cols={COLS} min={980} head style={{ gap: 10, fontSize: 10.5 }}>
-            <div role="columnheader">{t('deliver.cols.domain')}</div>
-            <div role="columnheader">{t('deliver.cols.spf')}</div>
-            <div role="columnheader">{t('deliver.cols.dkim')}</div>
-            <div role="columnheader">{t('deliver.cols.dmarc')}</div>
-            <div role="columnheader">{t('deliver.cols.sent')}</div>
-            <div role="columnheader">{t('deliver.cols.bounce')}</div>
-            <div role="columnheader">{t('deliver.cols.complaint')}</div>
-            <div role="columnheader">{t('deliver.cols.status')}</div>
-          </TRow>
-          {q.isPending && <SkeletonRows rows={5} h={22} />}
-          {d?.domains.map((x) => (
-            <DomainRow key={x.id} d={x} canManage={canManage} />
-          ))}
-          {d && d.domains.length === 0 && <Empty>{t('deliver.empty')}</Empty>}
-        </div>
-      </div>
-
-      <div className="grid-2">
-        <Card title={t('deliver.suppressionTitle')} style={{ padding: '18px 20px' }}>
-          <p className="muted t-sm" style={{ margin: '0 0 4px' }}>
-            {t('deliver.suppressionIntro')}
-          </p>
-          {d ? (
-            <ul className="plain-list">
-              {d.suppression.map((s) => (
-                <li key={s.list} className="row" style={{ gap: 10, padding: '10px 0', fontSize: 12.5 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600 }}>{s.list}</div>
-                    <div className="faint" style={{ fontSize: 11 }}>
-                      {s.note}
-                    </div>
-                  </div>
-                  <span style={{ fontWeight: 700 }}>{num(s.count)}</span>
-                </li>
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({
+          id,
+          label: t(`sections.deliver.${id}`),
+          ...(id === 'domains'
+            ? { badge: over.length, badgeLabel: t('sections.deliver.overBadge', { count: over.length }), badgeTone: 'bad' as const }
+            : {}),
+        }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.deliver.nav')}
+        href={sectionHref}
+      >
+        <SectionPanel active={section === 'domains'}>
+          <div className="card table-scroll" style={{ padding: '6px 18px 4px' }}>
+            <div role="table" aria-label={t('deliver.table')}>
+              <TRow cols={COLS} min={980} head style={{ gap: 10, fontSize: 10.5 }}>
+                <div role="columnheader">{t('deliver.cols.domain')}</div>
+                <div role="columnheader">{t('deliver.cols.spf')}</div>
+                <div role="columnheader">{t('deliver.cols.dkim')}</div>
+                <div role="columnheader">{t('deliver.cols.dmarc')}</div>
+                <div role="columnheader">{t('deliver.cols.sent')}</div>
+                <div role="columnheader">{t('deliver.cols.bounce')}</div>
+                <div role="columnheader">{t('deliver.cols.complaint')}</div>
+                <div role="columnheader">{t('deliver.cols.status')}</div>
+              </TRow>
+              {q.isPending && <SkeletonRows rows={5} h={22} />}
+              {d?.domains.map((x) => (
+                <DomainRow key={x.id} d={x} canManage={canManage} />
               ))}
-            </ul>
-          ) : (
-            <SkeletonRows rows={4} h={20} />
-          )}
-        </Card>
-        <div className="card note" style={{ padding: '18px 20px', fontSize: 12.5, lineHeight: 1.6 }}>
-          <b style={{ color: 'var(--tx)' }}>{t('deliver.whyTitle')}</b>
-          <br />
-          {t('deliver.whyBody')}
-          {d && (
-            <>
-              <br />
-              <span className="faint">
-                {t('deliver.thresholds', {
-                  bounceWatch: d.summary.thresholds.bounceWatch,
-                  complaintWatch: d.summary.thresholds.complaintWatch,
-                  bounceMax: d.summary.thresholds.bounceMax,
-                  complaintMax: d.summary.thresholds.complaintMax,
-                })}
-              </span>
-            </>
-          )}
-        </div>
-      </div>
+              {d && d.domains.length === 0 && <Empty>{t('deliver.empty')}</Empty>}
+            </div>
+          </div>
+
+          <div className="card note" style={{ padding: '18px 20px', fontSize: 12.5, lineHeight: 1.6 }}>
+            <b style={{ color: 'var(--tx)' }}>{t('deliver.whyTitle')}</b>
+            <br />
+            {t('deliver.whyBody')}
+            {d && (
+              <>
+                <br />
+                <span className="faint">
+                  {t('deliver.thresholds', {
+                    bounceWatch: d.summary.thresholds.bounceWatch,
+                    complaintWatch: d.summary.thresholds.complaintWatch,
+                    bounceMax: d.summary.thresholds.bounceMax,
+                    complaintMax: d.summary.thresholds.complaintMax,
+                  })}
+                </span>
+              </>
+            )}
+          </div>
+        </SectionPanel>
+
+        <SectionPanel active={section === 'suppression'}>
+          <Card title={t('deliver.suppressionTitle')} style={{ padding: '18px 20px' }}>
+            <p className="muted t-sm" style={{ margin: '0 0 4px' }}>
+              {t('deliver.suppressionIntro')}
+            </p>
+            {d ? (
+              <ul className="plain-list">
+                {d.suppression.map((s) => (
+                  <li key={s.list} className="row" style={{ gap: 10, padding: '10px 0', fontSize: 12.5 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600 }}>{s.list}</div>
+                      <div className="faint" style={{ fontSize: 11 }}>
+                        {s.note}
+                      </div>
+                    </div>
+                    <span style={{ fontWeight: 700 }}>{count(s.count)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <SkeletonRows rows={4} h={20} />
+            )}
+          </Card>
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

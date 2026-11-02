@@ -23,8 +23,14 @@ export const { t, useT } = defineMessages('billing', {
     audience: 'Audience',
     feature: 'Feature',
   },
-  invoiceStatus: { Paid: 'Paid', 'Past due': 'Past due', Waived: 'Waived' },
+  invoiceStatus: { Paid: 'Paid', 'Past due': 'Past due', Waived: 'Waived', Void: 'Void', Open: 'Open' },
   payoutStatus: { Scheduled: 'Scheduled', Paid: 'Paid' },
+  /** Merchants of record that bill some schools themselves (`Invoice.provider`). */
+  provider: {
+    names: { paddle: 'Paddle', lemon_squeezy: 'Lemon Squeezy' },
+    billedBy: 'Billed by {name}',
+    managedThere: '{name} retries this invoice on its own schedule — manage it in {name}.',
+  },
 
   revenue: {
     title: 'Revenue',
@@ -39,6 +45,10 @@ export const { t, useT } = defineMessages('billing', {
       titleMonth: 'MRR movement · {month}',
       caption: 'MRR movement for {month}',
       netChange: 'Net change',
+      more: {
+        one: '+ {count} smaller movement (counted in the net change)',
+        other: '+ {count} smaller movements (counted in the net change)',
+      },
     },
     churn: {
       title: 'Churn reasons · last 90 days',
@@ -85,6 +95,7 @@ export const { t, useT } = defineMessages('billing', {
     noun: 'invoices',
     toasts: {
       retried: 'Charge retried — {amount} collected from {tenant}',
+      declined: 'The card was declined again — {tenant}’s invoice is still past due',
     },
   },
 
@@ -97,6 +108,10 @@ export const { t, useT } = defineMessages('billing', {
     unbilled: 'Unbilled',
     addToInvoice: 'Add to invoice',
     addToInvoiceFor: 'Add {tenant} {meter} overage to invoice',
+    /** Laravel meter keys (`coursiva.billing.overage`). */
+    meters: { ai_credits: 'AI credits', live_room_minutes: 'Live room minutes', sms_credits: 'SMS credits' },
+    usageOf: '{usage} of {allowance}',
+    rate: '{price} per {per}',
     footer: 'Overage meters reset on the 1st. Rates are set in',
     footerLink: 'Plans & pricing → Add-ons',
     toasts: {
@@ -106,6 +121,7 @@ export const { t, useT } = defineMessages('billing', {
 
   plans: {
     title: 'Plans and pricing',
+    sections: { nav: 'Plans and pricing sections', pricing: 'Prices & add-ons', features: 'Feature matrix', promos: 'Promo codes' },
     impact: {
       label: 'MRR impact:',
       newSignups: 'Projected at current tenant counts — existing tenants keep their price.',
@@ -122,7 +138,7 @@ export const { t, useT } = defineMessages('billing', {
     },
     trial: {
       label: 'Free trial length',
-      hint: 'Applies to all new tenant signups.',
+      hint: '0–90 days, 0 = no free trial: schools pay at sign-up. Applies to new signups — the same value as Settings → Sign-up, where the card requirement is set.',
       days: 'days',
     },
     unsaved: 'Unsaved changes',
@@ -146,6 +162,7 @@ export const { t, useT } = defineMessages('billing', {
   planCards: {
     tenants: { one: '{count} tenant', other: '{count} tenants' },
     monthlyPrice: '{plan} monthly price',
+    recommended: 'Recommended',
     mrrFromPlan: 'MRR from this plan:',
     staffSeats: { one: '{count} staff seat', other: '{count} staff seats' },
     unlimitedStaffSeats: 'Unlimited staff seats',
@@ -154,7 +171,7 @@ export const { t, useT } = defineMessages('billing', {
     storageGb: '{gb} GB storage',
     storageTb: '{tb} TB storage',
     unlimitedStorage: 'Unlimited storage',
-    liveRoomMinutes: '{minutes} built-in live-room min/mo',
+    liveRoomMinutes: '{minutes} built-in live-room participant-min/mo',
     liveRoomExternal: 'Live classes via their own Zoom, Meet or Teams',
   },
 

@@ -89,7 +89,15 @@ export interface AiUsage {
   settings: { monthlyCap: number; routingPolicy: RoutingPolicy };
   /** Server pricing rules, so the explanation on screen always matches the maths. */
   pricing: { costPer1k: number; billedPer1k: number; allowances: { plan: Plan; tokensK: number }[] };
-  totals: { spend: number; tokensK: number; tenants: number; throttled: number; capUsedPct: number };
+  totals: {
+    spend: number;
+    tokensK: number;
+    tenants: number;
+    throttled: number;
+    /** What the model calls really cost this month (USD), summed from each charge — beside `spend`, the credit cost. */
+    modelCost: number;
+    capUsedPct: number;
+  };
   tenants: AiTenantUsage[];
   /** Our cost by AI feature, largest first. `sharePct` of total spend. */
   byFeature: { feature: AiFeature; cost: number; sharePct: number }[];
@@ -105,6 +113,8 @@ export interface AiTenantUsage {
   cost: number;
   /** Overage billed to the tenant above their allowance (USD). */
   billed: number;
+  /** What this tenant's model calls really cost this month (USD, rounded to cents). */
+  modelCost: number;
   /** (plan MRR + billed − cost) ÷ revenue, in %. Null when the tenant has no revenue (trial / suspended). */
   marginPct: number | null;
   topFeature: AiFeature;
@@ -149,4 +159,47 @@ export interface QueueRetryResult {
   /** Failed jobs pushed back onto the queue. */
   requeued: number;
   queue: JobQueue;
+}
+
+// ---------- GET /analytics/live ----------
+/** One school's live usage in the month. */
+export interface LiveTenantUsage {
+  tenantId: string;
+  name: string;
+  /** The billing meter (`live_room_minutes`): participant-minutes in built-in rooms, learners and staff. */
+  roomMinutes: number;
+  /** Included minutes on the school's plan (0 = none included). */
+  allowance: number;
+  /** roomMinutes ÷ allowance (null without an allowance). */
+  usedPct: number | null;
+  /** Live classes that ended in the month. */
+  sessions: number;
+  attendees: number;
+  /** Attendees' minutes in the room. */
+  participantMinutes: number;
+  /** The most learners in the school's rooms in one minute. */
+  peakConcurrency: number;
+}
+
+export interface LiveUsage {
+  /** First day of the month the figures cover (ISO date). */
+  period: string;
+  /** The months the picker offers (first days, newest first). */
+  periods: string[];
+  totals: {
+    roomMinutes: number;
+    sessions: number;
+    attendees: number;
+    participantMinutes: number;
+    /** The highest school peak in the month. */
+    peakConcurrency: number;
+    /** Schools with room minutes or sessions. */
+    schools: number;
+  };
+  /** Six months ending with the chosen one. */
+  trend: { period: string; roomMinutes: number; sessions: number; attendees: number }[];
+  /** Each day of the month (to today): sessions and the busiest school's peak. */
+  daily: { date: string; sessions: number; peakConcurrency: number }[];
+  /** Top 20 schools by room minutes. */
+  tenants: LiveTenantUsage[];
 }

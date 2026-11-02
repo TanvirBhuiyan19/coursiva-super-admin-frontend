@@ -80,6 +80,10 @@ docs/openapi.yaml generated OpenAPI 3.1 spec (`npm run openapi`) — never edit 
 - Toasts state the consequence, using the design's copy: "Refunded $249 to Priya Nair — access revoked, receipt emailed".
 - Accessibility (WCAG 2.2 AA): real `<button>`/`<a>`/`<Link>` for interactions; every input has a label (`Field` or `aria-label`); toggles need `label`; headings in order (card titles are `<h2>`); lists as `ul/ol`; icons `aria-hidden`; charts get an `sr-only` table. `jsx-a11y` is enforced — a suppression needs a one-line reason.
 - Responsive: `grid-kpi`, `grid-2`, `grid-3`; wide tables in `.card.table-scroll` with a `min` width.
+- Long screens made of independent sections (Settings, Platform → Media/API/…, Governance → Policies/Compliance/Abuse,
+  Plans, Extensions, Entitlements, Backup) use `SectionedPage` + one `SectionPanel` per section, with the active section
+  in `?section=` via `useSection` (`lib/useSection.ts`). Import them from `@/components/ui/Sectioned` (kept out of the
+  barrel so they stay off the critical path). Dashboards and single big lists don't use it.
 - Dates via `timeAgo`, `formatDate`, `formatDateTime`; numbers via `num`, `money`, `moneyFine`, `moneyCompact`.
 
 ### Internationalisation (lint-enforced)

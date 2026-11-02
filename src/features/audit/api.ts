@@ -1,5 +1,6 @@
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
+import { live } from '@/lib/queryClient';
 import type { Paginated } from '@/lib/api/types';
 import type { AuditEntry, AuditParams } from './types';
 
@@ -19,4 +20,6 @@ export const auditQueries = {
     }),
 };
 
-export const useAuditLog = (params: AuditParams) => useQuery({ ...auditQueries.list(params), placeholderData: keepPreviousData });
+/** `live`: refresh every minute while visible — only for the console home's activity feed. */
+export const useAuditLog = (params: AuditParams, opts: { live?: boolean } = {}) =>
+  useQuery({ ...auditQueries.list(params), placeholderData: keepPreviousData, ...(opts.live ? live : {}) });

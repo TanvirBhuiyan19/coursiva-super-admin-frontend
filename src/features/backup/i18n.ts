@@ -2,6 +2,13 @@ import { defineMessages } from '@/lib/i18n';
 
 export const { t, useT } = defineMessages('backup', {
   title: 'Backup and restore',
+  sections: {
+    nav: 'Backup sections',
+    points: 'Restore points',
+    policy: 'Policy & destinations',
+    exports: 'Tenant exports',
+    activity: 'Activity',
+  },
   // Labels for backup enum values sent by the API.
   enums: {
     frequency: {
@@ -16,6 +23,7 @@ export const { t, useT } = defineMessages('backup', {
       six_hourly_nightly: 'every 6h incremental + nightly full',
     },
     exportFormat: { json: 'JSON', csv: 'CSV bundle', sql: 'SQL dump' },
+    exportStatus: { queued: 'Queued', running: 'Building', ready: '✓ Ready', failed: 'Failed', expired: 'Expired' },
     kind: { Full: 'Full', Incremental: 'Incremental', Manual: 'Manual' },
     integrity: { Verified: 'Verified', Verifying: 'Verifying', Failed: 'Failed' },
     restoreStatus: {
@@ -24,6 +32,7 @@ export const { t, useT } = defineMessages('backup', {
       running: 'Running',
       completed: 'Completed',
       cancelled: 'Cancelled',
+      failed: 'Failed',
     },
   },
   duration: { hours: '{count} h', minutes: '{count} min' },
@@ -37,6 +46,8 @@ export const { t, useT } = defineMessages('backup', {
     rpoRto: 'RPO / RTO',
     rpoRtoValue: '{rpo} / {rto}',
     pitrWindow: '{days}-day point-in-time window',
+    snapshotsOnly: 'Snapshots only — no point-in-time window',
+    notMeasured: 'not measured',
     drills: 'Restore drills',
     drillsValue: '{passed} / {total} passed',
     lastDrill: 'last drill {date}',
@@ -153,9 +164,11 @@ export const { t, useT } = defineMessages('backup', {
     intro: 'Full data export for offboarding or GDPR portability.',
     noTenants: 'No tenants to export.',
     tenants: 'Tenants',
-    ready: '✓ Ready',
-    queued: 'Queued',
     jobLine: '{status} · {format} · {when} by {name}',
+    download: 'Download',
+    downloadFor: 'Download the data export of {tenant}',
+    linked: 'Export of {tenant} ({format}): {status}',
+    linkedMissing: 'That export no longer exists. Exports are deleted 7 days after they’re ready.',
     exportFor: 'Export data for {tenant}',
     queuedToast: 'Export queued for {tenant} ({format}) — the link emails to you and expires in 7 days',
     queuedToastMedia: 'Export queued for {tenant} ({format} + media manifests) — the link emails to you and expires in 7 days',

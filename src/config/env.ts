@@ -3,7 +3,8 @@ const bool = (v: string | undefined, fallback: boolean) => (v == null || v === '
 
 export const env = {
   apiUrl: (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, ''),
-  apiPrefix: import.meta.env.VITE_API_PREFIX ?? '/api/v1/admin',
+  // The Laravel platform surface. Mock mode (MSW) mounts its handlers on this same prefix, so dev, demo and production agree.
+  apiPrefix: import.meta.env.VITE_API_PREFIX || '/api/v1/platform',
   enableMocks: bool(import.meta.env.VITE_ENABLE_MOCKS, import.meta.env.DEV),
   sentryDsn: import.meta.env.VITE_SENTRY_DSN ?? '',
   /** Where Web Vitals beacons go (empty disables RUM). */

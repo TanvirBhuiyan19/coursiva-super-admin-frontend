@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChipGroup, ErrorState, Screen, Skeleton } from '@/components/ui';
+import { ChipGroup, CountUp, ErrorState, Screen, Skeleton } from '@/components/ui';
 import { Can } from '@/features/auth/Can';
 import { useCan } from '@/features/auth/useCan';
 import { ROLES, type Role } from '@/features/auth/permissions';
@@ -37,7 +37,9 @@ function Kpis({ s }: { s: StaffSummary | undefined }) {
         ? items.map(([label, value, sub]) => (
             <div key={label} className="card card--tight">
               <div className="kpi-label">{label}</div>
-              <div className="kpi-value kpi-value--sm">{value}</div>
+              <div className="kpi-value kpi-value--sm">
+                <CountUp value={value} />
+              </div>
               <div className="kpi-sub" style={{ marginTop: 2 }}>
                 {sub}
               </div>

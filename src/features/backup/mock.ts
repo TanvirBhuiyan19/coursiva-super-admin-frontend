@@ -12,7 +12,9 @@ import {
   type BackupPoint,
   type BackupSettings,
   type BackupSummary,
+  type ExportDownload,
   type ExportFormat,
+  type ExportStatus,
   type Restore,
   type StageRestoreInput,
   type TenantExport,
@@ -20,7 +22,12 @@ import {
 
 const MIN = 60_000;
 const DAY = 1440 * MIN;
-const WAL_DAYS = 7;
+/**
+ * Transaction-log (WAL) archive window. Laravel's snapshot-only driver has none (`wal_window_days: 0`, and PITR
+ * answers 422); tests raise it to exercise point-in-time restores for a driver that archives logs.
+ */
+export const backupWal = singleton('backupWal', () => ({ days: 0 }));
+const walDays = () => backupWal.get().days;
 /** Seconds between approval and the restore worker picking the job up. */
 const QUEUE_DELAY_MS = 5_000;
 const EXPORT_READY_MS = 5 * MIN;
@@ -55,8 +62,10 @@ const drills = singleton<{ passed: number; total: number; lastAt: string | null 
   lastAt: ago({ d: 28 }),
 }));
 
-interface ExportRow extends Omit<TenantExport, 'status'> {
+interface ExportRow extends Omit<TenantExport, 'status' | 'sizeBytes'> {
   readyAt: string;
+  /** Mock only: a failed build (Laravel status `failed`). */
+  failed?: boolean;
 }
 const exportsTable = collection<ExportRow>('backupExports', () => []);
 
@@ -112,10 +121,20 @@ function toRestore(r: RestoreRow, viewer: StaffRow): Restore {
   };
 }
 
-const toExport = ({ readyAt, ...e }: ExportRow): TenantExport => ({
-  ...e,
-  status: Date.now() >= new Date(readyAt).getTime() ? 'ready' : 'queued',
-});
+/** Laravel's lifecycle: queued → running → ready (→ expired after `expires_at`), or failed. */
+function exportStatus(e: ExportRow): ExportStatus {
+  const now = Date.now();
+  if (e.failed) return 'failed';
+  if (now >= new Date(e.expiresAt).getTime()) return 'expired';
+  if (now >= new Date(e.readyAt).getTime()) return 'ready';
+  return now >= new Date(e.requestedAt).getTime() + EXPORT_READY_MS / 2 ? 'running' : 'queued';
+}
+
+const toExport = (row: ExportRow): TenantExport => {
+  const { readyAt: _readyAt, failed: _failed, ...e } = row;
+  const status = exportStatus(row);
+  return { ...e, status, sizeBytes: status === 'ready' ? 48_213_504 : null };
+};
 
 const pointLabel = (p: BackupPoint) => {
   const d = new Date(p.takenAt);
@@ -141,18 +160,27 @@ function summary(): BackupSummary {
     historyTb: 4.1,
     tenants: tenants.all().length,
     rpoMinutes: rpoFor(s.frequency),
-    rtoMinutes: 45,
+    // Laravel: duration of the last live restore, else the last passed drill; null before either.
+    rtoMinutes: d.passed > 0 ? 45 : null,
     drillsPassed: d.passed,
     drillsTotal: d.total,
     lastDrillAt: d.lastAt,
-    walWindowDays: WAL_DAYS,
+    walWindowDays: walDays(),
     destinations: [
       { id: 'primary', name: 'Primary — Cloudflare R2 · eu-west', size: `${protectedGb} GB`, status: 'Healthy', healthy: true },
       s.replication
         ? { id: 'replica', name: 'Replica — AWS S3 · us-east-1', size: `${protectedGb} GB`, status: 'Synced 6 min ago', healthy: true }
         : { id: 'replica', name: 'Replica — AWS S3 · us-east-1', size: '—', status: 'Paused — replication off', healthy: false },
       { id: 'cold', name: 'Cold — Glacier Deep Archive', size: '4.1 TB', status: 'Weekly · 12-month retention', healthy: true },
-      { id: 'wal', name: 'Transaction log (WAL) — continuous', size: `${WAL_DAYS}-day window`, status: 'Shipping · 8s lag', healthy: true },
+      walDays()
+        ? {
+            id: 'wal',
+            name: 'Transaction log (WAL) — continuous',
+            size: `${walDays()}-day window`,
+            status: 'Shipping · 8s lag',
+            healthy: true,
+          }
+        : { id: 'wal', name: 'Transaction log archive', size: '—', status: 'Not configured', healthy: false },
     ],
   };
 }
@@ -245,14 +273,17 @@ export const handlers = [
       let point: BackupPoint | undefined;
       let pointInTime: string | null = null;
 
-      if (pitr) {
+      if (pitr && !walDays()) {
+        // Laravel PlatformBackupController::stage on the snapshot-only driver.
+        errors.pitrDate = 'Point-in-time recovery is not available on this platform — restore from a snapshot instead.';
+      } else if (pitr) {
         if (!body.pitrDate || !DATE_RE.test(body.pitrDate)) errors.pitrDate = 'Choose the day to recover to.';
         if (!body.pitrTime || !TIME_RE.test(body.pitrTime)) errors.pitrTime = 'Enter a time as HH:MM (24-hour), e.g. 13:42.';
         if (!errors.pitrDate && !errors.pitrTime) {
           const target = new Date(`${body.pitrDate}T${body.pitrTime}:00Z`).getTime();
           if (Number.isNaN(target)) errors.pitrDate = 'Choose the day to recover to.';
           else if (target > Date.now()) errors.pitrTime = 'That time is in the future.';
-          else if (target < Date.now() - WAL_DAYS * DAY) errors.pitrDate = `Point-in-time recovery covers the last ${WAL_DAYS} days.`;
+          else if (target < Date.now() - walDays() * DAY) errors.pitrDate = `Point-in-time recovery covers the last ${walDays()} days.`;
           else {
             pointInTime = new Date(target).toISOString();
             point = sortedPoints().find((p) => p.kind !== 'Incremental' && new Date(p.takenAt).getTime() <= target);
@@ -421,6 +452,23 @@ export const handlers = [
       log(`Data export queued for ${tenant.name} (${what})`);
       recordAudit(`Queued ${what} data export for ${tenant.name}`, 'Security', tenant.id);
       return ok(toExport(row), 201);
+    }),
+  ),
+
+  // Laravel PlatformBackupController::downloadExport: a 15-minute signed URL; 409 while not ready or once expired.
+  http.get<{ id: string }>(
+    route('/backup/exports/:id/download'),
+    handle<{ id: string }>(({ params }) => {
+      authorize('platform.manage');
+      const row = exportsTable.find(params.id);
+      if (!row) throw notFound('Export');
+      const status = exportStatus(row);
+      if (status !== 'ready') throw new HttpError(409, status === 'expired' ? 'This export has expired.' : 'This export is not ready yet.');
+      recordAudit(`Downloaded the data export of ${row.tenantName}`, 'Security', row.tenantId);
+      return ok<ExportDownload>({
+        url: `https://storage.example.com/tenants/${row.tenantId}/exports/coursiva-export-${row.id}.zip?signature=mock`,
+        expiresAt: new Date(Date.now() + 15 * MIN).toISOString(),
+      });
     }),
   ),
 

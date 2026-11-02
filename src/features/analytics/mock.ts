@@ -24,6 +24,7 @@ import {
 } from './types';
 
 const DAY = 86_400_000;
+const METER_LABELS = { ai_credits: 'AI credits', live_room_minutes: 'Live room minutes', sms_credits: 'SMS credits' } as const;
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const daysSince = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / DAY));
@@ -190,7 +191,8 @@ function usage(): Usage {
         videoMinutes: u.videoMinutes,
         apiRequests: u.apiRequests,
         sharePct: Math.round(share * 100),
-        overage: ov ? { meter: ov.meter, amount: ov.amount } : null,
+        // Laravel sends the meter's display name here (AnalyticsController::METER_LABELS).
+        overage: ov ? { meter: METER_LABELS[ov.meter], amount: ov.amount } : null,
       };
     })
     .filter((r) => r.sharePct > 0)
@@ -237,9 +239,12 @@ const toQueue = (q: QueueRow): JobQueue => ({ name: q.name, depth: q.depth, fail
 // AI usage & cost
 // ======================================================================
 
-/** Thousand tokens included per month in each plan. */
-export const AI_ALLOWANCE_K: Record<Plan, number> = { Launch: 150, Growth: 600, Scale: 1500 };
-/** Our model cost per 1k tokens, and what we bill tenants per 1k above their allowance. */
+/**
+ * Thousand AI credits included per month in each plan (the backend's `ai_credits` plan limits: 50,000 · 600,000 ·
+ * 2,000,000). A credit is ~1 token-equivalent at fixed per-task rates; the contract keeps the `tokens_k` names.
+ */
+export const AI_ALLOWANCE_K: Record<Plan, number> = { Launch: 50, Growth: 600, Scale: 2000 };
+/** Our model cost per 1k credits, and what we bill tenants per 1k above their allowance. */
 export const AI_COST_PER_1K = 0.42;
 export const AI_BILLED_PER_1K = 0.6;
 
@@ -266,18 +271,24 @@ interface AiUsageRow {
   tokensK: number;
   topFeature: AiFeature;
 }
-/** AI tokens used this month by tenants that have AI studio. */
+/** AI credits (thousands) used this month by tenants that have AI studio. */
 export const aiUsageRows = collection<AiUsageRow>('analyticsAiUsage', () => [
   { id: 'tn_amplify', tokensK: 240, topFeature: 'outlines' },
   { id: 'tn_nordic', tokensK: 620, topFeature: 'quizzes' },
-  { id: 'tn_devpath', tokensK: 1980, topFeature: 'summaries' },
+  { id: 'tn_devpath', tokensK: 2480, topFeature: 'summaries' },
   { id: 'tn_silva', tokensK: 180, topFeature: 'outlines' },
   { id: 'tn_northstar', tokensK: 92, topFeature: 'chat' },
   { id: 'tn_atlas', tokensK: 640, topFeature: 'quizzes' },
   { id: 'tn_peak', tokensK: 55, topFeature: 'summaries' },
 ]);
 
-/** How a tenant's tokens split across features: 55% on their heaviest feature, the rest in fixed order. */
+/**
+ * What the model calls really cost per 1k credits. The backend sums each charge's `cost_micros` (priced per model and
+ * token); the mock has no per-call rows, so it uses one blended rate for the seeded credits.
+ */
+export const AI_MODEL_COST_PER_1K = 0.31;
+
+/** How a tenant's credits split across features: 55% on their heaviest feature, the rest in fixed order. */
 const featureSplit = (top: AiFeature) => {
   const rest = AI_FEATURES.filter((f) => f !== top);
   return [{ feature: top, share: 0.55 }, ...rest.map((feature, i) => ({ feature, share: [0.2, 0.15, 0.1][i] ?? 0 }))];
@@ -302,6 +313,7 @@ function aiUsage(): AiUsage {
       allowanceK,
       cost,
       billed,
+      modelCost: round2(u.tokensK * AI_MODEL_COST_PER_1K),
       marginPct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 100) : null,
       topFeature: u.topFeature,
       throttled: s.throttledTenantIds.includes(t.id),
@@ -327,6 +339,7 @@ function aiUsage(): AiUsage {
       tokensK: list.reduce((sum, r) => sum + r.tokensK, 0),
       tenants: list.length,
       throttled: list.filter((r) => r.throttled).length,
+      modelCost: round2(list.reduce((sum, r) => sum + r.modelCost, 0)),
       capUsedPct: s.monthlyCap ? Math.round((spend / s.monthlyCap) * 100) : 0,
     },
     tenants: list,
@@ -370,7 +383,7 @@ export const experiments = collection<ExperimentRow>('analyticsExperiments', () 
     id: 'ex_ai_outline',
     name: 'AI outline assistant',
     surface: 'Course creation',
-    flagKey: 'ai_outline',
+    flagKey: null,
     exposed: 3110,
     controlPct: 38.6,
     variantPct: 42.0,

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Badge, Card, ConfirmButton, Empty, ErrorState, Pagination, Screen, SkeletonRows, ToggleRow, TRow } from '@/components/ui';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import { formatDate, num } from '@/lib/format';
 import { useDebounced } from '@/lib/useDebounced';
+import { useSection } from '@/lib/useSection';
 import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
 import { useCertificateAction, useCertificates, useCertificateSummary, useRegistryPolicies, useSetRegistryPolicy } from '../api';
 import { Tiles } from '../components/Tiles';
 import { useT } from '../i18n';
 import type { Certificate, CertificateParams } from '../types';
+
+const SECTIONS = ['certificates', 'policy'] as const;
 
 const COLS = 'minmax(0,1.3fr) minmax(0,1.1fr) minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1.5fr)';
 const shortUrl = (url: string) => url.replace(/^https?:\/\//, '');
@@ -128,6 +132,7 @@ export default function CredentialsPage() {
   const t = useT();
   const can = useCan();
   const canManage = can('platform.manage');
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'certificates');
   const [f, setF] = useUrlState({ q: '', page: '1' });
   const [search, setSearch] = useState(f.q);
   const debounced = useDebounced(search, 300);
@@ -154,8 +159,14 @@ export default function CredentialsPage() {
         }
       />
 
-      <div className="hstack wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
-        <div className="stack min0" style={{ gap: 12, flex: '1.7 1 600px' }}>
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({ id, label: t(`sections.credentials.${id}`) }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.credentials.nav')}
+        href={sectionHref}
+      >
+        <SectionPanel active={section === 'certificates'}>
           <input
             className="input"
             type="search"
@@ -200,15 +211,15 @@ export default function CredentialsPage() {
               )}
             </div>
           )}
-        </div>
+        </SectionPanel>
 
-        <div className="stack min0" style={{ gap: 16, flex: '1 1 300px' }}>
+        <SectionPanel active={section === 'policy'}>
           <PolicyCard canManage={canManage} />
           <div className="card note" style={{ padding: '16px 18px', fontSize: 12.5, lineHeight: 1.6 }}>
             {t('credentials.note')}
           </div>
-        </div>
-      </div>
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

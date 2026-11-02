@@ -1,15 +1,19 @@
-import { useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { preloadScreen } from '@/app/pages';
 import { NAV, pathOf, screenById, type ScreenDef, type ScreenId } from '@/app/screens';
 import { useSession } from '@/features/auth/api';
 import { useCan } from '@/features/auth/useCan';
+import { DomainTasksBadge } from '@/features/domains';
 import { useNavBadges } from '@/features/shell/api';
 import { useT } from '@/features/shell/i18n';
 import { avatarColor, initials } from '@/lib/format';
 import { cx } from '@/lib/cx';
 import { useUi } from '@/store/ui';
-import { Avatar, Icon } from '../ui';
+import { Icon } from '../ui/Icon';
+import { Avatar } from '../ui/Misc';
+import { BrandMark } from './BrandMark';
+import { useBrand } from './useBrand';
 
 const CHEVRON = '▶';
 
@@ -17,7 +21,9 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
   const t = useT();
   const can = useCan();
   const { data: user } = useSession();
-  const { data: badges } = useNavBadges();
+  const { data: badges } = useNavBadges({ enabled: can('support.view') });
+  // The sidebar is dark in both themes, so it prefers the logo for dark backgrounds.
+  const brand = useBrand(t('brand'), 'dark');
   const navOpen = useUi((s) => s.navOpen);
   const toggleNavGroup = useUi((s) => s.toggleNavGroup);
   const closeMobile = () => useUi.getState().set({ mobileNav: false });
@@ -28,7 +34,7 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
     if (parent) toggleNavGroup(parent.id, true);
   }, [screen?.id, toggleNavGroup]);
 
-  // Show the thin scrollbar only while the nav is scrolling.
+  // Brighten the (always visible) thin scrollbar while the nav is scrolling.
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -49,15 +55,12 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
   const visible = (id: Parameters<typeof pathOf>[0]) => can(screenById[id].permission);
   // Hover/focus is a strong signal the user is about to navigate: fetch the page's code + data now.
   const intent = (id: ScreenId) => ({ onMouseEnter: () => preloadScreen(id), onFocus: () => preloadScreen(id) });
-
   return (
     <aside className="sidebar" ref={ref} aria-label={t('sidebar.label')}>
-      <Link to="/" className="sb-brand" onClick={closeMobile} aria-label={t('sidebar.homeLabel')}>
-        <div className="sb-logo" aria-hidden="true">
-          C
-        </div>
+      <Link to="/" className="sb-brand" onClick={closeMobile} aria-label={t('sidebar.homeLabel', { name: brand.name })}>
+        <BrandMark logo={brand.logo} name={brand.name} />
         <div className="min0">
-          <div className="sb-name">{t('brand')}</div>
+          {!brand.logo && <div className="sb-name">{brand.name}</div>}
           <div className="sb-tag">{t('sidebar.tagline')}</div>
         </div>
       </Link>
@@ -87,6 +90,12 @@ export default function Sidebar({ screen }: { screen: ScreenDef | undefined }) {
                         >
                           <Icon d={it.icon} />
                           <span className="sb-item-label">{it.label}</span>
+                          {it.id === 'domains' && (
+                            // Open registrar tasks; loads after the shell (its code is off the critical path).
+                            <Suspense fallback={null}>
+                              <DomainTasksBadge />
+                            </Suspense>
+                          )}
                           {badge > 0 && (
                             <span className="sb-badge" aria-label={t('sidebar.openTickets', { count: badge })}>
                               {badge}

@@ -2,7 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SCREENS, type ScreenDef } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
-import { useGlobalSearch, type SearchType } from '@/features/shell/api';
+import { SEARCH_MIN_LENGTH, useGlobalSearch, type SearchType } from '@/features/shell/api';
 import { useT } from '@/features/shell/i18n';
 import { useDebounced } from '@/lib/useDebounced';
 import { useUi } from '@/store/ui';
@@ -42,7 +42,7 @@ export default function CommandPalette() {
   const term = (scope ? raw.slice(1) : raw).trim();
   const debounced = useDebounced(term, 180);
   const remoteType = scope ? REMOTE[scope] : undefined;
-  const wantsRemote = scope ? !!remoteType : debounced.length > 0;
+  const wantsRemote = (scope ? !!remoteType : true) && debounced.length >= SEARCH_MIN_LENGTH;
   const search = useGlobalSearch(wantsRemote ? debounced : '', remoteType);
 
   const local = useMemo<Item[]>(() => {
@@ -63,7 +63,15 @@ export default function CommandPalette() {
         ? [{ key: 'a:ann', label: t('palette.actions.announce'), glyph: '⚡', group: 'Action' as const, run: go('/announcements') }]
         : []),
       ...(can('platform.view')
-        ? [{ key: 'a:status', label: t('palette.actions.incident'), glyph: '⚡', group: 'Action' as const, run: go('/platform/flags') }]
+        ? [
+            {
+              key: 'a:status',
+              label: t('palette.actions.incident'),
+              glyph: '⚡',
+              group: 'Action' as const,
+              run: go('/platform/flags?section=status'),
+            },
+          ]
         : []),
       { key: 'a:theme', label: t('palette.actions.theme'), glyph: '⚡', group: 'Action', run: toggleUiMode },
     ];

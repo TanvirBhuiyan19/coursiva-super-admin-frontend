@@ -11,7 +11,7 @@ export const spec = defineSpec({
       auth: 'authenticated',
       response: resource(ref('PlatformStatus')),
     },
-    { method: 'GET', path: '/badges', summary: 'Navigation badge counts', auth: 'authenticated', response: resource(ref('NavBadges')) },
+    { method: 'GET', path: '/badges', summary: 'Navigation badge counts', auth: 'support.view', response: resource(ref('NavBadges')) },
     {
       method: 'GET',
       path: '/notifications',
@@ -32,9 +32,14 @@ export const spec = defineSpec({
       path: '/search',
       summary: 'Global search (only record types the user may view; max 20)',
       auth: 'authenticated',
-      query: { q: { type: 'string' }, type: { type: 'string', enum: ['tenant', 'invoice', 'ticket', 'staff'] } },
+      description:
+        '`q` is required, 2–100 characters (422 otherwise). Tenants (name/owner/domain), invoices (number), tickets (subject, tenant name or `#number`) and staff (name/email), each only with its view permission.',
+      query: {
+        q: { type: 'string', required: true, description: '2–100 characters.' },
+        type: { type: 'string', enum: ['tenant', 'invoice', 'ticket', 'staff'] },
+      },
       response: resource(arrayOf(ref('SearchResult'))),
-      example: { query: { q: 'a' } },
+      example: { query: { q: 'am' } },
     },
   ],
 });

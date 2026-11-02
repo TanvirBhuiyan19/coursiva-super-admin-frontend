@@ -6,7 +6,8 @@ export type OverviewRange = (typeof OVERVIEW_RANGES)[number];
 /** GET /overview — platform headline numbers. Labels and colour bands are applied client-side. */
 export interface Overview {
   range: OverviewRange;
-  mrr: { value: number; deltaPct: number };
+  /** `deltaPct` is null when there was no MRR at the start of the range (no meaningful %). */
+  mrr: { value: number; deltaPct: number | null };
   tenants: { value: number; delta: number };
   students: { value: number; delta: number };
   revenueChurn: { valuePct: number; deltaPts: number };

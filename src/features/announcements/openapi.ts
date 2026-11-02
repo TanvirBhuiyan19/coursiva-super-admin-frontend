@@ -27,8 +27,10 @@ export const spec = defineSpec({
       method: 'POST',
       path: '/announcements',
       summary: 'Send an announcement',
-      description: 'Message is trimmed and must be 1–500 characters. `recipients` is the audience reach at send time.',
+      description:
+        'Message is trimmed and must be 1–500 characters. `recipients` is the audience reach at send time. Requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`). The console asks for a typed confirmation naming the reach first.',
       auth: 'announcements.send',
+      errors: [423],
       body: ref('NewAnnouncement'),
       response: resource(ref('Announcement'), 201),
       audit: { text: 'Broadcast to {audience}: "{message}"', category: 'Tenants' },

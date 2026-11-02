@@ -154,6 +154,18 @@ export const spec = defineSpec({
     },
     {
       method: 'POST',
+      path: '/governance/policies',
+      summary: 'Draft a new version of a policy document',
+      description:
+        '`doc_key` tos|dpa|aup|student_terms, `version` (≤ 20, letters/numbers/dots, new for the family), `note?` (≤ 300). One draft per family: 422 `doc_key` "This document already has a draft — publish it first."; 422 `version` when the label exists.',
+      auth: 'governance.manage',
+      body: ref('PolicyDraftInput'),
+      response: resource(ref('PolicyDocument'), 201),
+      audit: { text: 'Drafted {name} {version}', category: 'Tenants' },
+      example: { body: { doc_key: 'aup', version: 'v1.9', note: 'Clarifies AI-generated content' } },
+    },
+    {
+      method: 'POST',
       path: '/governance/policies/{id}/publish',
       summary: 'Publish a draft',
       description: 'Supersedes the family’s current Live version and opens a 30-day acceptance window. 422 unless the document is a Draft.',
@@ -202,11 +214,11 @@ export const spec = defineSpec({
       path: '/governance/abuse-signals/{id}/action',
       summary: "Apply a signal's recommended action",
       description:
-        '`raise_limit` doubles the tenant’s API per-minute limit; `freeze_checkout` blocks new card payments. 422 if already handled.',
+        '`raise_limit` doubles the tenant’s API per-minute limit; `freeze_checkout` blocks new card payments (sets the tenant’s `checkout_frozen_at`; undo with `DELETE /governance/tenants/{id}/checkout-freeze`) and requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`). 422 if already handled.',
       auth: 'governance.manage',
       path_params: id('Signal', 'as_1'),
       response: resource(ref('AbuseActionResult')),
-      errors: [422],
+      errors: [422, 423],
       audit: { text: '{action} applied to {tenant}', category: 'Security' },
       example: { params: { id: 'as_1' } },
     },

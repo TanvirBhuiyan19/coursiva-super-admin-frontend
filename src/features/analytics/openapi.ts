@@ -25,6 +25,18 @@ export const spec = defineSpec({
     },
     {
       method: 'GET',
+      path: '/analytics/live',
+      summary: 'Live usage: room minutes, sessions, attendees and peak concurrency per school',
+      description:
+        'Room minutes are the `live_room_minutes` billing meter; sessions, attendees, participant minutes and peak concurrency come from each school’s daily live rollup (measured hourly). Top 20 schools by room minutes.',
+      auth: 'analytics.view',
+      query: { period: { type: 'string', description: 'The month, `YYYY-MM` (default this month; one of the last 12).' } },
+      response: resource(ref('LiveUsage')),
+      errors: [422],
+      example: { query: { period: '2026-11' } },
+    },
+    {
+      method: 'GET',
       path: '/analytics/health',
       summary: 'Service status, job queues and email deliverability',
       auth: 'analytics.view',

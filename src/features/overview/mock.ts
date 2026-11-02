@@ -17,7 +17,7 @@ export const handlers = [
   http.get(
     route('/overview'),
     handle(({ request }) => {
-      authorize();
+      authorize('tenants.view');
       const range = (query(request).get('range') ?? '30d') as OverviewRange;
       const d = DELTAS[range] ?? DELTAS['30d'];
       const all = tenants.all();

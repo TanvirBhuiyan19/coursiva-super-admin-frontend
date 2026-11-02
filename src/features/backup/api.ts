@@ -6,6 +6,7 @@ import type {
   BackupPoint,
   BackupSettings,
   BackupSummary,
+  ExportDownload,
   ExportFormat,
   Restore,
   StageRestoreInput,
@@ -125,6 +126,19 @@ export function useUpdateBackupSettings() {
       invalidateBackup(qc);
     },
     meta: { errorToast: false },
+  });
+}
+
+/**
+ * A short-lived signed URL for a ready export (`GET /backup/exports/{id}/download`, audited). The browser then
+ * downloads the archive straight from storage. 409 while not ready or once expired.
+ */
+export function useExportDownload() {
+  return useMutation({
+    mutationFn: (exportId: string) =>
+      api.get<Resource<ExportDownload>>(`/backup/exports/${encodeURIComponent(exportId)}/download`).then((r) => r.data),
+    // The URL answers `Content-Disposition: attachment`, so opening it in this tab downloads without leaving the console.
+    onSuccess: ({ url }) => void window.open(url, '_self'),
   });
 }
 

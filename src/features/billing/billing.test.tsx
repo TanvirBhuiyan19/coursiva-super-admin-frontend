@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { api } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/errors';
 import { audit, invoices, overages, platformSettings, pricing, staff, tenants } from '@/mocks/collections';
+import { useUi } from '@/store/ui';
 import { renderApp, signInAs } from '@/test/utils';
 import { planFeatures, promoCodes } from './mock';
 
@@ -38,6 +39,29 @@ describe('revenue', () => {
     expect(await screen.findByText('No tenants in dunning — all charges healthy.')).toBeInTheDocument();
   });
 
+  it('says so when the card is declined again instead of claiming the money was collected', async () => {
+    invoices.update('in_20260818', { cardDeclines: true });
+    useUi.setState({ toasts: [] }); // toasts from earlier tests live in the UI store
+    signInAs('Owner');
+    const { user } = renderApp('/revenue');
+    const dunning = await screen.findByRole('table', { name: 'Dunning queue' });
+    await user.click(within(dunning).getByRole('button', { name: 'Retry now for Bloom Floristry Courses' }));
+    expect(
+      await screen.findByText('The card was declined again — Bloom Floristry Courses’s invoice is still past due'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/\$99 collected from Bloom Floristry Courses/)).not.toBeInTheDocument();
+    expect(invoices.find('in_20260818')).toMatchObject({ status: 'Past due', attempts: 3 });
+    expect(audited('Retried failed charge for Bloom Floristry Courses — declined again')).toBe(true);
+  });
+
+  it('labels Void and Open invoices', async () => {
+    invoices.update('in_20260818', { status: 'Void' });
+    signInAs('Owner');
+    renderApp('/revenue');
+    const table = await screen.findByRole('table', { name: 'Latest invoices' });
+    expect(await within(table).findByText('Void')).toBeInTheDocument();
+  });
+
   it('waives only after confirming', async () => {
     signInAs('Finance');
     const { user } = renderApp('/revenue');
@@ -67,12 +91,45 @@ describe('revenue', () => {
     signInAs('Owner');
     const { user } = renderApp('/revenue');
     const table = await screen.findByRole('table', { name: 'Metered overages' });
-    await user.click(within(table).getByRole('button', { name: 'Add DevPath Bootcamp video storage overage to invoice' }));
+    // Laravel sends the meter key and raw numbers; the console labels and formats them.
+    expect(within(table).getAllByText('AI credits')[0]).toBeInTheDocument();
+    expect(within(table).getByText('790,000 of 600,000')).toBeInTheDocument();
+    expect(within(table).getByText('$0.60 per 1,000')).toBeInTheDocument();
+    await user.click(within(table).getByRole('button', { name: 'Add DevPath Bootcamp ai credits overage to invoice' }));
     expect(await screen.findByText('$114 overage added to DevPath Bootcamp’s next invoice')).toBeInTheDocument();
     expect(overages.find('ov_1')!.billedAt).not.toBeNull();
     expect(await within(table).findByText('Queued')).toBeInTheDocument();
     expect(await screen.findByText('$96')).toBeInTheDocument(); // unbilled total drops
-    expect(audited('Added $114 video storage overage to DevPath Bootcamp’s next invoice')).toBe(true);
+    expect(audited('Added $114 ai credits overage to DevPath Bootcamp’s next invoice')).toBe(true);
+  });
+
+  it('leaves invoices billed by a merchant of record to the provider', async () => {
+    invoices.update('in_20260818', { provider: 'paddle' });
+    signInAs('Owner');
+    renderApp('/revenue');
+    const dunning = await screen.findByRole('table', { name: 'Dunning queue' });
+    const row = within(dunning).getByText('Bloom Floristry Courses').closest('[role="row"]') as HTMLElement;
+    expect(within(row).getByText('Billed by Paddle')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'Retry now for Bloom Floristry Courses' })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: 'Pause dunning for Bloom Floristry Courses' })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: 'Waive' })).toBeDisabled();
+    const inv = await screen.findByRole('table', { name: 'Latest invoices' });
+    await within(inv).findByText('Bloom Floristry Courses');
+    expect(within(inv).queryByRole('button', { name: /Retry charge/ })).not.toBeInTheDocument();
+    expect(within(inv).getAllByText('Billed by Paddle')).toHaveLength(2); // Bloom, and Amplify's seeded Paddle invoice
+
+    await expect(api.post('/billing/invoices/in_20260818/retry')).rejects.toMatchObject({
+      status: 422,
+      message: 'CV-20260818 is billed by Paddle, which retries it on its own schedule. Manage it in Paddle.',
+    });
+    expect(invoices.find('in_20260818')!.status).toBe('Past due');
+  });
+
+  it('refuses overage charges for schools billed through Lemon Squeezy', async () => {
+    invoices.update('in_20260801b', { provider: 'lemon_squeezy' }); // Nordic
+    signInAs('Owner');
+    await expect(api.post('/billing/overages/ov_3/bill')).rejects.toMatchObject({ status: 409 });
+    expect(overages.find('ov_3')!.billedAt).toBeNull();
   });
 
   it('highlights an invoice deep-linked from search', async () => {
@@ -143,7 +200,7 @@ describe('plans & pricing', () => {
 
   it('toggles a plan feature', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/plans');
+    const { user } = renderApp('/plans?section=features');
     const cell = await screen.findByRole('button', { name: 'SSO (SAML) on Growth' });
     expect(cell).toHaveAttribute('aria-pressed', 'false');
     await user.click(cell);
@@ -153,7 +210,7 @@ describe('plans & pricing', () => {
 
   it('creates a promo code with validation', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/plans');
+    const { user } = renderApp('/plans?section=promos');
     const code = await screen.findByLabelText('Promo code');
     await user.type(code, 'x');
     await user.click(screen.getByRole('button', { name: 'Create' }));
@@ -180,7 +237,7 @@ describe('plans & pricing', () => {
 
   it('deactivates a promo code after confirming', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/plans');
+    const { user } = renderApp('/plans?section=promos');
     const table = await screen.findByRole('table', { name: 'Active promo codes' });
     const row = within(table).getByRole('row', { name: /WINBACK50/ });
     await user.click(within(row).getByRole('button', { name: 'Deactivate' }));
@@ -191,6 +248,10 @@ describe('plans & pricing', () => {
     expect(audited('Deactivated promo code WINBACK50')).toBe(true);
   });
 });
+
+function sectionLink(name: string) {
+  return within(screen.getByRole('navigation', { name: 'Plans and pricing sections' })).getByRole('link', { name });
+}
 
 describe('billing permissions', () => {
   it('blocks roles without billing.view', async () => {
@@ -218,14 +279,33 @@ describe('billing permissions', () => {
 
   it('lets a read-only role view pricing but not change it', async () => {
     signInReadOnly();
-    renderApp('/plans');
+    const { user } = renderApp('/plans');
     expect(await screen.findByLabelText('Growth monthly price')).toHaveAttribute('readonly');
     expect(screen.queryByRole('button', { name: 'Save pricing' })).not.toBeInTheDocument();
+    await user.click(sectionLink('Promo codes'));
+    expect(await screen.findByRole('table', { name: 'Active promo codes' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'SSO (SAML) on Growth' })).toBeDisabled();
+    await user.click(sectionLink('Feature matrix'));
+    expect(await screen.findByRole('button', { name: 'SSO (SAML) on Growth' })).toBeDisabled();
     await expect(api.put('/billing/pricing', { prices: [{ plan: 'Growth', price: 1 }] })).rejects.toMatchObject({ status: 403 });
     expect(pricing.get().prices.Growth).toBe(399);
+  });
+});
+
+describe('pricing sections', () => {
+  it('keeps the section in the URL and keeps a pricing draft while another section is open', async () => {
+    signInAs('Owner');
+    const { user, router } = renderApp('/plans');
+    const growth = await screen.findByLabelText('Growth monthly price');
+    await user.clear(growth);
+    await user.type(growth, '449');
+    await user.click(sectionLink('Feature matrix'));
+    expect(router.state.location.search).toBe('?section=features');
+    expect(await screen.findByRole('button', { name: 'SSO (SAML) on Growth' })).toBeInTheDocument();
+    await router.navigate(-1);
+    expect(await screen.findByRole('button', { name: /save pricing/i })).toBeEnabled();
+    expect(screen.getByRole('textbox', { name: 'Growth monthly price' })).toHaveValue('449');
   });
 });
 

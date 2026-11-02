@@ -111,6 +111,11 @@ export function useIdleLock(limitMinutes: number, enabled = true) {
   return { state, secondsLeft, stayActive, unlock, lock };
 }
 
+/** Whether the console is idle-locked right now (also across a reload: the lock is kept in localStorage). */
+export function isIdleLocked() {
+  return !!read(LOCK_KEY);
+}
+
 /** Clears idle-lock state on sign-out so the next session starts unlocked. */
 export function resetIdleLock() {
   write(LOCK_KEY, null);

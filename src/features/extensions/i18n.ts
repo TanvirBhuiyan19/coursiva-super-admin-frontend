@@ -4,6 +4,7 @@ export const { t, useT } = defineMessages('extensions', {
   enums: {
     status: { Live: 'Live', Beta: 'Beta', Hidden: 'Hidden' },
   },
+  sections: { nav: 'Extensions sections', catalogue: 'Catalogue', bundle: 'All-access bundle', rules: 'Selling rules' },
   page: {
     screenLabel: 'Extensions and add-ons',
     catalogueTitle: 'Extension catalogue',

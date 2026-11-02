@@ -1,4 +1,4 @@
-import { Badge, Bar, Card, ErrorState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
+import { Badge, Bar, Card, CountUp, ErrorState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
 import type { Tone } from '@/lib/domain';
 import { formatDate, money, moneyCompact, monthName, num, toneDot, toneFg } from '@/lib/format';
 import { useUrlState } from '@/lib/useUrlState';
@@ -37,7 +37,7 @@ function Kpis({ r }: { r: RevenueSummary | undefined }) {
         <div key={label} className="card card--tight">
           <div className="kpi-label">{label}</div>
           <div className="kpi-value kpi-value--sm" style={{ marginTop: 4, color: tone ? toneFg(tone) : undefined }}>
-            {value}
+            <CountUp value={value} />
           </div>
         </div>
       ))}
@@ -52,7 +52,7 @@ function Movement({ r }: { r: RevenueSummary }) {
     <figure style={{ margin: 0 }}>
       <ul className="stack plain-list" style={{ gap: 12, marginTop: 6 }} aria-hidden="true">
         {r.movements.map((m) => (
-          <li key={m.kind}>
+          <li key={m.id}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 5 }}>
               <span style={{ fontWeight: 600 }}>{m.label}</span>
               <span style={{ fontWeight: 700, color: toneFg(MOVEMENT_TONE[m.kind]) }}>{signedMoney(m.amount)}</span>
@@ -68,7 +68,7 @@ function Movement({ r }: { r: RevenueSummary }) {
         <caption>{t('revenue.movement.caption', { month: monthName(r.movementMonth, 'long') })}</caption>
         <tbody>
           {r.movements.map((m) => (
-            <tr key={m.kind}>
+            <tr key={m.id}>
               <th scope="row">{m.label}</th>
               <td>{signedMoney(m.amount)}</td>
               <td>{m.detail}</td>
@@ -81,6 +81,11 @@ function Movement({ r }: { r: RevenueSummary }) {
           </tr>
         </tbody>
       </table>
+      {r.movementCount > r.movements.length && (
+        <figcaption className="t-xs muted" style={{ marginTop: 10 }}>
+          {t('revenue.movement.more', { count: r.movementCount - r.movements.length })}
+        </figcaption>
+      )}
     </figure>
   );
 }

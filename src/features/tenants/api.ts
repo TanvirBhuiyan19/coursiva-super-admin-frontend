@@ -1,10 +1,14 @@
 import { keepPreviousData, type QueryClient, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
+import { live } from '@/lib/queryClient';
 import type { Paginated, Resource } from '@/lib/api/types';
-import type { LimitKey } from '@/lib/domain';
+import type { LimitKey, Plan } from '@/lib/domain';
 import type {
   BulkTenantAction,
+  ExtendTrialInput,
   Impersonation,
+  ImpersonationInput,
+  PlanKey,
   ProvisionTenantInput,
   Tenant,
   TenantAction,
@@ -55,7 +59,9 @@ export const tenantQueries = {
     }),
 };
 
-export const useTenants = (params: TenantListParams) => useQuery({ ...tenantQueries.list(params), placeholderData: keepPreviousData });
+/** `live`: refresh every minute while visible — only for the console home's recent sign-ups. */
+export const useTenants = (params: TenantListParams, opts: { live?: boolean } = {}) =>
+  useQuery({ ...tenantQueries.list(params), placeholderData: keepPreviousData, ...(opts.live ? live : {}) });
 
 export const useTenantSummary = () => useQuery(tenantQueries.summary());
 
@@ -69,7 +75,11 @@ export const useTenant = (id: string | undefined) =>
 export function useProvisionTenant() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: ProvisionTenantInput) => api.post<Resource<Tenant>>('/tenants', input).then((r) => r.data),
+    // The form works with display names (`Launch`); the wire takes the lowercase plan key.
+    mutationFn: (input: Omit<ProvisionTenantInput, 'plan'> & { plan: Plan }) => {
+      const body: ProvisionTenantInput = { ...input, plan: input.plan.toLowerCase() as PlanKey };
+      return api.post<Resource<Tenant>>('/tenants', body).then((r) => r.data);
+    },
     onSuccess: () => invalidateTenantData(qc),
     meta: { errorToast: false },
   });
@@ -180,6 +190,33 @@ export function useTenantAction(id: string) {
   });
 }
 
+/** `DELETE /governance/tenants/{id}/checkout-freeze`: lifts the abuse queue's "Freeze checkout" (governance.manage). */
+export function useUnfreezeCheckout(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete<Resource<TenantDetail>>(`/governance/tenants/${id}/checkout-freeze`).then((r) => r.data),
+    onSuccess: (detail) => {
+      qc.setQueryData(tenantKeys.detail(id), detail);
+      invalidateTenantData(qc, id);
+    },
+  });
+}
+
+/** `POST /tenants/{id}/extend-trial` with `{ days }` (1–90). Also reopens a tenant paused for a missing card. */
+export function useExtendTrial(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (days: number) =>
+      api.post<Resource<TenantDetail>>(`/tenants/${id}/extend-trial`, { days } satisfies ExtendTrialInput).then((r) => r.data),
+    onSuccess: (detail) => {
+      qc.setQueryData(tenantKeys.detail(id), detail);
+      invalidateTenantData(qc, id);
+    },
+    // `days` / `trial` 422s show inline.
+    meta: { errorToast: false },
+  });
+}
+
 export function useTransferOwnership(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -195,8 +232,11 @@ export function useTransferOwnership(id: string) {
 export function useImpersonate(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<Resource<Impersonation>>(`/tenants/${id}/impersonate`).then((r) => r.data),
+    mutationFn: (body: ImpersonationInput = {}) =>
+      api.post<Resource<Impersonation>>(`/tenants/${id}/impersonate`, body).then((r) => r.data),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['audit'] }),
+    // The reason's 422 shows inline.
+    meta: { errorToast: false },
   });
 }
 

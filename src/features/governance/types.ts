@@ -111,6 +111,17 @@ export interface TenantStrikes {
 // ---------- Policies & terms ----------
 export type PolicyState = 'Draft' | 'Live' | 'Superseded';
 
+/** Document families the console versions (Laravel GovernanceController::POLICY_FAMILIES). */
+export const POLICY_FAMILIES = ['tos', 'dpa', 'aup', 'student_terms'] as const;
+export type PolicyFamily = (typeof POLICY_FAMILIES)[number];
+
+/** `POST /governance/policies` — a new Draft version (one draft per family; the version label must be new). */
+export interface PolicyDraftInput {
+  docKey: PolicyFamily;
+  version: string;
+  note?: string | null;
+}
+
 export interface PolicyDocument {
   id: string;
   /** Document family, e.g. `tos`, `dpa`. One Live version per family. */
@@ -118,7 +129,8 @@ export interface PolicyDocument {
   name: string;
   version: string;
   state: PolicyState;
-  note: string;
+  /** What changed in this version; null when none was given. */
+  note: string | null;
   publishedAt: string | null;
   /** End of the 30-day acceptance window (Live versions). */
   acceptanceDeadline: string | null;
@@ -155,9 +167,12 @@ export interface TenantResidency {
   name: string;
   plan: Plan;
   students: number;
+  /** Where the data is now. A requested move doesn't change it (there is no automatic cutover). */
   region: Region;
-  /** A move was scheduled and the cutover (~20 min) hasn't finished. */
+  /** A move was requested and the platform team hasn't migrated the data yet. */
   migrating: boolean;
+  /** Target of the pending move, or null. */
+  requestedRegion: Region | null;
 }
 
 export interface RegionSummary {
@@ -194,8 +209,8 @@ export interface RateLimit {
   perMinute: number;
   /** Plan default (`api_per_minute` in the plan limits). */
   defaultPerMinute: number;
-  /** Highest per-tenant rate seen today on this plan. */
-  peakPerMinute: number;
+  /** Highest per-tenant rate seen today on this plan; null = not sampled yet. */
+  peakPerMinute: number | null;
 }
 
 export interface BlockedIp {

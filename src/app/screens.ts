@@ -26,14 +26,18 @@ const S = <Id extends ScreenKey>(id: Id, permission?: Permission, path = '/' + i
 });
 
 export const SCREENS = [
-  S('overview', undefined, '/'),
+  // Tenant and revenue headline figures: the API requires tenants.view (every built-in role has it).
+  S('overview', 'tenants.view', '/'),
   S('tenants', 'tenants.view'),
   S('support', 'support.view'),
+  // Domain resale (docs/api/domains.md): registrations, /domains/tasks, /domains/orders, /domains/settings.
+  S('domains', 'tenants.view'),
   S('revenue', 'billing.view'),
   S('plans', 'billing.view'),
   S('ext', 'billing.view', '/extensions'),
   S('growth', 'analytics.view', '/analytics/growth'),
   S('usage', 'analytics.view', '/analytics/usage'),
+  S('liveusage', 'analytics.view', '/analytics/live'),
   S('health', 'analytics.view', '/analytics/health'),
   S('ai', 'analytics.view', '/analytics/ai'),
   S('exp', 'analytics.view', '/analytics/experiments'),
@@ -44,6 +48,9 @@ export const SCREENS = [
   S('abuse', 'governance.view', '/governance/abuse'),
   S('audit', 'audit.view'),
   S('flags', 'platform.view', '/platform/flags'),
+  S('connections', 'platform.view', '/platform/connections'),
+  // What schools can see at all (docs/api/platform.md#feature-availability): above plans, extensions and overrides.
+  S('availability', 'platform.view', '/platform/availability'),
   S('media', 'platform.view', '/platform/media'),
   S('deliver', 'platform.view', '/platform/deliverability'),
   S('credentials', 'platform.view', '/platform/certificates'),
@@ -54,6 +61,8 @@ export const SCREENS = [
   S('settings', 'platform.view', '/settings'),
   S('announce', 'announcements.send', '/announcements'),
   S('staff', 'staff.view'),
+  // Every signed-in member's own credentials (2FA, password); reached from the account menu, not the sidebar.
+  S('account'),
 ] as const;
 
 export type ScreenId = (typeof SCREENS)[number]['id'];
@@ -127,11 +136,16 @@ export const NAV: NavGroup[] = [
       'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8z',
       { screen: 'support' },
     ),
+    item(
+      'domains',
+      'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10',
+      { screen: 'domains' },
+    ),
   ]),
   group('business', [
     item('revenue', 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6', { subs: [sub('revenue'), sub('plans'), sub('ext')] }),
     item('analytics', 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6', {
-      subs: [sub('growth'), sub('usage'), sub('health'), sub('ai'), sub('exp')],
+      subs: [sub('growth'), sub('usage'), sub('liveusage'), sub('health'), sub('ai'), sub('exp')],
     }),
   ]),
   group('trust', [
@@ -146,6 +160,8 @@ export const NAV: NavGroup[] = [
       {
         subs: [
           sub('flags'),
+          sub('connections'),
+          sub('availability'),
           sub('media'),
           sub('deliver'),
           sub('credentials'),

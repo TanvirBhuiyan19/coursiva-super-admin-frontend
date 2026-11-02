@@ -225,6 +225,11 @@ function operation(e: EndpointDef, tag: string, feature: string) {
   if (e.path_params || e.errors?.includes(404)) responses['404'] = errorResponse('Not found.');
   if (e.errors?.includes(409)) responses['409'] = errorResponse('Conflict with the current state.');
   if (e.errors?.includes(419)) responses['419'] = errorResponse('Session or CSRF token expired.');
+  if (e.errors?.includes(423))
+    responses['423'] = errorResponse(
+      'Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry).',
+    );
+  if (e.errors?.includes(429)) responses['429'] = errorResponse('Too many attempts — throttled; retry later.');
   if (e.body || e.errors?.includes(422)) responses['422'] = errorResponse('Validation failed.', 'ValidationError');
   const opId = `${e.method.toLowerCase()}${e.path
     .replace(/\{(\w+)\}/g, 'By_$1')
@@ -238,7 +243,14 @@ function operation(e: EndpointDef, tag: string, feature: string) {
     summary: e.summary,
     ...(e.description ? { description: e.description } : {}),
     ...(params.length ? { parameters: params } : {}),
-    ...(e.body ? { requestBody: { required: true, content: { 'application/json': { schema: schemaOf(e.body, feature) } } } } : {}),
+    ...(e.body
+      ? {
+          requestBody: {
+            required: true,
+            content: { [e.bodyType === 'multipart' ? 'multipart/form-data' : 'application/json']: { schema: schemaOf(e.body, feature) } },
+          },
+        }
+      : {}),
     responses,
     security: e.auth === 'public' ? [] : [{ sanctumSession: [] }],
     ...(e.auth !== 'public' ? { 'x-permission': e.auth } : {}),
@@ -270,8 +282,11 @@ const doc = {
       'Auth is a Laravel Sanctum SPA session cookie plus the `X-XSRF-TOKEN` header. Every endpoint enforces its `x-permission`; the server writes the `x-audit` entry on success. See docs/api/README.md.',
   },
   servers: [
-    { url: 'https://api.coursiva.io/api/v1/admin', description: 'Production' },
-    { url: 'http://localhost:8000/api/v1/admin', description: 'Local Laravel' },
+    {
+      url: 'https://console.example.com/api/v1/platform',
+      description: 'Production (same origin as the console; host is deployment-specific)',
+    },
+    { url: 'http://localhost:8000/api/v1/platform', description: 'Local Laravel' },
   ],
   tags,
   paths: Object.fromEntries(Object.entries(paths).sort(([a], [b]) => a.localeCompare(b))),

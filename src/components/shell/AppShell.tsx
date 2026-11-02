@@ -1,12 +1,14 @@
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { screenForPath } from '@/app/screens';
 import { IdleLock } from '@/features/auth/IdleLock';
+import { isIdleLocked } from '@/features/auth/useIdleLock';
+import { PasswordConfirmPrompt } from '@/features/auth/PasswordConfirmPrompt';
 import { useT } from '@/features/shell/i18n';
-import { ImpersonationView, ProvisionTenantModal } from '@/features/tenants';
+import { ProvisionTenantModal } from '@/features/tenants';
 import { lazyWithPreload, whenIdle } from '@/lib/lazy';
 import { useUi } from '@/store/ui';
-import { SkeletonRows } from '../ui';
+import { SkeletonRows } from '../ui/Misc';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import Toasts from './Toasts';
@@ -22,10 +24,17 @@ export default function AppShell() {
   const cmdOpen = useUi((s) => s.cmdOpen);
   const provisionOpen = useUi((s) => s.provisionOpen);
   const mobileNav = useUi((s) => s.mobileNav);
-  const impersonating = useUi((s) => s.impersonating);
   const setUi = useUi((s) => s.set);
   const content = useRef<HTMLElement>(null);
-  const [locked, setLocked] = useState(false);
+  const [locked, setLocked] = useState(isIdleLocked);
+  // A tab that loads already locked (a reload while locked) renders no shell at all — no navigation, operator or
+  // screen data, and no screen requests — until it is unlocked. A lock that engages mid-session keeps the shell
+  // mounted (inert, covered by the lock screen) so unsaved work survives the unlock.
+  const [shellReady, setShellReady] = useState(() => !isIdleLocked());
+  const onLockedChange = useCallback((value: boolean) => {
+    setLocked(value);
+    if (!value) setShellReady(true);
+  }, []);
 
   useEffect(() => {
     whenIdle(() => {
@@ -65,6 +74,15 @@ export default function AppShell() {
     setAnnouncement(t('routeAnnouncement', { screen: screen.title }));
   }, [screen, t]);
 
+  if (!shellReady)
+    return (
+      <>
+        {/* The lock screen's own backdrop, shown until its card (needs the session) is ready. */}
+        <div className="lock-screen" aria-hidden="true" />
+        <IdleLock onLockedChange={onLockedChange} />
+      </>
+    );
+
   return (
     // While idle-locked the whole app is inert (no focus, clicks or screen-reader access) behind the lock screen.
     <div className={'shell' + (mobileNav ? ' nav-open' : '')} inert={locked}>
@@ -92,13 +110,13 @@ export default function AppShell() {
       <Suspense fallback={null}>
         {cmdOpen && <CommandPalette />}
         {provisionOpen && <ProvisionTenantModal />}
-        {impersonating && <ImpersonationView />}
       </Suspense>
       <Toasts />
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </div>
-      <IdleLock onLockedChange={setLocked} />
+      <IdleLock onLockedChange={onLockedChange} />
+      <PasswordConfirmPrompt />
     </div>
   );
 }

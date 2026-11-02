@@ -13,15 +13,19 @@ import {
   SkeletonRows,
   ToggleRow,
 } from '@/components/ui';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import { api } from '@/lib/api/client';
 import { money } from '@/lib/format';
+import { useSection } from '@/lib/useSection';
 import { toast } from '@/store/ui';
 import { useExtensionSettings, useExtensionSummary, useExtensions, useUpdateExtensionSettings } from '../api';
 import { CommitNumberInput } from '@/components/ui';
 import { ExtensionCatalogueTable } from '../components/ExtensionCatalogue';
 import { t, useT } from '../i18n';
 import { EXTENSION_TRIAL_DAYS, type ExtensionSettings, type ExtensionTrialDays } from '../types';
+
+const SECTIONS = ['catalogue', 'bundle', 'rules'] as const;
 
 const trialText = (d: number) => (d ? t('bundle.trialDays', { days: d }) : t('bundle.noTrial'));
 const trialOptions = () => EXTENSION_TRIAL_DAYS.map((d) => [String(d), trialText(d)] as const);
@@ -166,6 +170,7 @@ export default function ExtensionsPage() {
   const list = useExtensions();
   const settings = useExtensionSettings();
   const [exporting, setExporting] = useState(false);
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'catalogue');
   const rows = list.data ?? [];
   const top = [...rows].sort((a, b) => b.installs - a.installs).slice(0, 5);
   const categories = new Set(rows.map((r) => r.category)).size;
@@ -186,69 +191,81 @@ export default function ExtensionsPage() {
     <Screen max={1250} label={t('page.screenLabel')}>
       <Kpis />
 
-      {list.error ? (
-        <ErrorState error={list.error} onRetry={() => void list.refetch()} />
-      ) : (
-        <section
-          className="card table-scroll"
-          style={{ padding: '6px 18px 4px' }}
-          aria-labelledby="ext-cat-title"
-          aria-busy={list.isFetching}
-        >
-          <div className="hstack wrap" style={{ alignItems: 'baseline', gap: 10, padding: '14px 0 10px' }}>
-            <h2 id="ext-cat-title" className="card-title" style={{ flex: 'none' }}>
-              {t('page.catalogueTitle')}
-            </h2>
-            {list.data && <span className="faint t-xs">{t('page.categories', { count: categories })}</span>}
-            <div className="spacer" />
-            <button type="button" className="btn btn--sm" disabled={exporting} onClick={() => void exportCsv()}>
-              {exporting ? t('page.exporting') : t('page.exportRevenue')}
-            </button>
-          </div>
-          {list.isPending ? (
-            <SkeletonRows rows={8} h={26} />
-          ) : rows.length === 0 ? (
-            <Empty>{t('page.empty')}</Empty>
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({ id, label: t(`sections.${id}`) }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.nav')}
+        href={sectionHref}
+      >
+        <SectionPanel active={section === 'catalogue'}>
+          {list.error ? (
+            <ErrorState error={list.error} onRetry={() => void list.refetch()} />
           ) : (
-            <ExtensionCatalogueTable rows={rows} />
+            <section
+              className="card table-scroll"
+              style={{ padding: '6px 18px 4px' }}
+              aria-labelledby="ext-cat-title"
+              aria-busy={list.isFetching}
+            >
+              <div className="hstack wrap" style={{ alignItems: 'baseline', gap: 10, padding: '14px 0 10px' }}>
+                <h2 id="ext-cat-title" className="card-title" style={{ flex: 'none' }}>
+                  {t('page.catalogueTitle')}
+                </h2>
+                {list.data && <span className="faint t-xs">{t('page.categories', { count: categories })}</span>}
+                <div className="spacer" />
+                <button type="button" className="btn btn--sm" disabled={exporting} onClick={() => void exportCsv()}>
+                  {exporting ? t('page.exporting') : t('page.exportRevenue')}
+                </button>
+              </div>
+              {list.isPending ? (
+                <SkeletonRows rows={8} h={26} />
+              ) : rows.length === 0 ? (
+                <Empty>{t('page.empty')}</Empty>
+              ) : (
+                <ExtensionCatalogueTable rows={rows} />
+              )}
+            </section>
           )}
-        </section>
-      )}
 
-      <div className="grid-2">
-        <QueryState query={settings} skeleton={<Card>{<SkeletonRows rows={4} />}</Card>}>
-          {(s) => <BundleCard s={s} />}
-        </QueryState>
+          <Card title={t('page.mostInstalled')} style={{ padding: '18px 20px' }}>
+            {list.isPending ? (
+              <SkeletonRows rows={5} />
+            ) : top.length === 0 ? (
+              <Empty>{t('page.noInstalls')}</Empty>
+            ) : (
+              <ol className="plain-list">
+                {top.map((r) => (
+                  <li key={r.key} style={{ padding: '10px 0', borderBottom: '1px solid var(--bd2)', fontSize: 12.5 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                      <span className="ellipsis min0" style={{ fontWeight: 600 }}>
+                        {r.name}
+                      </span>
+                      <b className="nowrap">{money(r.mrr)}</b>
+                    </div>
+                    <Bar size="thin" value={r.attachPct} style={{ marginTop: 6, flex: 'none' }} />
+                    <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
+                      {t('page.installedTenants', { count: r.installs })} · {t('page.attach', { pct: r.attachPct })}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Card>
+        </SectionPanel>
 
-        <Card title={t('page.mostInstalled')} style={{ padding: '18px 20px' }}>
-          {list.isPending ? (
-            <SkeletonRows rows={5} />
-          ) : top.length === 0 ? (
-            <Empty>{t('page.noInstalls')}</Empty>
-          ) : (
-            <ol className="plain-list">
-              {top.map((r) => (
-                <li key={r.key} style={{ padding: '10px 0', borderBottom: '1px solid var(--bd2)', fontSize: 12.5 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
-                    <span className="ellipsis min0" style={{ fontWeight: 600 }}>
-                      {r.name}
-                    </span>
-                    <b className="nowrap">{money(r.mrr)}</b>
-                  </div>
-                  <Bar size="thin" value={r.attachPct} style={{ marginTop: 6, flex: 'none' }} />
-                  <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
-                    {t('page.installedTenants', { count: r.installs })} · {t('page.attach', { pct: r.attachPct })}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Card>
+        <SectionPanel active={section === 'bundle'}>
+          <QueryState query={settings} skeleton={<Card>{<SkeletonRows rows={4} />}</Card>}>
+            {(s) => <BundleCard s={s} />}
+          </QueryState>
+        </SectionPanel>
 
-        <QueryState query={settings} skeleton={<Card>{<SkeletonRows rows={4} />}</Card>}>
-          {(s) => <RulesCard s={s} />}
-        </QueryState>
-      </div>
+        <SectionPanel active={section === 'rules'}>
+          <QueryState query={settings} skeleton={<Card>{<SkeletonRows rows={4} />}</Card>}>
+            {(s) => <RulesCard s={s} />}
+          </QueryState>
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

@@ -147,21 +147,30 @@ option {
   background: var(--pg);
 }
 
-/* Sidebar scrollbar only appears while scrolling. */
+/* Sidebar: a slim, always-visible scrollbar on the dark nav, brighter while hovered or scrolling. */
 .sidebar ::-webkit-scrollbar {
   background: transparent;
-  width: 5px;
+  width: 6px;
 }
 .sidebar ::-webkit-scrollbar-track {
   background: transparent;
 }
 .sidebar ::-webkit-scrollbar-thumb {
-  background: transparent;
+  background: oklch(1 0 0 / 0.18);
   border: none;
   border-radius: 3px;
 }
+.sidebar ::-webkit-scrollbar-thumb:hover,
 .sidebar[data-scrolling] ::-webkit-scrollbar-thumb {
-  background: oklch(1 0 0 / 0.28);
+  background: oklch(1 0 0 / 0.34);
+}
+/* Firefox has no ::-webkit-scrollbar; Chromium ignores the webkit rules once scrollbar-* is set, so scope it. */
+@supports not selector(::-webkit-scrollbar) {
+  .sidebar,
+  .sidebar * {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(1 0 0 / 0.22) transparent;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

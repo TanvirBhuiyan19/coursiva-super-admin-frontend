@@ -8,12 +8,13 @@ import { toast } from '@/store/ui';
 import { useInvoices, useSettleInvoice } from '../api';
 import { useT } from '../i18n';
 import type { Invoice, InvoiceListParams } from '../types';
+import { ProviderTag } from './ProviderTag';
 
 const COLS = 'minmax(0,1.8fr) minmax(0,0.8fr) minmax(0,0.7fr) minmax(0,0.8fr) minmax(0,1.1fr)';
 const MIN = 460;
 const PER_PAGE = 10;
 
-const STATUS_TONE = { Paid: 'good', 'Past due': 'bad', Waived: 'flat' } as const;
+const STATUS_TONE = { Paid: 'good', 'Past due': 'bad', Waived: 'flat', Void: 'flat', Open: 'info' } as const;
 
 interface Props {
   /** Invoice id from a deep link (`/revenue?invoice=…`): its page is loaded and the row highlighted. */
@@ -45,7 +46,13 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
   const retry = (v: Invoice) =>
     settle.mutate(
       { id: v.id, action: 'retry' },
-      { onSuccess: () => toast(t('invoices.toasts.retried', { amount: money(v.amount), tenant: v.tenantName })) },
+      {
+        // A declined card answers 200 with the invoice still past due — only a Paid invoice means money came in.
+        onSuccess: (inv) =>
+          inv.status === 'Paid'
+            ? toast(t('invoices.toasts.retried', { amount: money(v.amount), tenant: v.tenantName }))
+            : toast(t('invoices.toasts.declined', { tenant: v.tenantName }), 'error'),
+      },
     );
 
   return (
@@ -83,6 +90,7 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
                   <div className="mono faint ellipsis" style={{ fontSize: 10.5 }}>
                     {v.number}
                   </div>
+                  {v.provider && <ProviderTag provider={v.provider} />}
                 </div>
                 <div role="cell" className="muted">
                   {tc(`enums.plan.${v.plan}`)}
@@ -94,7 +102,8 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
                   {formatDate(v.issuedAt)}
                 </div>
                 <div role="cell">
-                  {v.status === 'Past due' && canManage ? (
+                  {/* A merchant of record retries its own invoices: nothing to retry from here. */}
+                  {v.status === 'Past due' && canManage && !v.provider ? (
                     <button
                       type="button"
                       className="btn btn--sm btn--danger-solid"

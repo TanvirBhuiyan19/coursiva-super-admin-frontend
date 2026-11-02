@@ -69,6 +69,12 @@ describe('platform staff', () => {
     const { user } = renderApp('/staff');
     const priya = await row(/Priya Shah/);
     await user.click(within(priya).getByRole('button', { name: 'Elevate Priya Shah to Owner for 60 minutes' }));
+    // Minting Owner access names what it grants and is confirmed by typing the member's name.
+    const dialog = await screen.findByRole('dialog', { name: 'Elevate Priya Shah to Owner?' });
+    expect(dialog).toHaveTextContent('every Owner permission for 60 minutes');
+    expect(staffTables.access.find('st_priya')!.elevatedUntil).toBeNull();
+    await user.type(within(dialog).getByLabelText('Type Priya Shah to confirm'), 'Priya Shah');
+    await user.click(within(dialog).getByRole('button', { name: 'Elevate to Owner' }));
     await waitFor(() => expect(staffTables.access.find('st_priya')!.elevatedUntil).not.toBeNull());
     const until = new Date(staffTables.access.find('st_priya')!.elevatedUntil!).getTime();
     expect(until - Date.now()).toBeGreaterThan(55 * 60_000);
@@ -134,6 +140,11 @@ describe('permission matrix', () => {
     const cell = within(matrix).getByRole('button', { name: 'View billing — Support' });
     expect(cell).toHaveAttribute('aria-pressed', 'false');
     await owner.user.click(cell);
+    // One cell changes the whole role: the dialog names the members and asks for the role typed back.
+    const dialog = await screen.findByRole('dialog', { name: 'Grant “View billing” to Support?' });
+    expect(rolePermissions.get().Support).not.toContain('billing.view');
+    await owner.user.type(within(dialog).getByLabelText('Type Support to confirm'), 'support');
+    await owner.user.click(within(dialog).getByRole('button', { name: 'Grant to Support' }));
     await waitFor(() => expect(rolePermissions.get().Support).toContain('billing.view'));
     expect(audit.all().some((a) => a.action === 'Granted “View billing” to the Support role')).toBe(true);
     owner.unmount();

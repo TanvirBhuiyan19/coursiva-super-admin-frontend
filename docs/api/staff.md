@@ -66,6 +66,9 @@ Each returns `{ data: StaffMember }`; failures are `422 { errors: { staff: [...]
 | `DELETE /staff/{id}/elevation`     | —                                                                                       | `Revoked just-in-time Owner elevation for {name}`            |
 | `POST /staff/{id}/review`          | target not Invited, not self                                                            | `Confirmed {name}’s access ({role}) in the quarterly review` |
 
+`POST /staff/{id}/elevate` mints Owner access, so it needs a password confirmed in the last 15 minutes (`423 password_confirmation_required`, see [auth.md](auth.md)) in both backends; the console first
+asks for the member's name typed back in a dialog that says what Owner access includes. Revoking stays one click.
+
 Elevation expires on its own at `elevated_until`. **Backend note:** effective permissions (`/auth/me` and every `authorize()`)
 must treat an elevated member as Owner until then — see the handover notes; the mock records elevation but does not yet grant it.
 
@@ -82,3 +85,5 @@ must treat an elevated member as Owner until then — see the handover notes; th
 422 `permissions`: Owner is locked · unknown permission · removing `staff.manage` from **your own** role.
 Changes apply to every member of the role on their next request; the client refetches `/auth/me`.
 Audit, one entry per change: `Granted “{label}” to the {role} role` · `Removed “{label}” from the {role} role`.
+Needs a password confirmed in the last 15 minutes (`423 password_confirmation_required`, see [auth.md](auth.md)). The console's matrix asks for the role name typed back (the dialog names how many members it reaches)
+before a cell is granted or removed.

@@ -1,16 +1,21 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bar, Card, ConfirmButton, Dot, Empty, QueryState, Screen, SkeletonRows, Toggle, TRow } from '@/components/ui';
+import { Bar, Card, ConfirmButton, ConfirmDialog, Dot, Empty, QueryState, Screen, SkeletonRows, Toggle, TRow } from '@/components/ui';
 import { pathOf } from '@/app/screens';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
-import { PLANS, type LimitKey } from '@/lib/domain';
+import { useTenants } from '@/features/tenants/api';
+import { limitKeyOf, PLANS, type LimitKey, type Plan } from '@/lib/domain';
 import { money, num } from '@/lib/format';
 import { t as common, useT as useCommonT } from '@/lib/i18n/common';
+import { useSection } from '@/lib/useSection';
 import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
 import { useEntitlements, usePlanLimits, useResetEntitlements, useSetEntitlements } from '../api';
 import { t as msg, useT } from '../i18n';
 import type { EntitlementCell, EntitlementMatrix, EntitlementModule, PlanLimit } from '../types';
 
+const SECTIONS = ['modules', 'limits'] as const;
 const COLS = 'minmax(0,1.8fr) repeat(3, minmax(0,90px))';
 const MIN = 520;
 const TAG_STYLE = { background: 'transparent', padding: '1px 5px', flexShrink: 0 } as const;
@@ -55,18 +60,34 @@ function extensionTip(m: EntitlementModule) {
   });
 }
 
+/** How many schools a plan-wide change reaches (the directory's total for that plan), when the viewer can list schools. */
+function PlanReach({ module, plan }: { module: string; plan: Plan }) {
+  const t = useT();
+  const tc = useCommonT();
+  const list = useTenants({ plan, perPage: 1 });
+  const total = list.data?.meta.total;
+  const name = tc(`enums.plan.${plan}`);
+  return total == null
+    ? t('matrix.confirmOff.reachUnknown', { module, plan: name })
+    : t('matrix.confirmOff.reach', { count: total, module, plan: name });
+}
+
 function ModuleRow({ m }: { m: EntitlementModule }) {
   const t = useT();
   const tc = useCommonT();
   const can = useCan();
   const set = useSetEntitlements();
   const manage = can('platform.manage');
-  const toggle = (c: EntitlementCell) => {
-    const enabled = !c.enabled;
+  // Turning a module off removes it from every school on the plan at once, so it is confirmed by typing first.
+  const [turningOff, setTurningOff] = useState<EntitlementCell | null>(null);
+  const apply = (c: EntitlementCell, enabled: boolean) =>
     set.mutate([{ moduleId: m.id, plan: c.plan, enabled }], {
-      onSuccess: () => toast(t(enabled ? 'matrix.added' : 'matrix.removed', { module: m.label, plan: tc(`enums.plan.${c.plan}`) })),
+      onSuccess: () => {
+        setTurningOff(null);
+        toast(t(enabled ? 'matrix.added' : 'matrix.removed', { module: m.label, plan: tc(`enums.plan.${c.plan}`) }));
+      },
     });
-  };
+  const toggle = (c: EntitlementCell) => (c.enabled ? setTurningOff(c) : apply(c, true));
   const tip = extensionTip(m);
   return (
     <TRow cols={COLS} min={MIN} style={{ gap: 10, padding: '9px 0' }}>
@@ -95,6 +116,22 @@ function ModuleRow({ m }: { m: EntitlementModule }) {
           <span style={{ width: 5, flexShrink: 0 }}>{c.overridden && <Dot tone="warn" size={5} label={t('matrix.overridden')} />}</span>
         </div>
       ))}
+      {turningOff && (
+        <ConfirmDialog
+          title={t('matrix.confirmOff.title', { module: m.label, plan: tc(`enums.plan.${turningOff.plan}`) })}
+          phrase={m.label}
+          confirmLabel={t('matrix.confirmOff.action', { plan: tc(`enums.plan.${turningOff.plan}`) })}
+          pending={set.isPending}
+          onConfirm={() => apply(turningOff, false)}
+          onCancel={() => setTurningOff(null)}
+        >
+          {can('tenants.view') ? (
+            <PlanReach module={m.label} plan={turningOff.plan} />
+          ) : (
+            t('matrix.confirmOff.reachUnknown', { module: m.label, plan: tc(`enums.plan.${turningOff.plan}`) })
+          )}
+        </ConfirmDialog>
+      )}
     </TRow>
   );
 }
@@ -226,18 +263,21 @@ function Limits({ rows }: { rows: PlanLimit[] }) {
       </p>
       <div role="table" aria-label={t('limits.title')} style={{ marginTop: 8 }}>
         <PlanHead first={t('limits.limit')} />
-        {rows.map((r) => (
-          <TRow key={r.key} cols={COLS} min={MIN} style={{ gap: 10, padding: '10px 0' }}>
-            <div role="rowheader" style={{ fontWeight: 600 }}>
-              {t(`limits.rows.${r.key}`)}
-            </div>
-            {r.values.map((v) => (
-              <div key={v.plan} role="cell" className="muted" style={{ textAlign: 'center' }}>
-                {formatLimit(r.key, v.value)}
+        {rows.map((r) => {
+          const key = limitKeyOf(r.key);
+          return (
+            <TRow key={r.key} cols={COLS} min={MIN} style={{ gap: 10, padding: '10px 0' }}>
+              <div role="rowheader" style={{ fontWeight: 600 }}>
+                {t(`limits.rows.${key}`)}
               </div>
-            ))}
-          </TRow>
-        ))}
+              {r.values.map((v) => (
+                <div key={v.plan} role="cell" className="muted" style={{ textAlign: 'center' }}>
+                  {formatLimit(key, v.value)}
+                </div>
+              ))}
+            </TRow>
+          );
+        })}
       </div>
     </section>
   );
@@ -247,33 +287,46 @@ export default function EntitlementsPage() {
   const t = useT();
   const matrix = useEntitlements();
   const limits = usePlanLimits();
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'modules');
   return (
-    <Screen max={1000} label={t('title')}>
-      <QueryState
-        query={matrix}
-        skeleton={
-          <Card>
-            <SkeletonRows rows={12} h={20} />
-          </Card>
-        }
+    <Screen max={1120} label={t('title')}>
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({ id, label: t(`sections.${id}`) }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.nav')}
+        href={sectionHref}
       >
-        {(m) => (
-          <>
-            <Summary m={m} />
-            <Matrix m={m} />
-          </>
-        )}
-      </QueryState>
-      <QueryState
-        query={limits}
-        skeleton={
-          <Card>
-            <SkeletonRows rows={6} />
-          </Card>
-        }
-      >
-        {(rows) => <Limits rows={rows} />}
-      </QueryState>
+        <SectionPanel active={section === 'modules'}>
+          <QueryState
+            query={matrix}
+            skeleton={
+              <Card>
+                <SkeletonRows rows={12} h={20} />
+              </Card>
+            }
+          >
+            {(m) => (
+              <>
+                <Summary m={m} />
+                <Matrix m={m} />
+              </>
+            )}
+          </QueryState>
+        </SectionPanel>
+        <SectionPanel active={section === 'limits'}>
+          <QueryState
+            query={limits}
+            skeleton={
+              <Card>
+                <SkeletonRows rows={6} />
+              </Card>
+            }
+          >
+            {(rows) => <Limits rows={rows} />}
+          </QueryState>
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

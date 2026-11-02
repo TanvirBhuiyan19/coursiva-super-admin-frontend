@@ -10,7 +10,7 @@ export const { t, useT } = defineMessages('shell', {
   routeAnnouncement: '{screen} page',
   sidebar: {
     label: 'Console navigation',
-    homeLabel: 'Coursiva platform console — home',
+    homeLabel: '{name} platform console — home',
     tagline: 'Platform console',
     openTickets: { one: '{count} open ticket', other: '{count} open tickets' },
     platformOwner: 'Platform owner',
@@ -80,5 +80,11 @@ export const { t, useT } = defineMessages('shell', {
   errorBoundary: {
     title: 'This screen hit a problem',
     body: 'The error has been reported. You can try again, or use the navigation to go somewhere else.',
+  },
+  /** Route-level error page (sign-in pages and anything outside the shell). */
+  routeError: {
+    title: 'Something went wrong',
+    body: 'The error has been reported. Reload the page to try again, or go back to sign-in.',
+    toSignIn: 'Go to sign-in',
   },
 });

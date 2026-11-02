@@ -1,0 +1,594 @@
+/*
+ * Motion system. One place for how the console moves, loaded after base/ui/shell so it refines their rules.
+ *
+ * Principles (what separates "pro" from "cheap"):
+ *  - Shared tokens, not ad-hoc numbers. Small things move fast (micro 120ms), big things a little slower (320ms).
+ *  - Arrivals decelerate (ease-out), departures accelerate and are shorter; constant motion (spinners) is linear.
+ *  - Only transform and opacity animate (no layout); distances are short (4–12px) and scale starts near 1 (0.97).
+ *  - Restraint: the page arrives once, then only what the user touches responds. Nothing bounces or loops for show.
+ *  - Motion means something: arrival, change, feedback or state. No decorative hover on cards or tiles, no loops except
+ *    status indicators, no overshoot on data (the spring is only for toggles and toasts).
+ *  - prefers-reduced-motion turns all of it off (base.css + the block at the end), and the script-driven motion
+ *    (components/ui/motion.ts: exits, FLIPs, skeleton swaps, count-ups) checks it too.
+ */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1); /* expo-like deceleration: arrivals */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* departures */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* things that move from A to B (indicators) */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); /* a hint of overshoot for small pieces (toggles, toasts) */
+  --dur-micro: 120ms; /* hover, press, colour changes */
+  --dur-short: 180ms; /* menus, popovers, scrims */
+  --dur-medium: 240ms; /* modals, toasts */
+  --dur-long: 320ms; /* page arrival, drawers, sliding indicator */
+  --dur-draw: 700ms; /* meters and charts drawing in, count-ups */
+  /* State layers (Material-style): a faint wash of the content colour on hover, a little more when pressed. */
+  --state-hover: color-mix(in oklab, var(--tx) 5%, transparent);
+  --state-press: color-mix(in oklab, var(--tx) 9%, transparent);
+  --state-accent: color-mix(in oklab, var(--ac) 12%, transparent);
+  /* One elevation step for hovered raised controls (matches the card shadow family). */
+  --elev-hover: 0 1px 2px rgb(15 15 30 / 0.06), 0 3px 8px -3px rgb(15 15 30 / 0.12);
+}
+
+/* ---------- Page arrival: the screen fades up once, its blocks follow in a short cascade ---------- */
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.screen > * {
+  animation: riseIn var(--dur-long) var(--ease-out) both;
+}
+.screen > :nth-child(2) {
+  animation-delay: 40ms;
+}
+.screen > :nth-child(3) {
+  animation-delay: 80ms;
+}
+.screen > :nth-child(4) {
+  animation-delay: 120ms;
+}
+.screen > :nth-child(n + 5) {
+  animation-delay: 160ms;
+}
+/* KPI tiles cascade within their row. */
+.grid-kpi > * {
+  animation: riseIn var(--dur-long) var(--ease-out) both;
+}
+.grid-kpi > :nth-child(2) {
+  animation-delay: 50ms;
+}
+.grid-kpi > :nth-child(3) {
+  animation-delay: 100ms;
+}
+.grid-kpi > :nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+/* A section switch (tab bar) brings its panel in without replaying the whole page. */
+.sectioned-panel:not([hidden]) {
+  animation: riseIn var(--dur-medium) var(--ease-out) both;
+}
+
+/* ---------- Buttons and controls: quick colour response, a tactile press ---------- */
+.btn,
+.icon-btn,
+.menu-item,
+.sb-item,
+.sb-sub,
+.trow--click,
+.notif-row,
+.cmdk-item,
+.link {
+  transition:
+    background-color var(--dur-micro) ease,
+    color var(--dur-micro) ease,
+    border-color var(--dur-micro) ease,
+    box-shadow var(--dur-micro) ease,
+    transform var(--dur-micro) var(--ease-out);
+}
+.btn:active:not(:disabled),
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn--primary:hover:not(:disabled) {
+  box-shadow: 0 4px 14px -4px color-mix(in oklab, var(--ac) 55%, transparent);
+}
+.input,
+.select,
+textarea.input {
+  transition:
+    border-color var(--dur-micro) ease,
+    box-shadow var(--dur-short) ease;
+}
+.input:focus,
+.select:focus {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ac) 18%, transparent);
+}
+.toggle {
+  transition: background-color var(--dur-short) ease;
+}
+.toggle > span {
+  transition: transform var(--dur-medium) var(--ease-spring);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+.toggle:active:not(:disabled) > span {
+  width: 19px; /* the thumb stretches while pressed, like a native switch */
+}
+.toggle.is-on:active:not(:disabled) > span {
+  transform: translateX(13px);
+}
+
+/* ---------- Hover (interactive elements only): sliding row accents, drawn underlines ---------- */
+/* Clickable rows: a soft tint and a thin accent bar that slides in from the left edge. */
+.row--click,
+.trow--click {
+  position: relative;
+  transition: background-color var(--dur-micro) ease;
+}
+/* Padded list rows (not the support ticket list, whose flush card has its own padding) get room for the tint. */
+.row.row--click {
+  margin-inline: -10px;
+  padding-inline: 10px;
+  border-radius: 8px;
+}
+.row--click::before,
+.trow--click::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ac);
+  transform: scaleY(0);
+  transition: transform var(--dur-short) var(--ease-out);
+}
+.row--click:hover::before,
+.trow--click:hover::before {
+  transform: scaleY(1);
+}
+
+/* Text links: the underline draws in from the left instead of blinking on. */
+.link,
+.row-link {
+  text-decoration: none;
+  background-image: linear-gradient(currentColor, currentColor);
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0% 1px;
+  transition:
+    background-size var(--dur-short) var(--ease-out),
+    color var(--dur-micro) ease;
+}
+.link:hover,
+.row-link:hover {
+  background-size: 100% 1px;
+}
+
+/* Icon buttons and secondary buttons: a gentle accent tint rather than a hard border flip. */
+.icon-btn:hover {
+  background: var(--acT);
+  border-color: color-mix(in oklab, var(--ac) 45%, transparent);
+}
+.btn:not(.btn--primary, .btn--danger, .btn--danger-solid, .btn--ghost):hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--ac) 40%, var(--bd));
+  background: color-mix(in oklab, var(--ac) 4%, var(--card));
+}
+
+/* ---------- State layers for the remaining controls (interactive elements only) ---------- */
+.chip,
+.seg > button,
+.cmdk-item,
+.close-x,
+.checkbox {
+  transition:
+    background-color var(--dur-micro) ease,
+    border-color var(--dur-micro) ease,
+    color var(--dur-micro) ease,
+    box-shadow var(--dur-short) ease;
+}
+/* Secondary buttons rise one elevation step; pressing drops them back. */
+.btn:not(.btn--primary, .btn--danger, .btn--danger-solid, .btn--ghost):hover:not(:disabled) {
+  box-shadow: var(--elev-hover);
+}
+.btn:active:not(:disabled) {
+  box-shadow: none;
+}
+/* Fields: the border darkens under the pointer, so it reads as editable before you click. */
+.input:hover:not(:focus, :disabled, [readonly]),
+.select:hover:not(:focus, :disabled),
+.textarea:hover:not(:focus, :disabled, [readonly]) {
+  border-color: var(--tx4);
+}
+/* Chips and segmented choices: a state layer on the unselected ones. */
+.chip:not(.is-on):hover {
+  background: color-mix(in oklab, var(--tx) 4%, var(--card));
+}
+.seg > button:not(.is-on):hover:not(:disabled) {
+  border-color: var(--tx4);
+  background: color-mix(in oklab, var(--tx) 4%, var(--card));
+}
+.cmdk-item:not(.is-on):hover {
+  background: var(--state-hover);
+}
+/* Toggles and checkboxes: a soft halo around the control (the Material "touch target" ring). */
+.toggle {
+  transition:
+    background-color var(--dur-short) ease,
+    box-shadow var(--dur-short) ease;
+}
+.toggle:hover:not(:disabled),
+.checkbox:hover:not(:disabled) {
+  box-shadow: 0 0 0 4px var(--state-accent);
+}
+.checkbox {
+  border-radius: 4px;
+}
+/* Keyboard focus: one clear 2px ring for every control. */
+:where(.btn, .icon-btn, .chip, .seg > button, .menu-item, .cmdk-item, .toggle, .close-x, .link, .sb-item, .sb-sub):focus-visible {
+  outline: 2px solid var(--ac);
+  outline-offset: 2px;
+}
+
+/* ---------- Sidebar: smooth hover, the open group's chevron turns, sub-items fade down in place ---------- */
+.sb-chev {
+  transition: transform var(--dur-short) var(--ease-out);
+}
+@keyframes subsIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sb-subs {
+  animation: subsIn var(--dur-short) var(--ease-out) both;
+}
+.sb-sub > i {
+  transition:
+    background-color var(--dur-micro) ease,
+    transform var(--dur-short) var(--ease-out);
+}
+/* Sidebar icons lean a touch toward their label on hover. */
+.sb-item svg {
+  transition: transform var(--dur-short) var(--ease-out);
+}
+.sb-item:hover svg {
+  transform: translateX(2px);
+}
+.sb-sub:hover > i {
+  transform: scale(1.4);
+}
+
+/* ---------- Overlays: scrims fade, modals settle from slightly smaller, drawers glide, popovers drop ---------- */
+@keyframes scrimIn {
+  from {
+    opacity: 0;
+  }
+}
+.scrim {
+  animation: scrimIn var(--dur-short) ease both;
+  backdrop-filter: blur(2px);
+}
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.modal {
+  animation: modalIn var(--dur-medium) var(--ease-out) both;
+}
+@keyframes drawerSlide {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.drawer {
+  animation: drawerSlide var(--dur-long) var(--ease-out) both;
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.popover {
+  transform-origin: top right;
+  animation: popIn var(--dur-short) var(--ease-out) both;
+}
+@keyframes toastRise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.toast {
+  animation: toastRise var(--dur-medium) var(--ease-spring) both;
+}
+
+/* KPI numbers count up (CountUp.tsx); fixed-width digits keep them from jittering while they roll. */
+.kpi-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Meters (Bar, grow.ts) and columns (the MRR chart): they keep their real width/height and only the transform moves.
+   On mount they grow from the start edge / baseline; on a value change they ease from the old size (scale old/new → 1).
+   Two identical keyframe names (a/b) restart the animation on every change without remounting. */
+.fx-grow,
+.fx-grow-y {
+  --i: 0;
+  --fx-sx: var(--fx-from);
+  --fx-sy: 1;
+  transform-origin: left center;
+  animation: var(--dur-draw) var(--ease-out) 120ms both;
+}
+:root[dir='rtl'] .fx-grow {
+  transform-origin: right center;
+}
+.fx-grow-y {
+  --fx-sx: 1;
+  --fx-sy: var(--fx-from);
+  transform-origin: 50% 100%;
+  animation-delay: calc(min(var(--i), 12) * 25ms);
+}
+/* The individual `scale` property, so the intro never fights a component's own `transform`. */
+.fx-grow--a,
+.fx-grow-y--a {
+  animation-name: fxGrowA;
+}
+.fx-grow--b,
+.fx-grow-y--b {
+  animation-name: fxGrowB;
+}
+@keyframes fxGrowA {
+  from {
+    scale: var(--fx-sx) var(--fx-sy);
+  }
+}
+@keyframes fxGrowB {
+  from {
+    scale: var(--fx-sx) var(--fx-sy);
+  }
+}
+/* Below the fold, an intro waits (paused on its first frame) until it scrolls into view (motion.ts revealRef). */
+[data-fx-wait] {
+  animation-play-state: paused;
+}
+
+/* ---------- Loading: a calmer, softer shimmer ---------- */
+.skeleton {
+  animation-duration: 1.6s;
+  animation-timing-function: var(--ease-in-out);
+}
+
+/* ---------- Section tab bar: one pill slides to the active tab (Sectioned.tsx positions it) ---------- */
+.sectioned-nav ul {
+  position: relative;
+}
+.sectioned-nav .sectioned-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  border-radius: 10px;
+  background: var(--acT);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ac) 22%, transparent);
+  pointer-events: none;
+  opacity: 0;
+}
+.sectioned-nav .sectioned-indicator[data-ready] {
+  opacity: 1;
+  /* Sectioned.tsx glides it with a transform FLIP (translate + scaleX from the top-left corner). */
+  transform-origin: 0 0;
+}
+.sectioned-nav li:not(.sectioned-indicator) {
+  position: relative;
+  z-index: 1;
+}
+/* With the indicator in place, the active tab itself stays transparent so the pill can slide under it. */
+.sectioned-nav[data-indicator] .sectioned-link.is-active {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ---------- Theme switch: the whole page cross-fades (View Transitions, where supported) ---------- */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-long);
+  animation-timing-function: var(--ease-in-out);
+}
+
+/* ---------- Exits (motion.ts): the inert copy of a closing overlay plays only its scripted exit ---------- */
+.is-exiting,
+.is-exiting * {
+  animation: none !important;
+  transition: none !important;
+}
+@keyframes toastOut {
+  to {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+.toast.toast--leaving {
+  animation: toastOut calc(var(--dur-long) * 0.65) var(--ease-in) forwards;
+  pointer-events: none;
+}
+
+/* ---------- Notifications: the unread dot pops in when the count changes; the bell swings once (Header.tsx) ---------- */
+@keyframes badgeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+.notif-badge {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  display: flex;
+  animation: badgeIn var(--dur-short) var(--ease-out);
+}
+.notif-bell svg {
+  transform-origin: 50% 3px;
+}
+
+/* ---------- Live screens (overview, system status) ---------- */
+/* A row that arrived with the latest refresh slides down into place; rows already there don't move (freshRows.ts). */
+@keyframes fxFreshIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.fx-fresh {
+  --i: 0;
+  animation: fxFreshIn var(--dur-long) var(--ease-out) both;
+  animation-delay: calc(var(--i) * 40ms);
+}
+/* A value that changed in place (a KPI, a service's status): a soft accent tint under the content, fading out once. */
+.fx-flash {
+  position: relative;
+  isolation: isolate;
+}
+.fx-flash::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--acT);
+  opacity: 0;
+  pointer-events: none;
+}
+.fx-flash-a::before {
+  animation: fxFlashA 1.2s var(--ease-out);
+}
+.fx-flash-b::before {
+  animation: fxFlashB 1.2s var(--ease-out);
+}
+@keyframes fxFlashA {
+  12% {
+    opacity: 1;
+  }
+}
+@keyframes fxFlashB {
+  12% {
+    opacity: 1;
+  }
+}
+/* Live status: a slow pulse ring while live (the one allowed loop: a status indicator), a breathing dot while a refresh
+   is in flight, warning colour and still when offline or paused. */
+.live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--tx3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gDot);
+  flex-shrink: 0;
+}
+.live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--gDot);
+  opacity: 0;
+}
+.live-status[data-state='live'] .live-dot::after {
+  animation: livePulse 2.4s var(--ease-out) infinite;
+}
+.live-status[data-state='updating'] .live-dot {
+  animation: liveBreathe 1s ease-in-out infinite alternate;
+}
+.live-status:is([data-state='offline'], [data-state='paused']) {
+  color: var(--aFg);
+  font-weight: 600;
+}
+.live-status:is([data-state='offline'], [data-state='paused']) .live-dot {
+  background: var(--aDot);
+}
+@keyframes livePulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+@keyframes liveBreathe {
+  to {
+    opacity: 0.35;
+  }
+}
+@media (forced-colors: active) {
+  .live-dot {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* base.css shortens every animation; the cascade's start delays must go too, or late blocks wait invisible. */
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0ms !important;
+  }
+  /* No motion at all: entrances, intros, tints and status loops are off; final states render at once. */
+  .fx-grow,
+  .fx-grow-y,
+  .fx-fresh,
+  .fx-flash::before,
+  .notif-badge,
+  .toast.toast--leaving,
+  .live-dot,
+  .live-dot::after {
+    animation: none !important;
+  }
+  [data-fx-wait] {
+    animation-play-state: running;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}

@@ -1,11 +1,12 @@
 import type { ReactElement } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom';
 import Toasts from '@/components/shell/Toasts';
 import { routes } from '@/app/router';
 import { I18nBoundary } from '@/lib/i18n/I18nBoundary';
+import { bumpSessionEpoch } from '@/lib/api/client';
 import { createQueryClient, setActiveQueryClient } from '@/lib/queryClient';
 import { session, staff } from '@/mocks/collections';
 import type { Role } from '@/features/auth/permissions';
@@ -14,11 +15,13 @@ import type { Role } from '@/features/auth/permissions';
 export function signInAs(role: Role = 'Owner') {
   const user = staff.where((s) => s.role === role && s.status === 'Active')[0];
   if (!user) throw new Error(`No active ${role} in the mock staff table`);
-  session.patch({ userId: user.id, pendingTwoFactorUserId: null });
+  session.patch({ userId: user.id, pendingTwoFactorUserId: null, passwordConfirmedAt: new Date().toISOString() });
   return user;
 }
 
 function newClient() {
+  // Each render is a fresh page load: no request from an earlier one can end its session.
+  bumpSessionEpoch();
   const client = createQueryClient();
   client.setDefaultOptions({ queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } });
   setActiveQueryClient(client);
@@ -53,4 +56,15 @@ export function renderWithProviders(ui: ReactElement, { path = '/', routePath = 
     </QueryClientProvider>,
   );
   return { ...utils, user, router, client };
+}
+
+/**
+ * Replaces a rich text editor's content with `text` (Markdown arrives as typed characters, so `**x**` stays literal).
+ * jsdom can't drive contenteditable typing, so this selects everything and pastes, which Lexical handles natively.
+ */
+export async function fillRichText(user: UserEvent, editor: HTMLElement, text: string) {
+  await user.click(editor);
+  await user.keyboard('{Control>}a{/Control}');
+  if (text) await user.paste(text);
+  else await user.keyboard('{Delete}');
 }

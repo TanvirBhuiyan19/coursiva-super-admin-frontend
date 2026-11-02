@@ -6,6 +6,7 @@ export const SCREENS: [string, string][] = [
   ['/', 'Platform overview'],
   ['/tenants', 'Tenants'],
   ['/support', 'Support'],
+  ['/domains', 'Domains'],
   ['/revenue', 'Revenue'],
   ['/plans', 'Plans & pricing'],
   ['/extensions', 'Extensions & add-ons'],

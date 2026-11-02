@@ -6,6 +6,7 @@ import { toast } from '@/store/ui';
 import { useDunning, usePauseDunning, useSettleInvoice } from '../api';
 import { t as tBilling, useT } from '../i18n';
 import type { DunningQueue, Invoice } from '../types';
+import { ProviderTag } from './ProviderTag';
 
 const COLS = 'minmax(0,2fr) minmax(0,1fr) minmax(0,0.9fr) minmax(0,1.1fr) minmax(0,1.7fr)';
 const COLS_READONLY = 'minmax(0,2fr) minmax(0,1fr) minmax(0,0.9fr) minmax(0,1.1fr)';
@@ -31,7 +32,13 @@ export function DunningCard() {
   const retry = (v: Invoice) =>
     settle.mutate(
       { id: v.id, action: 'retry' },
-      { onSuccess: () => toast(t('dunning.toasts.collected', { amount: money(v.amount), tenant: v.tenantName })) },
+      {
+        // A declined card answers 200 with the invoice still past due — only a Paid invoice means money came in.
+        onSuccess: (inv) =>
+          inv.status === 'Paid'
+            ? toast(t('dunning.toasts.collected', { amount: money(v.amount), tenant: v.tenantName }))
+            : toast(t('invoices.toasts.declined', { tenant: v.tenantName }), 'error'),
+      },
     );
   const waive = (v: Invoice) =>
     settle.mutate(
@@ -78,10 +85,15 @@ export function DunningCard() {
           </div>
           {queue.data.items.map((v) => {
             const busy = settle.isPending && settle.variables.id === v.id;
+            // Paddle / Lemon Squeezy retry their invoices on their own schedule (the API answers 422).
+            const external = !!v.provider;
             return (
               <div key={v.id} role="row" className="trow" style={{ gridTemplateColumns: cols, minWidth: MIN }}>
-                <div role="cell" className="ellipsis" style={{ fontWeight: 600 }}>
-                  {v.tenantName}
+                <div role="cell" className="min0">
+                  <div className="ellipsis" style={{ fontWeight: 600 }}>
+                    {v.tenantName}
+                  </div>
+                  {v.provider && <ProviderTag provider={v.provider} />}
                 </div>
                 <div role="cell" className="muted">
                   {tc(`enums.plan.${v.plan}`)} · {money(v.amount)}
@@ -95,7 +107,7 @@ export function DunningCard() {
                     <button
                       type="button"
                       className="btn btn--sm btn--primary"
-                      disabled={busy}
+                      disabled={busy || external}
                       onClick={() => retry(v)}
                       aria-label={t('dunning.retryNowFor', { tenant: v.tenantName })}
                     >
@@ -104,7 +116,7 @@ export function DunningCard() {
                     <button
                       type="button"
                       className="btn btn--sm"
-                      disabled={busy}
+                      disabled={busy || external}
                       onClick={() => togglePause(v)}
                       aria-label={t(v.dunningPaused ? 'dunning.resumeFor' : 'dunning.pauseFor', { tenant: v.tenantName })}
                     >
@@ -113,7 +125,7 @@ export function DunningCard() {
                     <ConfirmButton
                       className="btn btn--sm btn--danger"
                       confirmLabel={t('dunning.confirmWaive')}
-                      disabled={busy}
+                      disabled={busy || external}
                       onConfirm={() => waive(v)}
                     >
                       {t('dunning.waive')}

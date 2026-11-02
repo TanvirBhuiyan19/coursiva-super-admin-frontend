@@ -1,4 +1,4 @@
-import { Badge, Bar, Dot, Empty, ErrorState, KpiRow, Screen, Select, Skeleton, SkeletonRows, TRow } from '@/components/ui';
+import { Badge, Bar, CountUp, Dot, Empty, ErrorState, KpiRow, Screen, Select, Skeleton, SkeletonRows, TRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import type { Region } from '@/lib/domain';
 import { num, toneDot } from '@/lib/format';
@@ -16,11 +16,13 @@ function ResidencyRow({ tenant: tn, regions }: { tenant: TenantResidency; region
   const tc = useCommonT();
   const can = useCan();
   const move = useMoveTenantRegion(tn.tenantId);
-  const value = move.pendingRegion ?? tn.region;
+  // The select shows the requested target; the dot shows where the data actually is.
+  const value = move.pendingRegion ?? tn.requestedRegion ?? tn.region;
+  const label = (region: Region) => regions.find((r) => r.region === region)?.label ?? region;
   return (
     <TRow cols={COLS} min={640} style={{ padding: '10px 0', fontSize: 12.5 }}>
       <div role="cell" className="hstack min0">
-        <Dot color={toneDot(REGION_TONE[value])} size={8} />
+        <Dot color={toneDot(REGION_TONE[tn.region])} size={8} />
         <span className="ellipsis t-strong">{tn.name}</span>
       </div>
       <div role="cell" className="muted">
@@ -36,12 +38,13 @@ function ResidencyRow({ tenant: tn, regions }: { tenant: TenantResidency; region
           style={{ width: 'auto', padding: '6px 8px', fontSize: 12 }}
           onChange={(region) => {
             if (region === tn.region) return;
-            const label = regions.find((r) => r.region === region)?.label ?? region;
-            move.move(region, () => toast(t('regions.migrateToast', { tenant: tn.name, region: label })));
+            move.move(region, () =>
+              toast(t('regions.migrateToast', { tenant: tn.name, region: label(region), current: label(tn.region) })),
+            );
           }}
         />
         {tn.migrating && !move.isPending && (
-          <Badge tone="warn" xs>
+          <Badge tone="warn" xs title={t('regions.pendingTitle', { current: label(tn.region) })}>
             {t('regions.migrating')}
           </Badge>
         )}
@@ -100,7 +103,7 @@ export default function RegionsPage() {
                   <h2 style={{ fontWeight: 700, fontSize: 13.5, flex: 1, margin: 0 }}>{r.label}</h2>
                 </div>
                 <div className="display" style={{ fontSize: 20, fontWeight: 800, marginTop: 6 }}>
-                  {t('regions.tenants', { count: r.tenants })}
+                  <CountUp value={t('regions.tenants', { count: r.tenants })} />
                 </div>
                 <Bar
                   tone={REGION_TONE[r.region]}

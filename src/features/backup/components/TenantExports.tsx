@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Card, Empty, ErrorState, Select, SkeletonRows, Toggle } from '@/components/ui';
+import { useSearchParams } from 'react-router-dom';
+import { Card, Empty, ErrorState, Select, SkeletonRows, Spinner, Toggle } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { useTenants } from '@/features/tenants/api';
 import { timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
-import { useQueueExport, useTenantExports } from '../api';
+import { useExportDownload, useQueueExport, useTenantExports } from '../api';
 import { useT } from '../i18n';
 import { EXPORT_FORMATS, type ExportFormat } from '../types';
 
@@ -38,7 +39,7 @@ function TenantExportList({ format, includeMedia }: { format: ExportFormat; incl
                 {job && (
                   <span className="t-xs faint">
                     {t('exports.jobLine', {
-                      status: job.status === 'ready' ? t('exports.ready') : t('exports.queued'),
+                      status: t(`enums.exportStatus.${job.status}`),
                       format: t(`enums.exportFormat.${job.format}`),
                       when: timeAgo(job.requestedAt),
                       name: job.requestedByName,
@@ -46,6 +47,7 @@ function TenantExportList({ format, includeMedia }: { format: ExportFormat; incl
                   </span>
                 )}
               </span>
+              {job?.status === 'ready' && can('platform.manage') && <DownloadButton exportId={job.id} tenant={tn.name} />}
               {can('platform.manage') && (
                 <button
                   type="button"
@@ -84,9 +86,58 @@ function TenantExportList({ format, includeMedia }: { format: ExportFormat; incl
   );
 }
 
+function DownloadButton({ exportId, tenant, primary }: { exportId: string; tenant: string; primary?: boolean }) {
+  const t = useT();
+  const download = useExportDownload();
+  return (
+    <button
+      type="button"
+      className={primary ? 'btn btn--primary btn--sm' : 'link'}
+      style={primary ? undefined : { fontSize: 12, marginRight: 12 }}
+      disabled={download.isPending}
+      aria-label={t('exports.downloadFor', { tenant })}
+      onClick={() => download.mutate(exportId)}
+    >
+      {download.isPending && <Spinner />} {t('exports.download')}
+    </button>
+  );
+}
+
+/**
+ * The "Your data export is ready" email links to `?section=exports&export={id}`: show that export first, with its
+ * download (a signed-in, authorised member gets a short-lived URL; the email never carries one).
+ */
+function LinkedExport({ id }: { id: string }) {
+  const t = useT();
+  const can = useCan();
+  const exportsQ = useTenantExports();
+  if (exportsQ.isPending) return <SkeletonRows rows={1} />;
+  const job = exportsQ.data?.find((e) => e.id === id);
+  return (
+    <div className="callout" role="status" style={{ display: 'block', marginTop: 10 }}>
+      {job ? (
+        <div className="hstack wrap" style={{ gap: 10, justifyContent: 'space-between' }}>
+          <span className="t-sm">
+            {t('exports.linked', {
+              tenant: job.tenantName,
+              format: t(`enums.exportFormat.${job.format}`),
+              status: t(`enums.exportStatus.${job.status}`),
+            })}
+          </span>
+          {job.status === 'ready' && can('platform.manage') && <DownloadButton exportId={job.id} tenant={job.tenantName} primary />}
+        </div>
+      ) : (
+        <span className="t-sm">{t('exports.linkedMissing')}</span>
+      )}
+    </div>
+  );
+}
+
 export function TenantExports() {
   const t = useT();
   const can = useCan();
+  const [params] = useSearchParams();
+  const linked = params.get('export');
   const [format, setFormat] = useState<ExportFormat>('json');
   const [includeMedia, setIncludeMedia] = useState(true);
   return (
@@ -94,6 +145,7 @@ export function TenantExports() {
       <p className="t-sm muted" style={{ marginTop: -4, marginBottom: 0 }}>
         {t('exports.intro')}
       </p>
+      {linked && <LinkedExport id={linked} />}
       {can('platform.manage') && (
         <div className="hstack wrap" style={{ gap: 12, marginTop: 10 }}>
           <Select

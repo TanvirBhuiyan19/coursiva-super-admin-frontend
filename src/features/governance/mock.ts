@@ -1,15 +1,30 @@
 // Mock implementation of /governance/* (what the Laravel governance controllers + policies will do).
 import { http } from 'msw';
-import { apiRateLimits, audit, dsars, tenants, type DsarRow } from '@/mocks/collections';
+import { apiRateLimits, dsars, tenants, type DsarRow } from '@/mocks/collections';
 import { ago, collection, id, singleton } from '@/mocks/db';
 import { effectiveLimits } from '@/mocks/derive';
-import { authorize, handle, invalid, noContent, notFound, ok, paginate, query, readBody, recordAudit, route } from '@/mocks/http';
+import {
+  authorize,
+  handle,
+  invalid,
+  noContent,
+  notFound,
+  ok,
+  paginate,
+  query,
+  readBody,
+  recordAudit,
+  requireRecentPassword,
+  route,
+} from '@/mocks/http';
 import { PLAN_LIMITS } from '@/mocks/reference';
 import { PLANS, REGIONS, type Plan, type Region } from '@/lib/domain';
 import { IP_ERROR, isIpOrCidr } from './ip';
 import {
+  POLICY_FAMILIES,
   RETENTION_PERIODS,
   SEVERITIES,
+  type PolicyFamily,
   type AbuseAction,
   type AbuseSignal,
   type BlockedIp,
@@ -34,7 +49,6 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const STRIKE_LIMIT = 3;
 const ACCEPTANCE_WINDOW_DAYS = 30;
-const CUTOVER_MINUTES = 20;
 
 const tenantName = (tenantId: string) => tenants.find(tenantId)?.name ?? 'Deleted tenant';
 const plusHours = (iso: string, h: number) => new Date(new Date(iso).getTime() + h * HOUR).toISOString();
@@ -175,13 +189,20 @@ export const reports = collection<ReportRow>('governanceReports', () => [
   decided('rp_h6', 'DMCA', 'tn_devpath', 'Course · “React in 30 Days”', 'Claimed code samples — found to be MIT licensed.', 60, 5, 'kept'),
 ]);
 
+const POLICY_FAMILY_NAMES: Record<PolicyFamily, string> = {
+  tos: 'Platform Terms of Service',
+  dpa: 'Data Processing Agreement',
+  aup: 'Acceptable Use Policy',
+  student_terms: 'Student Terms template',
+};
+
 export interface PolicyRow {
   id: string;
   docKey: string;
   name: string;
   version: string;
   state: PolicyState;
-  note: string;
+  note: string | null;
   publishedAt: string | null;
   acceptanceDeadline: string | null;
 }
@@ -257,9 +278,11 @@ export interface ReminderRow {
 export const reminders = collection<ReminderRow>('governancePolicyReminders', () => []);
 
 const REGION_INFO: Record<Region, { label: string; framework: string }> = {
+  // Laravel GovernanceController::REGIONS.
   EU: { label: 'EU · Frankfurt', framework: 'GDPR · Schrems II' },
-  US: { label: 'US · Virginia', framework: 'SOC 2 · CCPA' },
-  APAC: { label: 'AP · Sydney', framework: 'Australian Privacy Act' },
+  US: { label: 'US · Virginia', framework: 'CCPA · SOC 2' },
+  UK: { label: 'UK · London', framework: 'UK GDPR · DPA 2018' },
+  APAC: { label: 'APAC · Sydney', framework: 'Privacy Act 1988' },
 };
 
 export interface SignalRow {
@@ -312,7 +335,8 @@ export const signals = collection<SignalRow>('governanceAbuseSignals', () => [
 
 /** Per-plan API rate limits — the shared `apiRateLimits` table (tenant limits read it via `planLimits`). */
 export const rateLimits = apiRateLimits;
-const PEAKS: Record<Plan, number> = { Launch: 58, Growth: 211, Scale: 940 };
+/** Laravel doesn't sample per-tenant request rates yet: null = not measured (the console shows a dash). */
+const PEAKS: Record<Plan, number | null> = { Launch: null, Growth: null, Scale: null };
 
 export const blockedIps = collection<BlockedIp>('governanceBlockedIps', () => [
   { id: 'ip_1', ip: '203.0.113.42', reason: 'Credential stuffing', blockedAt: ago({ m: 5 }), blockedBy: 'System' },
@@ -389,14 +413,9 @@ function toSignal(s: SignalRow): AbuseSignal {
   };
 }
 
+/** Tenants with a pending move: there is no automatic cutover, so a request stays pending (Laravel). */
 function migratingTenants() {
-  const since = Date.now() - CUTOVER_MINUTES * 60_000;
-  return new Set(
-    audit
-      .where((a) => a.action.startsWith('Scheduled data-residency move') && new Date(a.createdAt).getTime() >= since)
-      .map((a) => a.tenantId)
-      .filter((x): x is string => !!x),
-  );
+  return new Set(tenants.where((t) => !!t.regionRequest).map((t) => t.id));
 }
 
 const SEVERITY_RANK: Record<Severity, number> = { High: 0, Medium: 1, Low: 2 };
@@ -607,12 +626,46 @@ export const handlers = [
     }),
   ),
 
+  // Laravel GovernanceController::draft.
+  http.post(
+    route('/governance/policies'),
+    handle(async ({ request }) => {
+      authorize('governance.manage');
+      const body = await readBody<Partial<{ docKey: string; version: string; note: string | null }>>(request);
+      const family = POLICY_FAMILIES.find((f) => f === body.docKey);
+      const version = (body.version ?? '').trim();
+      const errors: Record<string, string> = {};
+      if (!family) errors.docKey = 'Choose a document.';
+      if (!version || version.length > 20 || !/^[A-Za-z0-9.\- ]+$/.test(version))
+        errors.version = 'Enter a version label like v4.3 (letters, numbers, dots).';
+      if (body.note && body.note.length > 300) errors.note = 'Keep the summary under 300 characters.';
+      if (!family || Object.keys(errors).length) throw invalid(errors);
+      const docs = policies.where((p) => p.docKey === family);
+      if (docs.some((p) => p.state === 'Draft')) throw invalid({ docKey: 'This document already has a draft — publish it first.' });
+      if (docs.some((p) => p.version === version)) throw invalid({ version: `${version} already exists for this document.` });
+      const name = POLICY_FAMILY_NAMES[family];
+      const row: PolicyRow = {
+        id: id('pd'),
+        docKey: family,
+        name,
+        version,
+        state: 'Draft',
+        note: body.note?.trim() || null,
+        publishedAt: null,
+        acceptanceDeadline: null,
+      };
+      policies.insert(row);
+      recordAudit(`Drafted ${name} ${version}`, 'Tenants');
+      return ok(toPolicy(row), 201);
+    }),
+  ),
+
   http.post<Params>(
     route('/governance/policies/:id/publish'),
     handle<Params>(({ params }) => {
       authorize('governance.manage');
       const p = findOr404(policies.find(params.id), 'Document');
-      if (p.state !== 'Draft') throw invalid({ state: 'Only a draft can be published.' });
+      if (p.state !== 'Draft') throw invalid({ state: 'Only drafts can be published.' });
       const now = new Date();
       policies.where((x) => x.docKey === p.docKey && x.state === 'Live').forEach((x) => policies.update(x.id, { state: 'Superseded' }));
       policies.update(p.id, {
@@ -668,6 +721,7 @@ export const handlers = [
             students: t.students,
             region: t.region,
             migrating: migrating.has(t.id),
+            requestedRegion: t.regionRequest?.region ?? null,
           })),
         pendingMigrations: all.filter((t) => migrating.has(t.id)).length,
         subProcessors: subProcessors.all().length,
@@ -704,6 +758,9 @@ export const handlers = [
         tenants.update(t.id, { limitOverrides: { ...t.limitOverrides, apiPerMinute: next } });
         outcome = `API limit for ${t.name} raised to ${next} req/min`;
       } else if (s.action === 'freeze_checkout') {
+        // Like both backends: blocking a school's card revenue needs a recently confirmed password.
+        requireRecentPassword();
+        tenants.update(t.id, { checkoutFrozenAt: t.checkoutFrozenAt ?? new Date().toISOString() });
         outcome = `Checkout frozen for ${t.name} — new card payments are blocked until you lift it`;
       }
       signals.update(s.id, { resolvedAt: new Date().toISOString(), resolution: 'actioned' });

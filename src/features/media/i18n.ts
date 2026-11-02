@@ -2,6 +2,7 @@ import { defineMessages } from '@/lib/i18n';
 
 export const { t, useT } = defineMessages('media', {
   title: 'Video and storage',
+  sections: { nav: 'Video and storage sections', live: 'Live classes', drm: 'Video DRM', storage: 'Storage & delivery' },
   connection: {
     connected: 'Connected',
     notConnected: 'Not connected',
@@ -19,11 +20,16 @@ export const { t, useT } = defineMessages('media', {
     disconnect: 'Disconnect',
     confirmDisconnect: 'Confirm disconnect',
     updated: '{name} credentials updated and re-verified',
+    test: 'Test',
+    testing: 'Testing…',
+    testOk: '{name} accepted the credentials ({ms} ms)',
   },
   liveRooms: {
     title: 'Live classes · video providers',
     intro:
       'Tenants bring their own Zoom, Google Meet or Teams account by default. Built-in rooms are platform-hosted video that costs participant-minutes — gate them by plan.',
+    availabilityNote: 'Whether schools get built-in rooms, Zoom, Meet or Teams at all is switched in',
+    availabilityLink: 'Feature availability.',
     policyOn: '{label} — turned on',
     policyOff: '{label} — turned off',
     allowanceHeading: 'Built-in room allowance by plan',

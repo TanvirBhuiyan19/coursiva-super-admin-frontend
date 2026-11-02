@@ -1,5 +1,5 @@
 // API resources for /entitlements. These types are the contract the Laravel EntitlementResource must match.
-import type { LimitKey, Plan } from '@/lib/domain';
+import type { LimitKeyWire, Plan } from '@/lib/domain';
 
 /** One module × plan cell of the matrix. */
 export interface EntitlementCell {
@@ -43,7 +43,8 @@ export interface EntitlementCellInput {
 
 /** Plan limit row. `value` 0 = unlimited. */
 export interface PlanLimit {
-  key: LimitKey;
+  /** Snake_case value (`storage_gb`), as Laravel sends it; `limitKeyOf()` gives the app key. */
+  key: LimitKeyWire;
   values: { plan: Plan; value: number }[];
   /** Screen that owns the value when it isn't edited here (live-room minutes → Video & storage). */
   managedBy: 'media' | null;

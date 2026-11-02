@@ -2,6 +2,7 @@ import { defineMessages } from '@/lib/i18n';
 
 export const { t, useT } = defineMessages('entitlements', {
   title: 'Plan entitlements',
+  sections: { nav: 'Entitlements sections', modules: 'Modules by plan', limits: 'Limits by plan' },
   summary: {
     title: 'What each plan unlocks',
     findPlaceholder: 'Find a module…',
@@ -32,6 +33,15 @@ export const { t, useT } = defineMessages('entitlements', {
     overridden: 'Overridden from the plan default',
     added: '{module} added to {plan} — tenant dashboards update on next load',
     removed: '{module} removed from {plan} — tenant dashboards update on next load',
+    confirmOff: {
+      title: 'Turn {module} off for {plan}?',
+      reach: {
+        one: '{count} school on {plan} loses {module} right away: its menu entry and pages are blocked until it’s turned back on.',
+        other: '{count} schools on {plan} lose {module} right away: its menu entry and pages are blocked until it’s turned back on.',
+      },
+      reachUnknown: 'Every school on {plan} loses {module} right away: its menu entry and pages are blocked until it’s turned back on.',
+      action: 'Turn off for {plan}',
+    },
     tip: {
       full: '{name} · {price}/mo · {included} — {effect}',
       freeOn: 'free on {plans}',
@@ -51,8 +61,11 @@ export const { t, useT } = defineMessages('entitlements', {
       storageGb: 'Storage',
       staffSeats: 'Staff seats',
       apiPerMinute: 'API req/min',
-      liveRoomMinutes: 'Live room minutes',
+      liveRoomMinutes: 'Live room participant-minutes',
       courses: 'Courses',
+      aiCredits: 'AI credits',
+      smsCredits: 'SMS credits',
+      liveSessions: 'Live sessions at once',
     },
     perMonth: '{value}/mo',
     byoOnly: 'BYO only',

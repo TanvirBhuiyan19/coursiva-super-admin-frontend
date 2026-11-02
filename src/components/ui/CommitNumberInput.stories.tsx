@@ -5,7 +5,7 @@ import { CommitNumberInput } from './CommitNumberInput';
 const meta = {
   title: 'UI/CommitNumberInput',
   component: CommitNumberInput,
-  args: { value: 14, min: 7, max: 60, label: 'Trial length (days)', rangeMessage: '7–60 days', onCommit: () => {}, suffix: 'days' },
+  args: { value: 14, min: 0, max: 90, label: 'Trial length (days)', rangeMessage: '0–90 days', onCommit: () => {}, suffix: 'days' },
 } satisfies Meta<typeof CommitNumberInput>;
 export default meta;
 type Story = StoryObj<typeof meta>;

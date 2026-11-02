@@ -5,9 +5,28 @@ export const LIST_PRICE: Record<Plan, number> = { Launch: 99, Growth: 399, Scale
 
 /** Plan default limits (`0` = unlimited). Live-room minutes come from the live-room policy instead. */
 export const PLAN_LIMITS: Record<Plan, Omit<Limits, 'liveRoomMinutes'>> = {
-  Launch: { storageGb: 50, staffSeats: 3, apiPerMinute: 60, students: 500, courses: 5 },
-  Growth: { storageGb: 500, staffSeats: 10, apiPerMinute: 300, students: 10000, courses: 0 },
-  Scale: { storageGb: 2000, staffSeats: 25, apiPerMinute: 1000, students: 0, courses: 0 },
+  // Laravel config/coursiva.php `plans`.
+  Launch: { storageGb: 50, staffSeats: 3, apiPerMinute: 60, students: 500, courses: 5, aiCredits: 50000, smsCredits: 0, liveSessions: 1 },
+  Growth: {
+    storageGb: 500,
+    staffSeats: 10,
+    apiPerMinute: 300,
+    students: 10000,
+    courses: 0,
+    aiCredits: 600000,
+    smsCredits: 500,
+    liveSessions: 3,
+  },
+  Scale: {
+    storageGb: 2000,
+    staffSeats: 25,
+    apiPerMinute: 1000,
+    students: 0,
+    courses: 0,
+    aiCredits: 2000000,
+    smsCredits: 2000,
+    liveSessions: 10,
+  },
 };
 
 export const LIVE_ROOM_DEFAULTS: Record<Plan, number> = { Launch: 0, Growth: 2000, Scale: 10000 };
@@ -245,11 +264,8 @@ export const FEATURE_FLAGS = [
     description: 'Drag-and-drop storefront editor with 250+ blocks',
     enabled: true,
   },
-  { key: 'ai_outline', name: 'AI outline assistant', description: 'Generate course modules from a topic prompt', enabled: true },
   { key: 'multi_currency', name: 'Multi-currency checkout', description: 'EUR, GBP and BRL pricing at checkout', enabled: false },
-  { key: 'affiliates', name: 'Affiliate module', description: 'Partner links, commissions and payouts', enabled: true },
-  { key: 'pwa_apps', name: 'PWA mobile apps', description: 'Installable branded apps without app stores', enabled: false },
 ] as const;
 
 /** Flags a tenant can override individually (shown in the tenant drawer). */
-export const TENANT_OVERRIDABLE_FLAGS = ['site_builder_v2', 'ai_outline', 'multi_currency'];
+export const TENANT_OVERRIDABLE_FLAGS = ['site_builder_v2', 'multi_currency'];

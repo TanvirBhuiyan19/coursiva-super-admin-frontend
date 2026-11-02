@@ -14,6 +14,9 @@ const VENDOR_GROUPS = [
   { name: 'vendor-data', test: /node_modules[\\/](@tanstack|zustand)[\\/]/, priority: 20 },
   // Forms libraries only load with screens that have forms (not on the critical path).
   { name: 'vendor-forms', test: /node_modules[\\/](zod|react-hook-form|@hookform)[\\/]/, priority: 20 },
+  // The rich text editor (components/editor) loads lazily with the first screen that has one. Lexical's core and its
+  // add-ons (with the editor's own code) are two chunks fetched in parallel, each within the per-chunk budget.
+  { name: 'vendor-lexical-core', test: /node_modules[\\/]lexical[\\/]/, priority: 20 },
 ];
 
 /**
@@ -78,7 +81,16 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    // Opt-in: against a real API (`DEV_API_PROXY=http://127.0.0.1:8000`), /api and /sanctum are proxied on this
+    // origin, so Sanctum's cookies stay first-party and the API recognises this app by its Host header.
+    ...(process.env.DEV_API_PROXY
+      ? {
+          proxy: Object.fromEntries(['/api', '/sanctum'].map((path) => [path, { target: process.env.DEV_API_PROXY, changeOrigin: false }])),
+        }
+      : {}),
+  },
   build: {
     target: 'es2022',
     // Hidden: maps are generated for error-report symbolication but not referenced by the shipped files.

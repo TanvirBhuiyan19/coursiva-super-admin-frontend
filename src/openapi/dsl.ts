@@ -24,12 +24,12 @@ export interface ParamDef {
 }
 
 export type ResponseDef =
-  | { kind: 'resource'; schema: Schema; status?: 200 | 201 }
+  | { kind: 'resource'; schema: Schema; status?: 200 | 201 | 202 }
   | { kind: 'paginated'; schema: Schema; meta?: InlineSchema }
   | { kind: 'noContent' }
   | { kind: 'file'; mime: string; filename: string };
 
-export const resource = (schema: Schema, status: 200 | 201 = 200): ResponseDef => ({ kind: 'resource', schema, status });
+export const resource = (schema: Schema, status: 200 | 201 | 202 = 200): ResponseDef => ({ kind: 'resource', schema, status });
 export const paginated = (schema: Schema, meta?: InlineSchema): ResponseDef => ({ kind: 'paginated', schema, ...(meta ? { meta } : {}) });
 export const noContent = (): ResponseDef => ({ kind: 'noContent' });
 export const file = (mime: string, filename: string): ResponseDef => ({ kind: 'file', mime, filename });
@@ -48,9 +48,11 @@ export interface EndpointDef {
   path_params?: Record<string, ParamDef>;
   query?: Record<string, ParamDef>;
   body?: Schema;
+  /** Request body encoding (default `json`). `multipart` = `multipart/form-data` (file uploads). */
+  bodyType?: 'json' | 'multipart';
   response: ResponseDef;
   /** 422 is added automatically when there is a body; list other notable errors here. */
-  errors?: (404 | 409 | 419 | 422)[];
+  errors?: (404 | 409 | 419 | 422 | 423 | 429)[];
   /** Server-side audit entry written on success. */
   audit?: { text: string; category: AuditCategory };
   /**

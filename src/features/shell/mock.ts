@@ -1,6 +1,6 @@
 import { http } from 'msw';
 import { invoices, notifications, platformStatus, staff, tenants, tickets } from '@/mocks/collections';
-import { authorize, handle, noContent, ok, permissionsOf, query, route } from '@/mocks/http';
+import { authorize, handle, invalid, noContent, ok, permissionsOf, query, route } from '@/mocks/http';
 import type { Notification, SearchResult, SearchType } from './api';
 
 export const handlers = [
@@ -16,7 +16,7 @@ export const handlers = [
   http.get(
     route('/badges'),
     handle(() => {
-      authorize();
+      authorize('support.view');
       return ok({ support: tickets.where((t) => t.status !== 'Resolved').length });
     }),
   ),
@@ -50,7 +50,9 @@ export const handlers = [
       const perms = permissionsOf(user);
       const q = (query(request).get('q') ?? '').trim().toLowerCase();
       const type = query(request).get('type') as SearchType | undefined;
-      const match = (...s: string[]) => !q || s.some((x) => x.toLowerCase().includes(q));
+      // Laravel: `q` required, 2–100 characters.
+      if (q.length < 2) throw invalid({ q: 'The q field must be at least 2 characters.' });
+      const match = (...s: string[]) => s.some((x) => x.toLowerCase().includes(q));
       const tenantName = (id: string) => tenants.find(id)?.name ?? 'Unknown tenant';
       const out: SearchResult[] = [];
       const want = (t: SearchType) => !type || type === t;
@@ -68,8 +70,9 @@ export const handlers = [
             out.push({
               type: 'invoice',
               id: v.id,
-              label: `$${v.amount} · ${tenantName(v.tenantId)}`,
-              sublabel: `${v.number} · ${v.status}`,
+              // Laravel ConsoleHomeController::search.
+              label: v.number,
+              sublabel: `${tenantName(v.tenantId)} · $${v.amount}`,
               href: `/revenue?invoice=${v.id}`,
             }),
           );

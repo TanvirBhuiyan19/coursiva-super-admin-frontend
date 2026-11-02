@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useBackdropExit } from './motion';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -59,8 +60,10 @@ interface OverlayProps {
   width?: number;
 }
 
+/** Motion: enters with modalIn (motion.css); on close an inert copy fades and shrinks out (`exits.modal`, ./exit). */
 export function Modal({ onClose, width = 460, children, label, top }: OverlayProps & { top?: boolean }) {
   const panel = useOverlay(onClose);
+  useBackdropExit(panel, 'modal');
   return createPortal(
     // Backdrop click closes; keyboard users close with Escape (handled in useOverlay).
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
@@ -73,8 +76,10 @@ export function Modal({ onClose, width = 460, children, label, top }: OverlayPro
   );
 }
 
+/** Motion: glides in from the edge (motion.css); on close an inert copy slides back out (`exits.drawer`, ./exit). */
 export function Drawer({ onClose, width = 400, children, label }: OverlayProps) {
   const panel = useOverlay(onClose);
+  useBackdropExit(panel, 'drawer');
   return createPortal(
     // Backdrop click closes; keyboard users close with Escape (handled in useOverlay).
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions

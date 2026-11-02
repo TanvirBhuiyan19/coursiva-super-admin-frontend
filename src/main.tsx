@@ -7,6 +7,7 @@ import '@fontsource-variable/bricolage-grotesque/wght.css';
 import './styles/base.css';
 import './styles/ui.css';
 import './styles/shell.css';
+import './styles/motion.css';
 import { AppProviders } from '@/app/providers';
 import { createRouter } from '@/app/router';
 import { useUi } from '@/store/ui';

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { pathOf } from '@/app/screens';
 import { Badge, Bar, Card, ConfirmButton, Dot, Field, Select, Toggle, ToggleRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { CommitNumberInput } from '@/components/ui';
@@ -18,7 +19,7 @@ import {
   type Stat,
   type StorageSettings,
 } from '../types';
-import { ConnectionCard } from './ConnectionCard';
+import { MediaConnectionCard } from './ConnectionCard';
 
 const SUB_HEAD = {
   fontSize: 10.5,
@@ -67,7 +68,10 @@ export function LiveRoomsCard({ s }: { s: LiveRoomSettings }) {
   return (
     <Card title={t('liveRooms.title')}>
       <p className="muted t-sm" style={{ lineHeight: 1.55 }}>
-        {t('liveRooms.intro')}
+        {t('liveRooms.intro')} {t('liveRooms.availabilityNote')}{' '}
+        <Link to={pathOf('availability')} className="link">
+          {t('liveRooms.availabilityLink')}
+        </Link>
       </p>
       <div className="stack" style={{ marginTop: 8 }}>
         {s.policies.map((p) => (
@@ -302,7 +306,7 @@ export function DrmCard({ s }: { s: DrmSettings }) {
         </p>
         <div style={AUTO_GRID(240)}>
           {s.providers.map((p) => (
-            <ConnectionCard
+            <MediaConnectionCard
               key={p.key}
               kind="drm"
               badge
@@ -356,7 +360,7 @@ export function StorageCard({ s }: { s: StorageSettings }) {
       <Stats items={s.stats} />
       <div style={AUTO_GRID(300)}>
         {s.backends.map((b) => (
-          <ConnectionCard
+          <MediaConnectionCard
             key={b.key}
             kind="storage"
             connection={b}

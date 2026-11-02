@@ -7,6 +7,7 @@ import {
   extensionPrice,
   isDormant,
   lifecycleStage,
+  PAUSED_FOR_CARD,
   planLimits,
   tenantHealth,
   tenantHealthScore,
@@ -14,9 +15,22 @@ import {
   tenantMrr,
   utilization,
 } from '@/mocks/derive';
-import { authorize, handle, invalid, notFound, ok, paginate, query, readBody, recordAudit, route, sortRows } from '@/mocks/http';
+import {
+  authorize,
+  handle,
+  invalid,
+  notFound,
+  ok,
+  paginate,
+  query,
+  readBody,
+  recordAudit,
+  requireRecentPassword,
+  route,
+  sortRows,
+} from '@/mocks/http';
 import { EXTENSIONS, FEATURE_FLAGS, TENANT_OVERRIDABLE_FLAGS } from '@/mocks/reference';
-import { LIMIT_KEYS, PLANS, REGIONS, type LimitKey, type TenantStatus } from '@/lib/domain';
+import { LIMIT_KEYS, LIMIT_WIRE_KEYS, PLANS, REGIONS, type LimitKey, type TenantStatus } from '@/lib/domain';
 import type { BulkTenantAction, ProvisionTenantInput, Tenant, TenantDetail, TenantSegment, TenantUpdate } from './types';
 
 const DAY = 86_400_000;
@@ -40,7 +54,21 @@ function toTenant(t: TenantRow, viewer: StaffRow): Tenant {
     createdAt: t.createdAt,
     lastActiveAt: t.lastActiveAt,
     trialEndsAt: t.trialEndsAt,
+    suspensionReason: t.status === 'Suspended' ? (t.suspensionReason ?? 'staff') : null,
     watched: viewer.watchlist.includes(t.id),
+  };
+}
+
+/** Laravel BillingPresenter trial state, as the console's tenant detail reports it. */
+function trialOf(t: TenantRow): TenantDetail['trial'] {
+  const paused = t.status === 'Suspended' && t.suspensionReason === PAUSED_FOR_CARD;
+  const trialing = t.status === 'Trial';
+  const cardVerified = t.cardVerified ?? !(trialing || paused);
+  return {
+    cardVerified,
+    requiresCard: (trialing || paused) && !cardVerified,
+    paused,
+    trialEndsAt: trialing || paused ? t.trialEndsAt : null,
   };
 }
 
@@ -52,11 +80,18 @@ function toDetail(t: TenantRow, viewer: StaffRow): TenantDetail {
   return {
     ...toTenant(t, viewer),
     region: t.region,
+    regionRequest: t.regionRequest ?? null,
     notes: t.notes,
     storageUsedGb: Math.max(2, Math.round(t.students * 0.04)),
     seatsUsed: Math.min(1 + (t.name.length % 5), limits.staffSeats || 99),
     healthScore: tenantHealthScore(t),
-    limits: LIMIT_KEYS.map((key) => ({ key, value: limits[key], planDefault: defaults[key], overridden: t.limitOverrides[key] != null })),
+    // Laravel TenantQuota::limitsOf: the key is a snake_case *value* (`storage_gb`), never camelised by the client.
+    limits: LIMIT_KEYS.map((key) => ({
+      key: LIMIT_WIRE_KEYS[key],
+      value: limits[key],
+      planDefault: defaults[key],
+      overridden: t.limitOverrides[key] != null,
+    })),
     modules: tenantModules(t),
     extensions: EXTENSIONS.filter((e) => ['ai', 'app', 'drm', 'scorm', 'exam'].includes(e.key)).map((e) => ({
       key: e.key,
@@ -78,6 +113,8 @@ function toDetail(t: TenantRow, viewer: StaffRow): TenantDetail {
           amount: t.monthlyPrice,
           status: 'Paid' as const,
         })),
+    trial: trialOf(t),
+    checkoutFrozenAt: t.checkoutFrozenAt ?? null,
     timeline: [
       t.status === 'Past due'
         ? { at: ago({ d: 4 }), text: 'Payment failed · retry 2 of 4 scheduled' }
@@ -145,10 +182,13 @@ const TENANT_ACTIONS = [
 ] as const;
 type TenantActionName = (typeof TENANT_ACTIONS)[number];
 
-function runTenantAction(action: TenantActionName, t: TenantRow) {
+/** Default and bounds of `POST /tenants/{id}/extend-trial` → `days`. */
+export const TRIAL_EXTENSION_DAYS = 14;
+
+function runTenantAction(action: TenantActionName, t: TenantRow, body: Record<string, unknown> = {}) {
   const set = (status: TenantStatus, text: string, perm: Parameters<typeof authorize>[0]) => {
     authorize(perm);
-    tenants.update(t.id, { status });
+    tenants.update(t.id, { status, suspensionReason: status === 'Suspended' ? 'staff' : null });
     recordAudit(text, 'Tenants', t.id);
   };
   switch (action) {
@@ -161,10 +201,19 @@ function runTenantAction(action: TenantActionName, t: TenantRow) {
       break;
     case 'extend-trial': {
       authorize('tenants.manage');
-      if (t.status !== 'Trial') throw invalid({ status: 'Only tenants on a trial can be extended.' });
-      const base = t.trialEndsAt ? new Date(t.trialEndsAt).getTime() : Date.now();
-      tenants.update(t.id, { trialEndsAt: new Date(base + 14 * DAY).toISOString() });
-      recordAudit(`Extended ${t.name}'s trial by 14 days`, 'Tenants', t.id);
+      // Laravel TenantDirectoryController::extendTrial: `days` sometimes|integer|between:1,90.
+      const days = body.days ?? TRIAL_EXTENSION_DAYS;
+      if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 90)
+        throw invalid({ days: 'Extend the trial by 1 to 90 days.' });
+      const paused = t.status === 'Suspended' && t.suspensionReason === PAUSED_FOR_CARD;
+      if (t.status !== 'Trial' && !paused) throw invalid({ trial: `${t.name} is not on a trial.` });
+      // A paused school gets a new trial of `days` from now and reopens; a running trial is pushed back.
+      const base = !paused && t.trialEndsAt ? new Date(t.trialEndsAt).getTime() : Date.now();
+      tenants.update(t.id, {
+        trialEndsAt: new Date(base + days * DAY).toISOString(),
+        ...(paused ? { status: 'Trial' as const, suspensionReason: null } : {}),
+      });
+      recordAudit(`Extended ${t.name}'s trial by ${days} days`, 'Billing', t.id);
       break;
     }
     case 'export':
@@ -173,6 +222,7 @@ function runTenantAction(action: TenantActionName, t: TenantRow) {
       break;
     case 'purge':
       authorize('tenants.purge');
+      requireRecentPassword();
       recordAudit(`Scheduled data purge for ${t.name} (30-day grace period)`, 'Security', t.id);
       break;
     case 'revoke-sessions':
@@ -233,12 +283,24 @@ export const handlers = [
     route('/tenants/export'),
     handle(({ request }) => {
       const viewer = authorize('tenants.view');
-      const rows = filtered(request, viewer);
-      const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+      // `ids` (comma-separated): only the rows selected in the directory (bulk bar → Export CSV).
+      const ids = query(request).get('ids')?.split(',').filter(Boolean);
+      const rows = filtered(request, viewer)
+        .filter((t) => !ids || ids.includes(t.id))
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)); // Laravel: name, id
+      const esc = (v: string | number | null) => {
+        const s = String(v ?? '');
+        // Spreadsheet formula injection: neutralise a leading = + - @ (Laravel does the same).
+        return `"${(/^[=+\-@]/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`;
+      };
+      // Laravel TenantDirectoryController::export columns.
+      const header = ['id', 'name', 'domain', 'owner_name', 'owner_email', 'plan', 'status', 'students', 'mrr', 'health'];
       const csv = [
-        ['Name', 'Domain', 'Owner', 'Owner email', 'Plan', 'Status', 'Students', 'MRR', 'Health', 'Created'].map(esc).join(','),
-        ...rows.map((t) =>
-          [
+        [...header, 'health_reason', 'utilization', 'stage', 'created_at', 'last_active_at'].join(','),
+        ...rows.map((row) => {
+          const t = toTenant(row, viewer);
+          return [
+            t.id,
             t.name,
             t.domain,
             t.ownerName,
@@ -246,13 +308,17 @@ export const handlers = [
             t.plan,
             t.status,
             t.students,
-            tenantMrr(t),
-            tenantHealth(t).health,
-            t.createdAt.slice(0, 10),
+            t.mrr,
+            t.health,
+            t.healthReason,
+            t.utilization,
+            t.stage,
+            t.createdAt,
+            t.lastActiveAt,
           ]
             .map(esc)
-            .join(','),
-        ),
+            .join(',');
+        }),
       ].join('\n');
       recordAudit(`Exported ${rows.length} tenants to CSV`, 'Tenants');
       return new HttpResponse(csv, {
@@ -265,7 +331,9 @@ export const handlers = [
     route('/tenants'),
     handle(async ({ request }) => {
       authorize('tenants.manage');
-      const body = await readBody<ProvisionTenantInput>(request);
+      const body = await readBody<Omit<ProvisionTenantInput, 'plan'> & { plan?: unknown }>(request);
+      // Laravel accepts the plan case-insensitively (`growth` or `Growth`).
+      const plan = PLANS.find((p) => typeof body.plan === 'string' && p.toLowerCase() === body.plan.trim().toLowerCase());
       const name = (body.name ?? '').trim();
       const email = (body.ownerEmail ?? '').trim().toLowerCase();
       const errors: Record<string, string> = {};
@@ -273,25 +341,29 @@ export const handlers = [
       else if (tenants.where((t) => t.name.toLowerCase() === name.toLowerCase()).length)
         errors.name = 'A tenant with this name already exists.';
       if (!isEmail(email)) errors.ownerEmail = 'The owner email must be a valid email address.';
-      if (!PLANS.includes(body.plan)) errors.plan = 'The selected plan is invalid.';
-      if (Object.keys(errors).length) throw invalid(errors);
-      const base = slug(name).replace(/-/g, '').slice(0, 24) || 'school';
+      if (!plan) errors.plan = 'The selected plan is invalid.';
+      if (!plan || Object.keys(errors).length) throw invalid(errors);
+      // Laravel TenantRules::slugFrom: hyphenated, at most 40 characters.
+      const base = slug(name).slice(0, 40).replace(/-+$/g, '') || 'school';
       const domain = `${base}.${platformSettings.get().primaryDomain}`;
       if (tenants.where((t) => t.domain === domain).length) throw invalid({ name: 'That subdomain is taken — try a different name.' });
       const now = new Date();
+      const { trialDays } = platformSettings.get();
       const row: TenantRow = {
         id: id('tn'),
         name,
         domain,
         ownerName: ownerNameFrom(email),
         ownerEmail: email,
-        plan: body.plan,
-        monthlyPrice: pricing.get().prices[body.plan],
+        plan,
+        monthlyPrice: pricing.get().prices[plan],
         students: 0,
-        status: 'Trial',
+        // trial_days 0 = no free trial: the first period is invoiced at once. A console-created school has no card
+        // yet, so that charge can't be taken: Past due, and dunning follows (retries, then suspension `billing`).
+        status: trialDays > 0 ? 'Trial' : 'Past due',
         createdAt: now.toISOString(),
         lastActiveAt: now.toISOString(),
-        trialEndsAt: new Date(now.getTime() + platformSettings.get().trialDays * DAY).toISOString(),
+        trialEndsAt: trialDays > 0 ? new Date(now.getTime() + trialDays * DAY).toISOString() : null,
         region: 'EU',
         notes: null,
         limitOverrides: {},
@@ -301,7 +373,20 @@ export const handlers = [
         paidExtensions: [],
       };
       tenants.insert(row);
-      recordAudit(`Provisioned tenant "${name}" on ${body.plan}`, 'Tenants', row.id);
+      if (trialDays === 0)
+        invoices.insert({
+          id: id('in'),
+          number: `CV-${row.id.slice(3, 11).toUpperCase()}`,
+          tenantId: row.id,
+          plan,
+          amount: row.monthlyPrice,
+          issuedAt: now.toISOString(),
+          status: 'Past due',
+          attempts: 1,
+          nextRetryAt: new Date(now.getTime() + DAY).toISOString(),
+          dunningPaused: false,
+        });
+      recordAudit(`Provisioned tenant "${name}" on ${plan}`, 'Tenants', row.id);
       return ok(toTenant(row, authorize()), 201);
     }),
   ),
@@ -310,11 +395,14 @@ export const handlers = [
     route('/tenants/bulk'),
     handle(async ({ request }) => {
       const { action, ids } = await readBody<{ action: BulkTenantAction; ids: string[] }>(request);
-      const viewer = authorize(action === 'suspend' ? 'tenants.suspend' : 'tenants.view');
+      // Like Laravel: full data exports need tenants.manage (same as the single-tenant export).
+      const viewer = authorize(action === 'suspend' ? 'tenants.suspend' : action === 'export' ? 'tenants.manage' : 'tenants.view');
+      // Like both backends: suspending up to 200 schools at once needs a recently confirmed password.
+      if (action === 'suspend') requireRecentPassword();
       const rows = (ids ?? []).map((i) => tenants.find(i)).filter((t): t is TenantRow => !!t);
       if (!rows.length) throw invalid({ ids: 'Select at least one tenant.' });
       if (action === 'suspend') {
-        rows.forEach((t) => tenants.update(t.id, { status: 'Suspended' }));
+        rows.forEach((t) => tenants.update(t.id, { status: 'Suspended', suspensionReason: 'staff' }));
         recordAudit(`Suspended ${rows.length} tenants in bulk`, 'Tenants');
       } else if (action === 'watch') {
         staff.update(viewer.id, { watchlist: [...new Set([...viewer.watchlist, ...rows.map((t) => t.id)])] });
@@ -333,6 +421,7 @@ export const handlers = [
       const errors: Record<string, string> = {};
       if (!body.subject?.trim()) errors.subject = 'Add a subject line.';
       if (!body.body?.trim()) errors.body = 'Write a message.';
+      else if (body.body.length > 10_000) errors.body = 'Keep the message under 10,000 characters.';
       if (!body.ids?.length) errors.ids = 'Select at least one tenant.';
       if (Object.keys(errors).length) throw invalid(errors);
       recordAudit(`Emailed ${body.ids.length} tenant owner${body.ids.length > 1 ? 's' : ''}: "${body.subject.trim()}"`, 'Tenants');
@@ -362,7 +451,10 @@ export const handlers = [
         if (!REGIONS.includes(body.region)) throw invalid({ region: 'The selected region is invalid.' });
         if (body.region !== t.region) {
           recordAudit(`Scheduled data-residency move for ${t.name}: ${t.region} → ${body.region}`, 'Security', t.id);
-          tenants.update(t.id, { region: body.region });
+          // Laravel: a request (`region_request`), not a field edit — `region` changes only once the data is migrated.
+          tenants.update(t.id, {
+            regionRequest: { region: body.region, requestedAt: new Date().toISOString(), requestedBy: 'Coursiva staff' },
+          });
         }
       }
       if (body.notes !== undefined) {
@@ -465,6 +557,20 @@ export const handlers = [
     }),
   ),
 
+  // Lifts the abuse queue's "Freeze checkout" (Laravel GovernanceController::unfreezeCheckout). Not frozen = no-op.
+  http.delete<Params>(
+    route('/governance/tenants/:id/checkout-freeze'),
+    handle<Params>(({ params }) => {
+      const viewer = authorize('governance.manage');
+      const t = findTenant(params.id);
+      if (t.checkoutFrozenAt) {
+        tenants.update(t.id, { checkoutFrozenAt: null });
+        recordAudit(`Unfroze checkout for ${t.name} — new card payments allowed again`, 'Security', t.id);
+      }
+      return ok(toDetail(tenants.find(t.id)!, viewer));
+    }),
+  ),
+
   http.post<Params>(
     route('/tenants/:id/watch'),
     handle<Params>(({ params }) => {
@@ -502,14 +608,21 @@ export const handlers = [
 
   http.post<Params>(
     route('/tenants/:id/impersonate'),
-    handle<Params>(({ params }) => {
+    handle<Params>(async ({ request, params }) => {
       authorize('tenants.impersonate');
+      requireRecentPassword();
       const t = findTenant(params.id);
-      recordAudit(`Signed in as owner of ${t.name} (read-only)`, 'Security', t.id);
+      const { reason: raw } = await readBody<{ reason?: unknown }>(request);
+      const reason = typeof raw === 'string' ? raw.trim() : '';
+      const { impersonationRequiresReason, impersonationMaxMinutes } = platformSettings.get();
+      if ((reason === '' && impersonationRequiresReason) || (reason !== '' && (reason.length < 5 || reason.length > 300)))
+        throw invalid({ reason: 'Give a reason for signing in as this tenant (5–300 characters).' });
+      recordAudit(`Signed in as owner of ${t.name} (read-only)${reason ? ` — reason: ${reason}` : ''}`, 'Security', t.id);
       return ok({
         tenantId: t.id,
-        url: `https://${t.domain}/admin?impersonation=mock`,
-        expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
+        // Laravel: `{coursiva.urls.tenant_admin}/auth/handoff?token=…` (single-use, short-lived handoff token).
+        url: `https://app.example.com/auth/handoff?token=${id('hof')}`,
+        expiresAt: new Date(Date.now() + impersonationMaxMinutes * 60_000).toISOString(),
       });
     }),
   ),
@@ -518,9 +631,9 @@ export const handlers = [
   ...TENANT_ACTIONS.map((action) =>
     http.post<Params>(
       route(`/tenants/:id/${action}`),
-      handle<Params>(({ params }) => {
+      handle<Params>(async ({ params, request }) => {
         const t = findTenant(params.id);
-        runTenantAction(action, t);
+        runTenantAction(action, t, action === 'extend-trial' ? await readBody<Record<string, unknown>>(request).catch(() => ({})) : {});
         return ok(toDetail(t, authorize()));
       }),
     ),

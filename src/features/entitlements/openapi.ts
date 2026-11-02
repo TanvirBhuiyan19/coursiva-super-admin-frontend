@@ -25,8 +25,9 @@ export const spec = defineSpec({
       path: '/entitlements',
       summary: 'Set module × plan cells',
       description:
-        'A value equal to the plan default removes the override. Core modules cannot be changed (422). Validation errors are keyed `cells.{i}.module_id` / `.plan` / `.enabled`.',
+        'A value equal to the plan default removes the override. Core modules cannot be changed (422). Validation errors are keyed `cells.{i}.module_id` / `.plan` / `.enabled`. A request that turns any cell off (removes a module from every school on the plan) requires a password confirmed in the last 15 minutes (423 `password_confirmation_required`); turning modules on does not.',
       auth: 'platform.manage',
+      errors: [423],
       body: {
         type: 'object',
         required: ['cells'],

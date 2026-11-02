@@ -3,11 +3,15 @@ import { defineSpec, ref, resource, type ParamDef } from '@/openapi/dsl';
 const providerKey: Record<string, ParamDef> = {
   key: { type: 'string', enum: ['mux', 'ezdrm', 'keyos'], description: 'DRM provider connection.' },
 };
+const muxDescription =
+  ' Mux fields: `token_id`, `token_secret`, `signing_key_id` (letters/digits), `signing_private_key` (required secret, one line of up to 8,192 characters — other fields 500: the base64 RSA private key Mux shows once when the signing key is created, a pasted PEM also works; signs every playback URL), `webhook_secret` (optional secret of the Mux webhook endpoint `{API}/api/v1/webhooks/mux`, events `video.asset.*`), `drm_configuration_id` (optional, letters/digits; turns on Mux DRM). Optional fields may stay blank.';
 const backendKey: Record<string, ParamDef> = {
-  key: { type: 'string', enum: ['r2', 's3'], description: 'Storage backend connection.' },
+  key: { type: 'string', enum: ['r2', 's3', 'public_assets'], description: 'Storage backend connection.' },
 };
+const publicAssetsDescription =
+  ' `public_assets` (role "Public images"): the bucket public images are served from (school logos, course covers, product thumbnails, the platform’s brand images). Fields: `provider` (switch `r2` | `s3`, default `r2`), `account_id` (R2, 32 hex) or `region` (S3) — the provider’s one is required (422 `credentials.account_id` / `credentials.region`), `access_key_id`, `secret_access_key`, `bucket`, `public_url` (https base URL serving the bucket, no query), `acl` (switch `none` | `public-read`, default `none`). Verified by writing, reading, fetching through `public_url` and deleting a probe file.';
 const credentialsDescription =
-  'Send new values for any fields; omitted or blank fields keep their stored value. Every field must end up set (422 `credentials.{field}`). Credentials are stored server-side and never returned — responses carry `configured` + `last4`.';
+  'Send new values for any fields; omitted or blank fields keep their stored value. Every required field must end up set (422 `credentials.{field}`). Credentials are stored server-side and never returned — responses carry `configured` + `last4`.';
 
 export const spec = defineSpec({
   tag: 'Media',
@@ -72,12 +76,12 @@ export const spec = defineSpec({
       method: 'PUT',
       path: '/media/drm/providers/{key}',
       summary: 'Connect a DRM provider or update its credentials',
-      description: credentialsDescription,
+      description: credentialsDescription + muxDescription,
       auth: 'platform.manage',
       path_params: providerKey,
       body: ref('CredentialsInput'),
       response: resource(ref('Connection')),
-      errors: [404, 422],
+      errors: [404, 422, 423],
       audit: { text: 'Connected DRM provider {name} / Updated credentials for DRM provider {name}', category: 'Security' },
       example: {
         params: { key: 'keyos' },
@@ -96,7 +100,7 @@ export const spec = defineSpec({
       auth: 'platform.manage',
       path_params: providerKey,
       response: resource(ref('Connection')),
-      errors: [404],
+      errors: [404, 423],
       audit: { text: 'Disconnected DRM provider {name}', category: 'Security' },
       example: { params: { key: 'mux' } },
     },
@@ -126,12 +130,12 @@ export const spec = defineSpec({
       method: 'PUT',
       path: '/media/storage/backends/{key}',
       summary: 'Connect a storage backend or update its credentials',
-      description: credentialsDescription,
+      description: credentialsDescription + publicAssetsDescription,
       auth: 'platform.manage',
       path_params: backendKey,
       body: ref('CredentialsInput'),
       response: resource(ref('Connection')),
-      errors: [404, 422],
+      errors: [404, 422, 423],
       audit: { text: 'Connected storage backend {name} / Updated credentials for storage backend {name}', category: 'Security' },
       example: { params: { key: 's3' }, body: { credentials: [{ field: 'region', value: 'eu-central-1' }] } },
     },
@@ -142,7 +146,7 @@ export const spec = defineSpec({
       auth: 'platform.manage',
       path_params: backendKey,
       response: resource(ref('Connection')),
-      errors: [404],
+      errors: [404, 423],
       audit: { text: 'Disconnected storage backend {name}', category: 'Security' },
       example: { params: { key: 'r2' } },
     },

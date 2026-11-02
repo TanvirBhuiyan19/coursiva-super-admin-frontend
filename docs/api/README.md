@@ -27,10 +27,12 @@ npm run openapi:check   # CI: fails if the committed spec is stale
 ## Base URL
 
 ```
-{VITE_API_URL}{VITE_API_PREFIX}      e.g. https://api.coursiva.io/api/v1/admin
+{VITE_API_URL}{VITE_API_PREFIX}      production: same origin + /api/v1/platform, e.g. https://console.example.com/api/v1/platform
 ```
 
-All paths below are relative to that prefix.
+All paths below are relative to that prefix. The console's nginx proxies `/api` and `/sanctum` to Laravel on the
+console's own origin (`deploy/nginx.conf`), so `VITE_API_URL` is empty in production and the session cookie is
+first-party. The mock API (MSW) mounts on the same prefix. Hosts are deployment-specific (`deploy/hosts.conf`).
 
 ## Authentication — Laravel Sanctum (SPA, cookie based)
 
@@ -38,10 +40,15 @@ All paths below are relative to that prefix.
    The client calls it once before the first state-changing request.
 2. Every request sends `credentials: include`, `Accept: application/json`, `X-Requested-With: XMLHttpRequest`
    and `X-XSRF-TOKEN` (read from the cookie).
-3. Sessions are server-side. `401` or `419` anywhere ends the client session and shows the login page.
+3. Sessions are server-side. `401` anywhere ends the client session and shows the login page. A `419` (CSRF token
+   mismatch: rotated by a sign-in in another tab, or expired with the page left open) first refreshes the CSRF cookie
+   and retries the request once; only a second `419` ends the session. Every sign-in and sign-out (including an expired
+   session) drops the query cache (public branding excepted), so the next person never sees the previous one's data, and
+   is announced to the browser's other tabs (BroadcastChannel, `storage` events as fallback), which sign out or reload
+   the new session with it.
 
-Configure `SANCTUM_STATEFUL_DOMAINS` and `SESSION_DOMAIN` for the console's domain, and CORS with
-`supports_credentials: true`.
+Laravel picks the console's session stack from the Host header (`SUPER_ADMIN_URL`), not from Sanctum's stateful
+domains: keep `SESSION_DOMAIN` empty (host-only cookies) and serve the API same-origin; no CORS entry is needed.
 
 See [auth.md](auth.md) for login and two-factor authentication.
 
@@ -94,6 +101,7 @@ other roles' permissions are editable from the Staff screen.
 | [governance.md](governance.md)       | `/governance/*` — privacy, moderation, policies, residency, abuse                             |
 | [platform.md](platform.md)           | `/platform/*` — flags, incidents, deliverability, certificates, standards, API keys, webhooks |
 | [backup.md](backup.md)               | `/backup/*`                                                                                   |
+| [domains.md](domains.md)             | `/domains/*` — domain resale: settings, registrations, registrar tasks, orders                |
 | [settings.md](settings.md)           | `/settings/*`                                                                                 |
 | [staff.md](staff.md)                 | `/staff/*`                                                                                    |
 | [telemetry.md](telemetry.md)         | Web Vitals beacon (real-user monitoring)                                                      |

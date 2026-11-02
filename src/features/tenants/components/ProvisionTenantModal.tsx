@@ -7,6 +7,8 @@ import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast, useUi } from '@/store/ui';
 import { useState } from 'react';
 import { useT as useCommonT } from '@/lib/i18n/common';
+import { useCan } from '@/features/auth/useCan';
+import { usePlatformSettings } from '@/features/settings/api';
 import { useProvisionTenant } from '../api';
 import { t as msg, useT } from '../i18n';
 
@@ -30,14 +32,19 @@ export function ProvisionTenantModal() {
   const [formError, setFormError] = useState<string | null>(null);
   const name = form.watch('name');
   const plan = form.watch('plan');
-  const slug =
-    (name.trim()
-      ? name
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '')
-          .slice(0, 24)
-      : 'yourschool') + '.coursiva.io';
+  // The address Laravel will derive (TenantRules::slugFrom) on the platform's configured root domain — never a
+  // hard-coded host. Without access to platform settings the root shows as a placeholder.
+  const can = useCan();
+  const root = usePlatformSettings({ enabled: can('platform.view') }).data?.primaryDomain;
+  const derived = name
+    .trim()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, '');
+  const slug = `${derived || t('provision.slugPlaceholder')}.${root ?? t('provision.rootPlaceholder')}`;
 
   const onSubmit = form.handleSubmit((values) => {
     setFormError(null);

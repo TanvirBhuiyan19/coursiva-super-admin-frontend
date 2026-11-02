@@ -1,24 +1,117 @@
-import { Badge, Card, ConfirmButton, Empty, ErrorState, KpiRow, QueryState, Screen, Select, Skeleton, SkeletonRows } from '@/components/ui';
+import { useState, type SyntheticEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Badge,
+  Card,
+  ConfirmButton,
+  Empty,
+  ErrorState,
+  Field,
+  Input,
+  KpiRow,
+  QueryState,
+  Screen,
+  Select,
+  Skeleton,
+  SkeletonRows,
+  Spinner,
+} from '@/components/ui';
+import { ApiError, errorMessage } from '@/lib/api/errors';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import type { Tone } from '@/lib/domain';
 import { daysUntil, formatDate, formatDateTime, formatMonth, pct, timeAgo } from '@/lib/format';
+import { useSection } from '@/lib/useSection';
 import { useUrlState } from '@/lib/useUrlState';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { toast } from '@/store/ui';
-import { usePolicies, usePolicyAcceptance, usePublishPolicy, useRemindTenant } from '../api';
+import { useDraftPolicy, usePolicies, usePolicyAcceptance, usePublishPolicy, useRemindTenant } from '../api';
 import { withinDay } from '../components/format';
 import { t as tStatic, useT } from '../i18n';
-import type { PolicyAcceptance, PolicyDocument, PolicyState } from '../types';
+import { POLICY_FAMILIES, type PolicyAcceptance, type PolicyDocument, type PolicyFamily, type PolicyState } from '../types';
+
+const SECTIONS = ['documents', 'acceptance'] as const;
 
 const STATE_TONE: Record<PolicyState, Tone> = { Live: 'good', Draft: 'warn', Superseded: 'flat' };
 
 function docMeta(d: PolicyDocument) {
-  if (d.state === 'Draft') return d.note;
-  if (d.state === 'Superseded') return tStatic('policies.meta.superseded', { note: d.note, date: formatDate(d.publishedAt) });
+  const note = d.note ?? tStatic('policies.noNote');
+  if (d.state === 'Draft') return note;
+  if (d.state === 'Superseded') return tStatic('policies.meta.superseded', { note, date: formatDate(d.publishedAt) });
   const left = d.acceptanceDeadline ? daysUntil(d.acceptanceDeadline) : 0;
   const window =
     left > 0 ? tStatic('policies.meta.windowCloses', { date: formatDate(d.acceptanceDeadline) }) : tStatic('policies.meta.windowClosed');
-  return tStatic('policies.meta.live', { note: d.note, date: formatDate(d.publishedAt), window });
+  return tStatic('policies.meta.live', { note, date: formatDate(d.publishedAt), window });
+}
+
+/** A new Draft version of a document family (`POST /governance/policies`); publishing it is the row's job. */
+function DraftForm() {
+  const t = useT();
+  const draft = useDraftPolicy();
+  const [family, setFamily] = useState<PolicyFamily>('tos');
+  const [version, setVersion] = useState('');
+  const [note, setNote] = useState('');
+  const [errors, setErrors] = useState<{ docKey?: string; version?: string; note?: string }>({});
+  const submit = (e: SyntheticEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!version.trim()) {
+      setErrors({ version: t('policies.draft.versionRequired') });
+      return;
+    }
+    setErrors({});
+    draft.mutate(
+      { docKey: family, version: version.trim(), note: note.trim() || null },
+      {
+        onSuccess: (d) => {
+          setVersion('');
+          setNote('');
+          toast(t('policies.draft.created', { name: d.name, version: d.version }));
+        },
+        onError: (err) =>
+          setErrors(
+            err instanceof ApiError
+              ? {
+                  docKey: err.field('docKey'),
+                  version: err.field('version') ?? (err.isValidation ? undefined : err.message),
+                  note: err.field('note'),
+                }
+              : { version: errorMessage(err) },
+          ),
+      },
+    );
+  };
+  return (
+    <form onSubmit={submit} noValidate className="hstack wrap" style={{ gap: 10, alignItems: 'flex-start', padding: '12px 0 14px' }}>
+      <Field label={t('policies.draft.document')} error={errors.docKey} style={{ minWidth: 220 }}>
+        {(p) => (
+          <select {...p} className="select" value={family} onChange={(e) => setFamily(e.target.value as PolicyFamily)}>
+            {POLICY_FAMILIES.map((f) => (
+              <option key={f} value={f}>
+                {t(`policies.draft.families.${f}`)}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <Field label={t('policies.draft.version')} error={errors.version} style={{ width: 120 }}>
+        {(p) => (
+          <Input
+            {...p}
+            value={version}
+            maxLength={20}
+            placeholder={t('policies.draft.versionPlaceholder')}
+            onChange={(e) => setVersion(e.target.value)}
+          />
+        )}
+      </Field>
+      <Field label={t('policies.draft.note')} error={errors.note} style={{ flex: '1 1 220px' }}>
+        {(p) => <Input {...p} value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />}
+      </Field>
+      <button type="submit" className="btn btn--sm" style={{ marginTop: 22 }} disabled={draft.isPending}>
+        {draft.isPending && <Spinner />} {t('policies.draft.submit')}
+      </button>
+    </form>
+  );
 }
 
 function DocumentRow({ d }: { d: PolicyDocument }) {
@@ -167,7 +260,11 @@ function AcceptanceCard({ docs, doc, onDoc }: { docs: PolicyDocument[]; doc: Pol
 
 export default function PoliciesPage() {
   const t = useT();
+  const can = useCan();
   const [f, setF] = useUrlState({ doc: 'tos' });
+  // Links that name a document (`?doc=dpa`) open its acceptance, as they did before the page had sections.
+  const [params] = useSearchParams();
+  const [section, setSection, sectionHref] = useSection(SECTIONS, params.has('doc') ? 'acceptance' : 'documents');
   const q = usePolicies();
 
   if (q.error)
@@ -223,24 +320,31 @@ export default function PoliciesPage() {
         </div>
       )}
 
-      <div
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 16, alignItems: 'start' }}
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({ id, label: t(`sections.policies.${id}`) }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.policies.nav')}
+        href={sectionHref}
       >
-        <Card title={t('policies.documents')} style={{ padding: '14px 18px 4px' }}>
-          {q.isPending ? (
-            <SkeletonRows rows={5} h={30} />
-          ) : docs.length === 0 ? (
-            <Empty>{t('policies.noDocuments')}</Empty>
-          ) : (
-            <ul className="plain-list">
-              {docs.map((d) => (
-                <DocumentRow key={d.id} d={d} />
-              ))}
-            </ul>
-          )}
-        </Card>
+        <SectionPanel active={section === 'documents'}>
+          <Card title={t('policies.documents')} style={{ padding: '14px 18px 4px' }}>
+            {can('governance.manage') && <DraftForm />}
+            {q.isPending ? (
+              <SkeletonRows rows={5} h={30} />
+            ) : docs.length === 0 ? (
+              <Empty>{t('policies.noDocuments')}</Empty>
+            ) : (
+              <ul className="plain-list">
+                {docs.map((d) => (
+                  <DocumentRow key={d.id} d={d} />
+                ))}
+              </ul>
+            )}
+          </Card>
+        </SectionPanel>
 
-        <div className="stack" style={{ gap: 16 }}>
+        <SectionPanel active={section === 'acceptance'}>
           {q.isPending ? (
             <div className="card">
               <SkeletonRows rows={6} h={26} />
@@ -251,8 +355,8 @@ export default function PoliciesPage() {
           <div className="card note" style={{ padding: '16px 18px', fontSize: 12.5, lineHeight: 1.6 }}>
             {t('policies.note')}
           </div>
-        </div>
-      </div>
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

@@ -1,17 +1,34 @@
 import { useState } from 'react';
 import { z } from 'zod';
-import { Badge, Card, ConfirmButton, Empty, ErrorState, FormError, QueryState, Screen, SkeletonRows, Spinner, TRow } from '@/components/ui';
+import {
+  Badge,
+  Card,
+  ConfirmButton,
+  ConfirmDialog,
+  Empty,
+  ErrorState,
+  FormError,
+  QueryState,
+  Screen,
+  SkeletonRows,
+  Spinner,
+  TRow,
+} from '@/components/ui';
+import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import { errorMessage } from '@/lib/api/errors';
 import { PLANS, type Plan } from '@/lib/domain';
 import { formatDateTime, num, sevTone, timeAgo } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
+import { useSection } from '@/lib/useSection';
 import { toast } from '@/store/ui';
 import { useAbuseSignals, useBlockIp, useBlockedIps, useRateLimits, useResolveSignal, useSetRateLimits, useUnblockIp } from '../api';
 import { t as tStatic, useT } from '../i18n';
 import { isIpOrCidr } from '../ip';
 import type { AbuseSignal, RateLimit } from '../types';
+
+const SECTIONS = ['signals', 'limits', 'blocked'] as const;
 
 const COLS = 'minmax(0,0.8fr) minmax(0,1.6fr) minmax(0,2.4fr) minmax(0,1.7fr)';
 
@@ -19,6 +36,18 @@ function SignalRow({ s }: { s: AbuseSignal }) {
   const t = useT();
   const can = useCan();
   const resolve = useResolveSignal();
+  // Freezing blocks the school's card revenue, so it names the impact and asks for the school's name typed back.
+  const [confirmFreeze, setConfirmFreeze] = useState(false);
+  const act = () =>
+    resolve.mutate(
+      { id: s.id, how: 'action' },
+      {
+        onSuccess: (r) => {
+          setConfirmFreeze(false);
+          if (r) toast(r.outcome);
+        },
+      },
+    );
   return (
     <TRow cols={COLS} min={700}>
       <div role="cell">
@@ -40,7 +69,7 @@ function SignalRow({ s }: { s: AbuseSignal }) {
               type="button"
               className="btn btn--sm btn--primary"
               disabled={resolve.isPending}
-              onClick={() => resolve.mutate({ id: s.id, how: 'action' }, { onSuccess: (r) => r && toast(r.outcome) })}
+              onClick={() => (s.action === 'freeze_checkout' ? setConfirmFreeze(true) : act())}
             >
               {resolve.isPending && resolve.variables.how === 'action' && <Spinner />} {s.actionLabel}
             </button>
@@ -60,6 +89,18 @@ function SignalRow({ s }: { s: AbuseSignal }) {
           <span className="t-xs faint">{t('abuse.suggested', { action: s.actionLabel })}</span>
         )}
       </div>
+      {confirmFreeze && (
+        <ConfirmDialog
+          title={t('abuse.freeze.title', { tenant: s.tenantName })}
+          phrase={s.tenantName}
+          confirmLabel={t('abuse.freeze.action')}
+          pending={resolve.isPending}
+          onConfirm={act}
+          onCancel={() => setConfirmFreeze(false)}
+        >
+          {t('abuse.freeze.body', { tenant: s.tenantName })}
+        </ConfirmDialog>
+      )}
     </TRow>
   );
 }
@@ -131,7 +172,7 @@ function RateLimitForm({ limits }: { limits: RateLimit[] }) {
           const l = byPlan[plan];
           const err = form.formState.errors[plan]?.message;
           const n = Number(draft[plan]);
-          const belowPeak = !err && l && Number.isFinite(n) && n > 0 && n < l.peakPerMinute;
+          const belowPeak = !err && l?.peakPerMinute != null && Number.isFinite(n) && n > 0 && n < l.peakPerMinute;
           const id = `rate-${plan}`;
           return (
             <li key={plan} className="row wrap" style={{ gap: '8px 12px', padding: '12px 0' }}>
@@ -151,7 +192,8 @@ function RateLimitForm({ limits }: { limits: RateLimit[] }) {
               />
               <span className="t-sm muted min0">{t('abuse.rateLimits.unit')}</span>
               <span className="muted nowrap" style={{ fontSize: 12, marginLeft: 'auto' }}>
-                {t('abuse.rateLimits.peak', { peak: l ? num(l.peakPerMinute) : '—' })}
+                {/* null = request rates aren't sampled yet: a dash, never a fake 0. */}
+                {t('abuse.rateLimits.peak', { peak: l?.peakPerMinute != null ? num(l.peakPerMinute) : '—' })}
                 {l && l.perMinute !== l.defaultPerMinute ? t('abuse.rateLimits.default', { count: l.defaultPerMinute }) : ''}
               </span>
               {err ? (
@@ -285,28 +327,37 @@ function BlockedIpsCard() {
 export default function AbusePage() {
   const t = useT();
   const limits = useRateLimits();
+  const [section, setSection, sectionHref] = useSection(SECTIONS, 'signals');
   return (
     <Screen max={1150} label={t('abuse.title')}>
-      <SignalsCard />
-
-      <div
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: 16, alignItems: 'start' }}
+      <SectionedPage
+        sections={SECTIONS.map((id) => ({ id, label: t(`sections.abuse.${id}`) }))}
+        active={section}
+        onChange={setSection}
+        label={t('sections.abuse.nav')}
+        href={sectionHref}
       >
-        <Card title={t('abuse.rateLimits.title')}>
-          <p className="t-sm muted" style={{ margin: '0 0 4px' }}>
-            {t('abuse.rateLimits.intro')}
-          </p>
-          {limits.error ? (
-            <ErrorState error={limits.error} onRetry={() => void limits.refetch()} compact />
-          ) : limits.isPending ? (
-            <SkeletonRows rows={3} h={28} />
-          ) : (
-            <RateLimitForm limits={limits.data} />
-          )}
-        </Card>
-
-        <BlockedIpsCard />
-      </div>
+        <SectionPanel active={section === 'signals'}>
+          <SignalsCard />
+        </SectionPanel>
+        <SectionPanel active={section === 'limits'}>
+          <Card title={t('abuse.rateLimits.title')}>
+            <p className="t-sm muted" style={{ margin: '0 0 4px' }}>
+              {t('abuse.rateLimits.intro')}
+            </p>
+            {limits.error ? (
+              <ErrorState error={limits.error} onRetry={() => void limits.refetch()} compact />
+            ) : limits.isPending ? (
+              <SkeletonRows rows={3} h={28} />
+            ) : (
+              <RateLimitForm limits={limits.data} />
+            )}
+          </Card>
+        </SectionPanel>
+        <SectionPanel active={section === 'blocked'}>
+          <BlockedIpsCard />
+        </SectionPanel>
+      </SectionedPage>
     </Screen>
   );
 }

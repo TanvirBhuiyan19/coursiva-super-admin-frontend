@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Badge, Bar, Card, Empty, ErrorState, Screen, SkeletonRows, TRow } from '@/components/ui';
+import { Badge, Bar, Card, CountUp, Empty, ErrorState, Screen, SkeletonRows, TRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { money, monthName, num } from '@/lib/format';
 import { useUsage } from '../api';
@@ -33,7 +33,7 @@ function Capacity({ u }: { u: Usage }) {
             {MONTHLY[c.meter] ? ` · ${month}` : ''}
           </h2>
           <div className="kpi-value" style={{ fontSize: 24 }}>
-            {formatMeter(c.meter, c.used)}{' '}
+            <CountUp value={formatMeter(c.meter, c.used)} />{' '}
             <span className="faint nowrap" style={{ fontSize: 12, fontWeight: 400, fontFamily: 'inherit' }}>
               {t('usage.ofCapacity', { value: formatMeter(c.meter, c.capacity) })}
             </span>

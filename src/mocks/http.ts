@@ -5,7 +5,7 @@ import { env } from '@/config/env';
 import { camelizeKeys, snakeizeKeys } from '@/lib/api/case';
 import type { AuditCategory } from '@/lib/domain';
 import { PERMISSIONS, type Permission } from '@/features/auth/permissions';
-import { audit, rolePermissions, session, staff, type StaffRow } from './collections';
+import { audit, platformSettings, rolePermissions, session, staff, type StaffRow } from './collections';
 import { id, saveDb } from './db';
 
 /** Matches the API path on any origin, e.g. route('/tenants/:id'). */
@@ -22,6 +22,9 @@ export class HttpError extends Error {
     readonly status: number,
     message: string,
     readonly errors?: Record<string, string[]>,
+    readonly code?: string,
+    /** More top-level body fields, e.g. `{ reason: 'task_closed' }`. */
+    readonly extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -102,12 +105,36 @@ export function permissionsOf(user: StaffRow): Permission[] {
   return [...rolePermissions.get()[user.role]];
 }
 
-/** Throws 401 when signed out and 403 when the user lacks the permission. */
-export function authorize(permission?: Permission): StaffRow {
+/** Throws 401 when signed out. For `auth/*` routes, which stay reachable while 2FA setup is required. */
+export function authenticate(): StaffRow {
   const user = currentUser();
   if (!user) throw unauthenticated();
+  return user;
+}
+
+/** True while the platform requires staff 2FA and this member has none (Laravel `EnsureStaffAccess`). */
+export const twoFactorSetupRequired = (user: StaffRow) => platformSettings.get().requireStaffTwoFactor && !user.twoFactorEnabled;
+
+/**
+ * Throws 401 when signed out, 403 `two_factor_setup_required` while the member owes 2FA enrolment, and 403 when the
+ * user lacks the permission.
+ */
+export function authorize(permission?: Permission): StaffRow {
+  const user = authenticate();
+  if (twoFactorSetupRequired(user))
+    throw new HttpError(403, 'Set up two-factor authentication to keep using the console.', undefined, 'two_factor_setup_required');
   if (permission && !permissionsOf(user).includes(permission)) throw forbidden();
   return user;
+}
+
+/** How long a password confirmation lasts for sensitive changes (credentials, keys). */
+export const PASSWORD_CONFIRM_MS = 15 * 60_000;
+
+/** 423 password_confirmation_required unless the password was entered (sign-in or confirmation) in the last 15 minutes. */
+export function requireRecentPassword() {
+  const at = session.get().passwordConfirmedAt;
+  if (!at || Date.now() - new Date(at).getTime() > PASSWORD_CONFIRM_MS)
+    throw new HttpError(423, 'Confirm your password to continue.', undefined, 'password_confirmation_required');
 }
 
 /** Appends an audit entry attributed to the signed-in user. */
@@ -139,7 +166,16 @@ export function handle<Params extends PathParams = PathParams>(resolver: Resolve
       if (request.method !== 'GET') saveDb();
       return res;
     } catch (err) {
-      if (err instanceof HttpError) return json({ message: err.message, ...(err.errors ? { errors: err.errors } : {}) }, err.status);
+      if (err instanceof HttpError)
+        return json(
+          {
+            message: err.message,
+            ...(err.errors ? { errors: err.errors } : {}),
+            ...(err.code ? { code: err.code } : {}),
+            ...err.extra,
+          },
+          err.status,
+        );
       console.error('[mock api]', err);
       return json({ message: 'Server Error' }, 500);
     }

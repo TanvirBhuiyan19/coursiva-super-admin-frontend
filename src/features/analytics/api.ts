@@ -1,12 +1,13 @@
-import { type QueryClient, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, type QueryClient, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
 import type { Resource } from '@/lib/api/types';
-import type { AiSettingsInput, AiUsage, Experiments, Growth, Health, JobQueue, Usage } from './types';
+import type { AiSettingsInput, AiUsage, Experiments, Growth, Health, JobQueue, LiveUsage, Usage } from './types';
 
 export const analyticsKeys = {
   all: ['analytics'] as const,
   growth: ['analytics', 'growth'] as const,
   usage: ['analytics', 'usage'] as const,
+  live: (period: string) => ['analytics', 'live', period || 'current'] as const,
   health: ['analytics', 'health'] as const,
   ai: ['analytics', 'ai'] as const,
   experiments: ['analytics', 'experiments'] as const,
@@ -20,6 +21,15 @@ export const analyticsQueries = {
 
 export const useGrowth = () => useQuery(analyticsQueries.growth());
 export const useUsage = () => useQuery({ queryKey: analyticsKeys.usage, queryFn: ({ signal }) => get<Usage>('/analytics/usage', signal) });
+/** Live usage for a month (`YYYY-MM`; empty = this month). */
+export const useLiveUsage = (period: string) =>
+  useQuery({
+    ...queryOptions({
+      queryKey: analyticsKeys.live(period),
+      queryFn: ({ signal }) => get<LiveUsage>(period ? `/analytics/live?period=${encodeURIComponent(period)}` : '/analytics/live', signal),
+    }),
+    placeholderData: keepPreviousData,
+  });
 export const useHealth = () =>
   useQuery({ queryKey: analyticsKeys.health, queryFn: ({ signal }) => get<Health>('/analytics/health', signal) });
 export const useAiUsage = () => useQuery({ queryKey: analyticsKeys.ai, queryFn: ({ signal }) => get<AiUsage>('/analytics/ai', signal) });

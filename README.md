@@ -42,14 +42,15 @@ CI: `.github/workflows/ci.yml` runs the check, build and e2e jobs.
 
 ## Configuration
 
-Copy `.env.example` to `.env.local` and adjust:
+Copy `.env.example` to `.env.local` and adjust. Production builds read the committed `.env.production`.
 
-| Variable            | Purpose                                                                |
-| ------------------- | ---------------------------------------------------------------------- |
-| `VITE_API_URL`      | Laravel base URL, e.g. `https://api.coursiva.io` (empty = same origin) |
-| `VITE_API_PREFIX`   | API prefix, default `/api/v1/admin`                                    |
-| `VITE_ENABLE_MOCKS` | `true` serves the API from Mock Service Worker                         |
-| `VITE_SENTRY_DSN`   | Sentry DSN — enables error reporting (lazy, errors only, no PII)       |
+| Variable               | Purpose                                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `VITE_API_URL`         | Leave empty (same origin): nginx proxies `/api` and `/sanctum` to Laravel (`deploy/nginx.conf`) |
+| `VITE_API_PREFIX`      | API prefix, default `/api/v1/platform` (the mock API mounts on the same prefix)                 |
+| `VITE_ENABLE_MOCKS`    | `true` serves the API from Mock Service Worker; always `false` in production                    |
+| `VITE_SENTRY_DSN`      | Sentry DSN — enables error reporting (lazy, errors only, no PII)                                |
+| `VITE_VITALS_ENDPOINT` | Real-user Web Vitals beacon endpoint (empty disables RUM)                                       |
 
 ## Error reporting
 
@@ -97,8 +98,14 @@ generated OpenAPI 3.1 spec (`npm run openapi`; verified against the mock API by 
 1. Implement the endpoints in `docs/api/` (start with `README.md` — conventions, Sanctum SPA auth,
    validation and error shapes, audit rules and the table of shared business rules).
    Each feature's `mock.ts` is a working reference implementation, and the tests describe the behaviour.
-2. Set `VITE_API_URL`, `VITE_ENABLE_MOCKS=false`, and configure Sanctum stateful domains + CORS with credentials.
-3. Run the e2e suite against it: `E2E_BASE_URL=https://console.staging… npm run e2e`.
+2. Build with the committed `.env.production` (same-origin API, `/api/v1/platform`, mocks off): `npm run build`.
+3. Serve `dist/` with `deploy/nginx.conf`. Its only per-deployment file is `deploy/hosts.conf` (copied to
+   `/etc/nginx/coursiva/super-admin.hosts.conf`): the console's `server_name`, the Laravel upstream that `/api` and
+   `/sanctum` are proxied to, and the CSP host lists (object storage/CDN, error reporting). The API is
+   **same-origin**: Sanctum's session cookie stays first-party and Laravel recognises the console by its Host, so the
+   API's `SUPER_ADMIN_URL` must be this site's `https://` origin and this nginx must be in the API's
+   `TRUSTED_PROXIES` (backend `docs/production.md`). No CORS or Sanctum stateful-domain setup is needed.
+4. Run the e2e suite against it: `E2E_BASE_URL=https://console.staging… npm run e2e`.
 
 ## Quality bar
 

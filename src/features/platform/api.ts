@@ -2,9 +2,16 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClie
 import { shellKeys } from '@/features/shell/api';
 import { tenantKeys } from '@/features/tenants/api';
 import { api } from '@/lib/api/client';
+import { live } from '@/lib/queryClient';
 import type { Paginated, Resource } from '@/lib/api/types';
 import type {
   ApiKey,
+  Availability,
+  AvailabilityUpdate,
+  Capability,
+  ConnectionInput,
+  ConnectionTestResult,
+  PlatformConnection,
   ApiKeyInput,
   Certificate,
   CertificateParams,
@@ -35,6 +42,8 @@ export const platformKeys = {
   standards: () => [...platformKeys.all, 'standards'] as const,
   apiKeys: () => [...platformKeys.all, 'api-keys'] as const,
   webhooks: () => [...platformKeys.all, 'webhooks'] as const,
+  connections: () => [...platformKeys.all, 'connections'] as const,
+  availability: () => [...platformKeys.all, 'availability'] as const,
 };
 
 const invalidateAudit = (qc: QueryClient) => void qc.invalidateQueries({ queryKey: ['audit'] });
@@ -46,7 +55,13 @@ const get =
     api.get<Resource<T>>(path, { signal }).then((r) => r.data);
 
 export const useFeatureFlags = () => useQuery({ queryKey: platformKeys.flags(), queryFn: get<FeatureFlag[]>('/platform/flags') });
-export const useSystemStatus = () => useQuery({ queryKey: platformKeys.system(), queryFn: get<SystemStatus>('/platform/system') });
+/**
+ * The system status section refreshes itself every minute while it is the section on screen (see `live`). `visible`
+ * false (another Flags section is open; the panel stays mounted to keep its state) turns the query off: no polling, no
+ * focus refetches. Cached data keeps showing, and switching back refetches it if stale.
+ */
+export const useSystemStatus = ({ visible = true }: { visible?: boolean } = {}) =>
+  useQuery({ queryKey: platformKeys.system(), queryFn: get<SystemStatus>('/platform/system'), ...live, enabled: visible });
 export const useDeliverability = () =>
   useQuery({ queryKey: platformKeys.deliverability(), queryFn: get<Deliverability>('/platform/deliverability') });
 export const useCertificateSummary = () =>
@@ -60,10 +75,12 @@ export const useCertificates = (params: CertificateParams) =>
 export const useRegistryPolicies = () =>
   useQuery({ queryKey: platformKeys.policies(), queryFn: get<RegistryPolicy[]>('/platform/certificate-policies') });
 export const useStandards = () => useQuery({ queryKey: platformKeys.standards(), queryFn: get<Standards>('/platform/standards') });
-export const useApiKeys = () =>
-  useQuery({
-    queryKey: platformKeys.apiKeys(),
-    queryFn: ({ signal }) => api.get<Paginated<ApiKey>>('/platform/api-keys', { query: { perPage: 100 }, signal }).then((r) => r.data),
+/** One page of platform API keys (25 a page) — the list pages instead of silently stopping at 100. */
+export const useApiKeys = (page = 1) =>
+  useQuery<Paginated<ApiKey>>({
+    queryKey: [...platformKeys.apiKeys(), page],
+    queryFn: ({ signal }) => api.get<Paginated<ApiKey>>('/platform/api-keys', { query: { page, perPage: 25 }, signal }),
+    placeholderData: keepPreviousData,
   });
 export const useWebhooks = () => useQuery({ queryKey: platformKeys.webhooks(), queryFn: get<Webhooks>('/platform/webhooks') });
 
@@ -220,6 +237,90 @@ export function useRetryDelivery() {
     mutationFn: (id: string) => api.post<Resource<RetryResult>>(`/platform/webhook-deliveries/${id}/retry`).then((r) => r.data),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: platformKeys.webhooks() });
+      invalidateAudit(qc);
+    },
+  });
+}
+
+// ---------- Connections ----------
+/** Every connected service (credentials pasted in the console). */
+export const usePlatformConnections = () =>
+  useQuery({ queryKey: platformKeys.connections(), queryFn: get<PlatformConnection[]>('/platform/connections') });
+
+/** Connect & verify, or replace credentials. The server verifies with the provider before saving; errors show inline. */
+export function useSaveConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, credentials }: ConnectionInput & { key: string }) =>
+      api.put<Resource<PlatformConnection>>(`/platform/connections/${key}`, { credentials }).then((r) => r.data),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: platformKeys.connections() });
+      // A capability is only available while its connections are connected.
+      void qc.invalidateQueries({ queryKey: platformKeys.availability() });
+      invalidateAudit(qc);
+    },
+    meta: { errorToast: false },
+  });
+}
+
+export function useDeleteConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.delete<Resource<PlatformConnection>>(`/platform/connections/${key}`).then((r) => r.data),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: platformKeys.connections() });
+      // A capability is only available while its connections are connected.
+      void qc.invalidateQueries({ queryKey: platformKeys.availability() });
+      invalidateAudit(qc);
+    },
+  });
+}
+
+/** Re-verifies stored credentials with the provider. */
+export function useTestConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.post<Resource<ConnectionTestResult>>(`/platform/connections/${key}/test`).then((r) => r.data),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: platformKeys.connections() }),
+  });
+}
+
+// ---------- Feature availability ----------
+/** Every capability with its switch, connection state and reach. */
+export const useAvailability = () =>
+  useQuery({ queryKey: platformKeys.availability(), queryFn: get<Availability>('/platform/availability') });
+
+/**
+ * Turns a capability on or off for every school. Turning off needs a recent password (423 → the step-up prompt).
+ * The switch moves at once — on this screen and on its connections' cards — and rolls back if the request fails or
+ * the prompt is cancelled.
+ */
+export function useSetAvailability() {
+  const qc = useQueryClient();
+  const keys = [platformKeys.availability(), platformKeys.connections()];
+  return useMutation({
+    mutationFn: ({ key, on }: AvailabilityUpdate & { key: string }) =>
+      api.put<Resource<Capability>>(`/platform/availability/${key}`, { on }).then((r) => r.data),
+    onMutate: async ({ key, on }) => {
+      await Promise.all(keys.map((k) => qc.cancelQueries({ queryKey: k })));
+      const availability = qc.getQueryData<Availability>(platformKeys.availability());
+      const connections = qc.getQueryData<PlatformConnection[]>(platformKeys.connections());
+      const flip = <T extends { key: string; on: boolean }>(c: T) => (c.key === key ? { ...c, on } : c);
+      if (availability)
+        qc.setQueryData<Availability>(platformKeys.availability(), { ...availability, capabilities: availability.capabilities.map(flip) });
+      if (connections)
+        qc.setQueryData<PlatformConnection[]>(
+          platformKeys.connections(),
+          connections.map((c) => ({ ...c, capabilities: c.capabilities.map(flip) })),
+        );
+      return { availability, connections };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.availability) qc.setQueryData(platformKeys.availability(), ctx.availability);
+      if (ctx?.connections) qc.setQueryData(platformKeys.connections(), ctx.connections);
+    },
+    onSettled: () => {
+      keys.forEach((k) => void qc.invalidateQueries({ queryKey: k }));
       invalidateAudit(qc);
     },
   });

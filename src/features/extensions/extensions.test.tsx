@@ -67,9 +67,15 @@ describe('extension catalogue', () => {
 
   it('toggles a selling rule and hides an extension', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/extensions');
+    const { user, router } = renderApp('/extensions');
+    await user.click(
+      within(await screen.findByRole('navigation', { name: 'Extensions sections' })).getByRole('link', { name: 'Selling rules' }),
+    );
+    expect(router.state.location.search).toBe('?section=rules');
     await user.click(await screen.findByRole('switch', { name: 'Prorate mid-cycle adds' }));
     await waitFor(() => expect(extensionStore.get().rulesOff).toEqual(['prorate']));
+    await user.click(within(screen.getByRole('navigation', { name: 'Extensions sections' })).getByRole('link', { name: 'Catalogue' }));
+    expect(router.state.location.search).toBe('');
     await user.click(within(await row(/Proctored exams/)).getByRole('button', { name: 'Hide Proctored exams' }));
     await waitFor(() => expect(extensionStore.get().hidden).toEqual(['exam']));
     expect(await within(await row(/Proctored exams/)).findByText('Hidden')).toBeInTheDocument();
@@ -79,12 +85,13 @@ describe('extension catalogue', () => {
     // The seeded read-only staffer hasn't accepted their invite yet; activate them for this test.
     staff.where((x) => x.role === 'Read-only').forEach((x) => staff.update(x.id, { status: 'Active' }));
     signInAs('Read-only');
-    renderApp('/extensions');
+    const { user } = renderApp('/extensions');
     const ai = await row(/AI studio/);
     expect(within(ai).getByRole('button', { name: 'Free on Scale: AI studio' })).toBeDisabled();
     expect(within(ai).queryByRole('textbox')).not.toBeInTheDocument();
     expect(within(ai).queryByRole('button', { name: /Hide/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: 'Let tenants self-serve' })).toBeDisabled();
+    await user.click(within(screen.getByRole('navigation', { name: 'Extensions sections' })).getByRole('link', { name: 'Selling rules' }));
+    expect(await screen.findByRole('switch', { name: 'Let tenants self-serve' })).toBeDisabled();
     await expect(api.put('/extensions/ai/plans', { plans: [] })).rejects.toMatchObject({ status: 403 });
     await expect(api.patch('/extensions/ai', { price: 5 })).rejects.toMatchObject({ status: 403 });
     expect(extensionInclusions.get().ai).toBeUndefined();

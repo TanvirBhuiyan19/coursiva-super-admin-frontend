@@ -17,7 +17,8 @@ export function Field({ label, error, hint, children, style }: FieldProps) {
   const hasMsg = !!error || hint != null;
   return (
     <div style={style}>
-      <label className="field-label" htmlFor={id}>
+      {/* The id lets controls that can't be <label for> targets (the rich text editor) use aria-labelledby. */}
+      <label className="field-label" htmlFor={id} id={`${id}-label`}>
         {label}
       </label>
       {children({ id, ...(error ? { 'aria-invalid': true } : {}), ...(hasMsg ? { 'aria-describedby': msgId } : {}) })}

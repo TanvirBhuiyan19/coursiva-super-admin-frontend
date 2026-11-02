@@ -1,12 +1,28 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Avatar, Badge, Bar, Chip, ChipGroup, Empty, ErrorState, Pagination, Screen, Skeleton, SkeletonRows, TRow } from '@/components/ui';
+import { preloadRichTextEditor } from '@/components/editor';
+import {
+  Avatar,
+  Badge,
+  Bar,
+  Chip,
+  ChipGroup,
+  ConfirmDialog,
+  CountUp,
+  Empty,
+  ErrorState,
+  Pagination,
+  Screen,
+  Skeleton,
+  SkeletonRows,
+  TRow,
+} from '@/components/ui';
 import { Can } from '@/features/auth/Can';
 import { useCan } from '@/features/auth/useCan';
 import { api } from '@/lib/api/client';
 import { PLANS, TENANT_STATUSES, type Plan, type TenantStatus } from '@/lib/domain';
-import { avatarColor, healthTone, initials, money, num, statusTone, timeAgo, toneFg, utilTone } from '@/lib/format';
+import { avatarColor, healthTone, initials, money, num, timeAgo, toneFg, utilTone } from '@/lib/format';
 import { useDebounced } from '@/lib/useDebounced';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { useUrlState } from '@/lib/useUrlState';
@@ -15,6 +31,7 @@ import { warm } from '@/lib/queryClient';
 import { tenantQueries, useBulkTenants, useTenantSummary, useTenants } from '../api';
 import { EmailComposer } from '../components/EmailComposer';
 import { TenantDrawer } from '../components/TenantDrawer';
+import { TenantStatusBadge } from '../components/TenantStatusBadge';
 import { useT } from '../i18n';
 import { TENANT_SEGMENTS, type TenantListParams, type TenantSegment, type TenantSort } from '../types';
 
@@ -84,29 +101,29 @@ export default function TenantsPage() {
   // Hovering a row warms its drawer so it opens with data already in cache.
   const warmTenant = (id: string) => warm(qc.query(tenantQueries.detail(id)));
 
-  const runBulk = (action: 'suspend' | 'watch' | 'export') =>
+  // Suspending takes every selected school offline, so it asks for the count typed back first (and the server asks for
+  // the password when it wasn't entered in the last 15 minutes).
+  const [confirmSuspend, setConfirmSuspend] = useState(false);
+  const runBulk = (action: 'suspend' | 'watch') =>
     bulk.mutate(
       { action, ids: selected },
       {
         onSuccess: ({ affected }) => {
-          toast(
-            action === 'suspend'
-              ? t('toasts.suspended', { count: affected })
-              : action === 'watch'
-                ? t('toasts.addedToWatchlist')
-                : t('toasts.exported', { count: affected }),
-          );
+          toast(action === 'suspend' ? t('toasts.suspended', { count: affected }) : t('toasts.addedToWatchlist'));
           setSelected([]);
+          setConfirmSuspend(false);
         },
       },
     );
 
-  const exportCsv = async () => {
+  // A CSV of the directory (filtered, or just the selected rows). Full data exports are a per-tenant action.
+  const exportCsv = async (ids?: string[]) => {
     setExporting(true);
     try {
       const { page: _p, perPage: _pp, ...filters } = params;
-      await api.download('/tenants/export', { ...filters }, 'tenants.csv');
-      toast(t('toasts.exported', { count: list.data?.meta.total ?? 0 }));
+      await api.download('/tenants/export', { ...filters, ...(ids ? { ids: ids.join(',') } : {}) }, 'tenants.csv');
+      toast(t('toasts.exported', { count: ids?.length ?? list.data?.meta.total ?? 0 }));
+      if (ids) setSelected([]);
     } catch {
       toast(t('toasts.exportFailed'), 'error');
     } finally {
@@ -131,7 +148,9 @@ export default function TenantsPage() {
           ? portfolio.map(([label, val, sub]) => (
               <div key={label} className="card card--tight">
                 <div className="kpi-label">{label}</div>
-                <div className="kpi-value kpi-value--sm">{val}</div>
+                <div className="kpi-value kpi-value--sm">
+                  <CountUp value={val} />
+                </div>
                 <div className="kpi-sub" style={{ marginTop: 2 }}>
                   {sub}
                 </div>
@@ -190,18 +209,25 @@ export default function TenantsPage() {
           </span>
           <div className="spacer" />
           <Can permission="tenants.manage">
-            <button type="button" className="btn btn--sm" onClick={() => setEmailTo(selected)}>
+            {/* Fetch the composer's rich text editor (a lazy chunk) on intent, so it is ready when the dialog opens. */}
+            <button
+              type="button"
+              className="btn btn--sm"
+              onPointerEnter={preloadRichTextEditor}
+              onFocus={preloadRichTextEditor}
+              onClick={() => setEmailTo(selected)}
+            >
               {t('directory.bulk.emailOwners')}
             </button>
           </Can>
           <button type="button" className="btn btn--sm" disabled={bulk.isPending} onClick={() => runBulk('watch')}>
             {t('directory.bulk.addToWatchlist')}
           </button>
-          <button type="button" className="btn btn--sm" disabled={bulk.isPending} onClick={() => runBulk('export')}>
+          <button type="button" className="btn btn--sm" disabled={exporting} onClick={() => void exportCsv(selected)}>
             {tc('actions.exportCsv')}
           </button>
           <Can permission="tenants.suspend">
-            <button type="button" className="btn btn--sm btn--danger" disabled={bulk.isPending} onClick={() => runBulk('suspend')}>
+            <button type="button" className="btn btn--sm btn--danger" disabled={bulk.isPending} onClick={() => setConfirmSuspend(true)}>
               {t('directory.bulk.suspend')}
             </button>
           </Can>
@@ -318,7 +344,7 @@ export default function TenantsPage() {
                   <Badge tone={healthTone(tn.health)}>{tc(`enums.tenantHealth.${tn.health}`)}</Badge>
                 </div>
                 <div role="cell">
-                  <Badge tone={statusTone(tn.status)}>{tc(`enums.tenantStatus.${tn.status}`)}</Badge>
+                  <TenantStatusBadge t={tn} />
                 </div>
               </div>
             ))}
@@ -346,6 +372,18 @@ export default function TenantsPage() {
       )}
 
       {emailTo && <EmailComposer ids={emailTo} onClose={() => setEmailTo(null)} onSent={() => setSelected([])} />}
+      {confirmSuspend && (
+        <ConfirmDialog
+          title={t('directory.bulk.confirmTitle', { count: selected.length })}
+          phrase={t('directory.bulk.confirmPhrase', { count: selected.length })}
+          confirmLabel={t('directory.bulk.confirmAction', { count: selected.length })}
+          pending={bulk.isPending}
+          onConfirm={() => runBulk('suspend')}
+          onCancel={() => setConfirmSuspend(false)}
+        >
+          {t('directory.bulk.confirmBody', { count: selected.length })}
+        </ConfirmDialog>
+      )}
       {can('tenants.view') && (
         <Routes>
           <Route

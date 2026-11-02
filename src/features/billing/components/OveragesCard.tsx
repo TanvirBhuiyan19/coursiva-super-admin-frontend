@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Badge, Card, Empty, ErrorState, SkeletonRows } from '@/components/ui';
 import { pathOf } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
-import { money, monthName } from '@/lib/format';
+import { money, moneyFine, monthName, num } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useBillOverage, useOverages } from '../api';
 import { useT } from '../i18n';
@@ -62,12 +62,12 @@ export function OveragesCard() {
               <div role="cell" className="ellipsis" style={{ fontWeight: 600 }}>
                 {o.tenantName}
               </div>
-              <div role="cell">{o.meter}</div>
+              <div role="cell">{t(`overages.meters.${o.meter}`)}</div>
               <div role="cell" className="muted">
-                {o.usage}
+                {t('overages.usageOf', { usage: num(o.usage), allowance: num(o.allowance) })}
               </div>
               <div role="cell" className="muted">
-                {o.rate}
+                {t('overages.rate', { price: moneyFine(o.rate), per: num(o.per) })}
               </div>
               <div role="cell" style={{ fontWeight: 700 }}>
                 {money(o.amount)}
@@ -81,7 +81,10 @@ export function OveragesCard() {
                     className="btn btn--sm btn--outline-accent"
                     disabled={bill.isPending && bill.variables === o.id}
                     onClick={() => addToInvoice(o)}
-                    aria-label={t('overages.addToInvoiceFor', { tenant: o.tenantName, meter: o.meter.toLowerCase() })}
+                    aria-label={t('overages.addToInvoiceFor', {
+                      tenant: o.tenantName,
+                      meter: t(`overages.meters.${o.meter}`).toLowerCase(),
+                    })}
                   >
                     {t('overages.addToInvoice')}
                   </button>

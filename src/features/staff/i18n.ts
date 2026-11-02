@@ -36,7 +36,7 @@ export const { t, useT } = defineMessages('staff', {
   invite: {
     formLabel: 'Invite staff',
     emailLabel: 'Invite email',
-    emailPlaceholder: 'colleague@coursiva.io',
+    emailPlaceholder: 'colleague@example.com',
     roleLabel: 'Role',
     send: 'Send invite',
     sent: 'Invite sent to {email} as {role} — the link expires in 7 days',
@@ -76,6 +76,11 @@ export const { t, useT } = defineMessages('staff', {
     elevateFor: 'Elevate {name} to Owner for 60 minutes',
     revokeElevationFor: 'Revoke elevation for {name}',
     elevatedLeft: 'Elevated · {minutes}m left',
+    elevateConfirm: {
+      title: 'Elevate {name} to Owner?',
+      body: '{name} gets every Owner permission for 60 minutes — including purging schools, managing staff and billing, and signing in as school owners. It’s logged and expires on its own.',
+      action: 'Elevate to Owner',
+    },
     signOutFor: 'Sign {name} out of all sessions',
     suspend: 'Suspend',
     confirmSuspend: 'Confirm suspend',
@@ -143,6 +148,20 @@ export const { t, useT } = defineMessages('staff', {
     members: { one: '{count} member', other: '{count} members' },
     cellLabel: '{permission} — {role}',
     cellLabelLocked: '{permission} — {role} (locked)',
+    confirm: {
+      grantTitle: 'Grant “{permission}” to {role}?',
+      removeTitle: 'Remove “{permission}” from {role}?',
+      grantBody: {
+        one: '{count} member of {role} gets it on their next request.',
+        other: 'All {count} members of {role} get it on their next request.',
+      },
+      removeBody: {
+        one: '{count} member of {role} loses it on their next request.',
+        other: 'All {count} members of {role} lose it on their next request.',
+      },
+      grant: 'Grant to {role}',
+      remove: 'Remove from {role}',
+    },
     groups: {
       tenants: 'Tenants',
       billing: 'Billing',

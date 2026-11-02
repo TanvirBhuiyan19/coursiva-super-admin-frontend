@@ -34,9 +34,17 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
   const [created, setCreated] = useState<CreatedApiKey | null>(null);
   const [copied, setCopied] = useState(false);
   const scope = form.watch('scope');
+  // A full-access key outlives the session and can mint more keys: it is confirmed by typing the scope first (the server
+  // also asks for the password when it wasn't entered in the last 15 minutes).
+  const [typed, setTyped] = useState('');
+  const fullAccessConfirmed = scope !== 'Full access' || typed.trim().toLowerCase() === t('createKey.fullAccessPhrase').toLowerCase();
 
   const submit = form.handleSubmit((values) => {
     setFormError(null);
+    if (!fullAccessConfirmed) {
+      setFormError(t('createKey.fullAccessRequired'));
+      return;
+    }
     create.mutate(values, {
       onSuccess: (key) => setCreated(key),
       onError: (err) => {
@@ -108,12 +116,28 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
           value={scope}
           onChange={(v) => form.setValue('scope', v, { shouldDirty: true })}
         />
+        {scope === 'Full access' && (
+          <>
+            <div className="callout callout--warn" style={{ marginTop: 12 }}>
+              <span aria-hidden="true">{WARN_ICON}</span>
+              <span>{t('createKey.fullAccessWarning')}</span>
+            </div>
+            <Field label={tc('confirmDialog.typeToConfirm', { phrase: t('createKey.fullAccessPhrase') })} style={{ marginTop: 12 }}>
+              {(p) => <Input {...p} value={typed} autoComplete="off" spellCheck={false} onChange={(e) => setTyped(e.target.value)} />}
+            </Field>
+          </>
+        )}
         <FormError>{formError}</FormError>
         <div className="hstack" style={{ gap: 10, marginTop: 18 }}>
           <button type="button" className="btn btn--lg" style={{ flex: 1 }} onClick={onClose}>
             {tc('actions.cancel')}
           </button>
-          <button type="submit" className="btn btn--primary btn--lg" style={{ flex: 1.4 }} disabled={create.isPending}>
+          <button
+            type="submit"
+            className="btn btn--primary btn--lg"
+            style={{ flex: 1.4 }}
+            disabled={create.isPending || !fullAccessConfirmed}
+          >
             {create.isPending && <Spinner />} {t('createKey.submit')}
           </button>
         </div>

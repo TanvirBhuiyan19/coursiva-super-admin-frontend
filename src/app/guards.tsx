@@ -3,8 +3,10 @@ import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useSession } from '@/features/auth/api';
 import type { Permission } from '@/features/auth/permissions';
 import { useCan } from '@/features/auth/useCan';
-import { ErrorState, SkeletonRows } from '@/components/ui';
+import { SkeletonRows } from '@/components/ui/Misc';
+import { ErrorState } from '@/components/ui/States';
 import { useT } from './i18n';
+import { pathOf } from './screens';
 
 function FullPageLoading() {
   return (
@@ -30,6 +32,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     );
   if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+  // The platform requires staff 2FA and this member has none: the API answers 403 everywhere but auth/*, so keep
+  // them on Account → Security until they enrol.
+  if (user.twoFactorSetupRequired && location.pathname !== pathOf('account')) return <Navigate to={pathOf('account')} replace />;
   return <>{children}</>;
 }
 

@@ -50,21 +50,26 @@ describe('idle lock', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Console locked' })).not.toBeInTheDocument());
     expect(container.querySelector('.shell')).not.toHaveAttribute('inert');
     expect(localStorage.getItem('sac-locked')).toBeNull();
-    expect(audit.all().some((a) => a.action === 'Unlocked the console after an idle lock')).toBe(true);
+    expect(audit.all().some((a) => a.action === 'Confirmed their password')).toBe(true);
   });
 
-  it('stays locked across a reload and follows other tabs', async () => {
+  it('stays locked across a reload, showing nothing of the console, and follows other tabs', async () => {
     localStorage.setItem('sac-locked', String(Date.now()));
     localStorage.setItem('sac-last-activity', String(Date.now() - 10 * MIN));
-    await setup();
+    const { container } = renderApp('/audit');
     expect(await screen.findByRole('dialog', { name: 'Console locked' })).toBeInTheDocument();
-    // Another tab unlocks → this one follows.
+    // A tab that loads locked renders no shell: no navigation, operator or screen.
+    expect(container.querySelector('.shell')).toBeNull();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Audit log' })).not.toBeInTheDocument();
+    // Another tab unlocks → this one follows, and the screen loads.
     act(() => {
       localStorage.removeItem('sac-locked');
       window.dispatchEvent(new StorageEvent('storage', { key: 'sac-locked', newValue: null }));
       localStorage.setItem('sac-last-activity', String(Date.now()));
     });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Console locked' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('heading', { level: 1, name: 'Audit log' })).toBeInTheDocument();
   });
 
   it('the idle lock length is a validated platform setting that /auth/me reports', async () => {

@@ -39,7 +39,8 @@ export interface BackupSummary {
   historyTb: number;
   tenants: number;
   rpoMinutes: number;
-  rtoMinutes: number;
+  /** From the last live restore or passed drill; null until either has happened. */
+  rtoMinutes: number | null;
   drillsPassed: number;
   drillsTotal: number;
   lastDrillAt: string | null;
@@ -63,7 +64,8 @@ export interface BackupSettings {
  * Restore lifecycle (server-side state machine):
  * `staged` → (second staff member approves) → `approved` → `running` → `completed`; `staged` → `cancelled`.
  */
-export type RestoreStatus = 'staged' | 'approved' | 'running' | 'completed' | 'cancelled';
+/** Laravel BackupRestore: `failed` when the restore worker errors (the error is in the backup activity feed). */
+export type RestoreStatus = 'staged' | 'approved' | 'running' | 'completed' | 'cancelled' | 'failed';
 
 export interface Restore {
   id: string;
@@ -111,10 +113,22 @@ export interface TenantExport {
   tenantName: string;
   format: ExportFormat;
   includeMedia: boolean;
-  status: 'queued' | 'ready';
+  status: ExportStatus;
   requestedAt: string;
   expiresAt: string;
   requestedByName: string;
+  /** Archive size once ready, else null. */
+  sizeBytes: number | null;
+}
+
+/** Laravel `DataExport` status. Only `ready` (and not past `expires_at`) can be downloaded. */
+export const EXPORT_STATUSES = ['queued', 'running', 'ready', 'failed', 'expired'] as const;
+export type ExportStatus = (typeof EXPORT_STATUSES)[number];
+
+/** `GET /backup/exports/{id}/download` — a 15-minute signed URL for the archive. */
+export interface ExportDownload {
+  url: string;
+  expiresAt: string;
 }
 
 export interface BackupActivity {

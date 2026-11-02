@@ -19,6 +19,7 @@ Lists marked _not paginated_ return `{ data: [ … ] }` with no `meta` (small, b
 ### `GET /governance/dsars`
 
 Paginated `Dsar[]`. Filter `status` = `open` · `fulfilled` (omit for both). Open requests first (soonest `due_at`), then fulfilled (newest first).
+The console asks for 25 a page (`?dsarPage=` in its URL) and shows the pager — it never stops at a fixed cap.
 
 `Dsar`: `id, requester, tenant_id, tenant_name, type (Access|Deletion|Portability), received_at, due_at, fulfilled_at|null`.
 `due_at` is the statutory deadline (receipt + 30 days); the client shows "in 4d" / "2d overdue" from it.
@@ -26,8 +27,11 @@ Rows live in the shared `dsars` table — the overview action queue counts the s
 
 ### `POST /governance/dsars/{id}/fulfil`
 
-Sets `fulfilled_at`. For a `Deletion` request this **erases** the subject's personal data (UI asks for confirmation first);
-`Access` sends the report, `Portability` sends the export. → `{ data: Dsar }`. 422 `status` if already fulfilled.
+Sets `fulfilled_at`. When the learner no longer exists (already erased or deleted), there is nothing to export or erase and
+the request is simply closed (200, never a 404). For a `Deletion` request this **erases** the subject's personal data (UI asks for confirmation first);
+`Access` / `Portability` queue the learner's export and email it **to the data subject (the learner)**, never to the staff
+member who fulfils it: the email links to the learner's account page on the school's site, where they download their data
+once signed in. → `{ data: Dsar }`. 422 `status` if already fulfilled.
 Audit (Security, tenant): `Erased personal data for {requester} ({tenant})` · `{type} request fulfilled for {requester} ({tenant})`.
 
 ### `GET /governance/retention` — _not paginated_
@@ -92,6 +96,13 @@ One row per tenant: `[{ tenant_id, tenant_name, plan, accepted_at|null, last_rem
 **Acceptance and reminders are separate records** — a reminder never sets `accepted_at`. Acceptance is recorded by the tenant
 dashboard (owner clicks "Accept"), not by this console.
 
+### `POST /governance/policies` — draft a new version
+
+`governance.manage`. Body `{ doc_key: tos|dpa|aup|student_terms, version, note? }` → `201 { data: PolicyDocument }` (state
+`Draft`, `name` from the family, `note` null when empty). 422 `doc_key` (unknown family, or "This document already has a
+draft — publish it first."), `version` (≤ 20 letters/numbers/dots, and new for the family), `note` (≤ 300).
+Audit: `Drafted {name} {version}` (Tenants). The Documents section has the form; nothing else creates documents.
+
 ### `POST /governance/policies/{id}/publish`
 
 Draft → Live. The previous Live version of the same `doc_key` becomes `Superseded`. Sets `published_at` = now and
@@ -114,21 +125,32 @@ Audit (Tenants, tenant): `Reminded {tenant} to accept {name} {version}`.
   "data": {
     "regions": [{ "region": "EU", "label": "EU · Frankfurt", "framework": "GDPR · Schrems II", "tenants": 6, "learners": 9412 }],
     "tenants": [
-      { "tenant_id": "tn_kodo", "name": "Kodo Design School", "plan": "Launch", "students": 146, "region": "APAC", "migrating": false }
+      {
+        "tenant_id": "tn_kodo",
+        "name": "Kodo Design School",
+        "plan": "Launch",
+        "students": 146,
+        "region": "APAC",
+        "migrating": true,
+        "requested_region": "EU"
+      }
     ],
-    "pending_migrations": 0,
+    "pending_migrations": 1,
     "sub_processors": 6
   }
 }
 ```
 
-`region` is the tenant's own `region` field (`EU|US|APAC`). `migrating` = a move was scheduled within the ~20-minute cutover window.
+`regions` lists `EU`, `US`, `UK`, `APAC`. `region` is where the tenant's data **is** (`EU|US|UK|APAC`). `migrating` = a move
+was requested and hasn't been carried out; `requested_region` is its target (null otherwise). There is **no automatic
+cutover**: a request stays pending (and `region` unchanged) until the platform team migrates the data. Requests from the
+tenant dashboard (`uk-london`, …) are reported with the console's codes.
 
 ### Moving a tenant — `PATCH /tenants/{id}` `{ region }`
 
-No governance endpoint: the console calls the tenant endpoint (`tenants.manage`), which schedules the migration and audits
-`Scheduled data-residency move for {name}: {a} → {b}` (Security). The workspace is read-only for ~20 minutes during cutover.
-Database, storage and backups are pinned to the region; video is served from the nearest CDN edge.
+No governance endpoint: the console calls the tenant endpoint (`tenants.manage`), which records a move **request**
+(`region_request`, returned on the tenant detail) and audits `Scheduled data-residency move for {name}: {a} → {b}` (Security).
+It doesn't move data by itself; the console shows "Move requested" and never claims the tenant moved.
 
 ## Abuse & limits
 
@@ -141,7 +163,10 @@ Unresolved signals, highest severity first:
 
 Applies the recommended action and resolves the signal → `{ data: { signal_id, outcome } }` (`outcome` is the operator-facing sentence).
 `raise_limit` doubles the tenant's API limit (sets the tenant's `api_per_minute` limit override); `freeze_checkout` blocks new card
-payments; `acknowledge` just records review. 422 `status` if already handled.
+payments (sets the tenant's `checkout_frozen_at`; `acknowledge` just records review). 422 `status` if already handled.
+`freeze_checkout` needs a password confirmed in the last 15 minutes (`423 password_confirmation_required`, see [auth.md](auth.md)) in both backends, and the console asks for the school's name typed back first.
+A freeze is undone with `DELETE /governance/tenants/{id}/checkout-freeze` (`governance.manage`, audited; see
+[tenants.md](tenants.md)) — the tenant drawer shows "Checkout frozen" with **Unfreeze checkout**.
 Audit (Security, tenant): `{action_label} applied to {tenant}`.
 
 ### `POST /governance/abuse-signals/{id}/dismiss`
@@ -152,7 +177,7 @@ Audit (Security, tenant): `Dismissed abuse signal for {tenant}: {signal}`.
 ### `GET /governance/rate-limits` — _not paginated_
 
 `[{ plan, per_minute, default_per_minute, peak_per_minute }]` for Launch, Growth, Scale. Defaults equal the plan limit
-`api_per_minute` (60 / 300 / 1000). `peak_per_minute` = highest per-tenant rate seen today.
+`api_per_minute` (60 / 300 / 1000). `peak_per_minute` = highest per-tenant rate seen today, or **null** while request rates aren't sampled (shown as "—").
 
 ### `PUT /governance/rate-limits`
 

@@ -10,14 +10,24 @@ const cell = (name: string) => screen.findByRole('switch', { name });
 describe('plan entitlements', () => {
   it('renders the module grid, locked core modules and plan limits', async () => {
     signInAs('Owner');
-    renderApp('/platform/entitlements');
+    const { user, router } = renderApp('/platform/entitlements');
     expect(await cell('Video analytics on Launch')).toHaveAttribute('aria-checked', 'false');
     expect(await cell('Video analytics on Growth')).toHaveAttribute('aria-checked', 'true');
     expect(await cell('Dashboard on Launch (core)')).toBeDisabled();
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Entitlements sections' })).getByRole('link', { name: 'Limits by plan' }),
+    );
+    expect(router.state.location.search).toBe('?section=limits');
     const limits = await screen.findByRole('table', { name: 'Limits by plan' });
-    const lr = within(limits).getByRole('row', { name: /Live room minutes/ });
+    const lr = within(limits).getByRole('row', { name: /Live room participant-minutes/ });
     expect(within(lr).getByText('BYO only')).toBeInTheDocument();
     expect(within(lr).getByText('2,000/mo')).toBeInTheDocument();
+    const parallel = within(limits).getByRole('row', { name: /Live sessions at once/ });
+    expect(
+      within(parallel)
+        .getAllByRole('cell')
+        .map((c) => c.textContent),
+    ).toEqual(['1', '3', '10']);
   });
 
   it('overrides a cell, reaches tenants, and resets to defaults after confirming', async () => {
@@ -37,6 +47,27 @@ describe('plan entitlements', () => {
     await waitFor(() => expect(entitlementOverrides.get()).toEqual({}));
     expect(await cell('Video analytics on Launch')).toHaveAttribute('aria-checked', 'false');
     expect(audit.all().some((a) => a.action === 'Reset 1 entitlement override to plan defaults')).toBe(true);
+  });
+
+  it('names the schools on the plan and asks for the module typed back before turning it off', async () => {
+    signInAs('Owner');
+    const { user } = renderApp('/platform/entitlements');
+    await user.click(await cell('Video analytics on Growth'));
+    const dialog = await screen.findByRole('dialog', { name: 'Turn Video analytics off for Growth?' });
+    const onGrowth = tenants.where((x) => x.plan === 'Growth').length;
+    expect(await within(dialog).findByText(new RegExp(`^${onGrowth} schools? on Growth lose`))).toBeInTheDocument();
+    const off = within(dialog).getByRole('button', { name: 'Turn off for Growth' });
+    expect(off).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(await cell('Video analytics on Growth')).toHaveAttribute('aria-checked', 'true');
+    expect(entitlementOverrides.get()).toEqual({});
+
+    await user.click(await cell('Video analytics on Growth'));
+    const again = await screen.findByRole('dialog', { name: 'Turn Video analytics off for Growth?' });
+    await user.type(within(again).getByLabelText('Type Video analytics to confirm'), 'video analytics');
+    await user.click(within(again).getByRole('button', { name: 'Turn off for Growth' }));
+    await waitFor(() => expect(entitlementOverrides.get()).toEqual({ 'vidanalytics:Growth': false }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('filters modules with the search box and keeps it in the URL', async () => {

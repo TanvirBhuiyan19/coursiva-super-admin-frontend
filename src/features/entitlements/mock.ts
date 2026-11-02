@@ -3,9 +3,19 @@
 // (server-side storage only — the API always exchanges arrays of cells).
 import { entitlementOverrides, liveRoomAllowance } from '@/mocks/collections';
 import { extensionPlans, extensionPrice, moduleDefaultForPlan, moduleOnForPlan } from '@/mocks/derive';
-import { authorize, handle, http, invalid, ok, readBody, recordAudit, route } from '@/mocks/http';
+import { authorize, handle, http, invalid, ok, readBody, recordAudit, requireRecentPassword, route } from '@/mocks/http';
 import { EXTENSIONS, MODULES, PLAN_LIMITS, type ModuleDef } from '@/mocks/reference';
-import { LIMIT_KEYS, PLANS, type Plan } from '@/lib/domain';
+import { LIMIT_WIRE_KEYS, PLANS, type LimitKey, type Plan } from '@/lib/domain';
+
+const ENTITLEMENT_LIMIT_KEYS: LimitKey[] = [
+  'storageGb',
+  'staffSeats',
+  'apiPerMinute',
+  'students',
+  'courses',
+  'liveRoomMinutes',
+  'liveSessions',
+];
 import type { EntitlementCellInput, EntitlementMatrix, EntitlementModule, PlanLimit } from './types';
 
 const cellKey = (moduleId: string, plan: Plan) => `${moduleId}:${plan}`;
@@ -47,8 +57,9 @@ function matrix(): EntitlementMatrix {
 
 function limits(): PlanLimit[] {
   const lr = liveRoomAllowance.get();
-  return LIMIT_KEYS.map((key) => ({
-    key,
+  // Laravel EntitlementController::LIMITS (credits are per-tenant only); keys are snake_case values on the wire.
+  return ENTITLEMENT_LIMIT_KEYS.map((key) => ({
+    key: LIMIT_WIRE_KEYS[key],
     values: PLANS.map((plan) => ({ plan, value: key === 'liveRoomMinutes' ? lr[plan] : PLAN_LIMITS[plan][key] })),
     managedBy: key === 'liveRoomMinutes' ? 'media' : null,
   }));
@@ -87,6 +98,8 @@ export const handlers = [
         if (typeof c.enabled !== 'boolean') errors[`cells.${i}.enabled`] = 'Enabled must be true or false.';
       });
       if (Object.keys(errors).length) throw invalid(errors);
+      // Like both backends: turning a module off for a whole plan needs a recently confirmed password.
+      if (cells.some((c) => !c.enabled)) requireRecentPassword();
 
       for (const c of cells) {
         const mod = MODULES.find((m) => m.id === c.moduleId)!;

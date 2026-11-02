@@ -1,8 +1,10 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Tone } from '@/lib/domain';
 import { cx } from '@/lib/cx';
 import { toneFg } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
+import { clampNum, useGrow } from './grow';
+import { revealRef, useSkeletonSwap } from './motion';
 
 interface BarProps {
   /** 0–100, or any CSS width. */
@@ -14,9 +16,15 @@ interface BarProps {
   label?: string;
 }
 
+/**
+ * A meter. Motion (transform only, CSS in motion.css): the fill grows in from its start edge once it scrolls into view,
+ * and eases from the old size to the new one when the value changes; its real width is always the exact value.
+ */
 export function Bar({ value, color, tone, size, style, label }: BarProps) {
-  const numeric = typeof value === 'number' ? Math.max(0, Math.min(100, value)) : undefined;
+  // API numbers are validated before they reach CSS: finite and clamped to 0–100 (NaN/Infinity render as empty).
+  const numeric = typeof value === 'number' ? clampNum(value, 0, 100, 0) : undefined;
   const w = numeric != null ? numeric + '%' : (value as string);
+  const grow = useGrow(numeric ?? 100);
   return (
     <div
       className={cx('bar', size === 'lg' && 'bar--lg', size === 'md' && 'bar--md', size === 'thin' && 'bar--thin')}
@@ -27,7 +35,11 @@ export function Bar({ value, color, tone, size, style, label }: BarProps) {
       aria-valuemin={label ? 0 : undefined}
       aria-valuemax={label ? 100 : undefined}
     >
-      <span style={{ width: w, background: color ?? (tone ? toneFg(tone) : undefined) }} />
+      <span
+        ref={revealRef}
+        className={grow.className}
+        style={{ ...grow.style, width: w, background: color ?? (tone ? toneFg(tone) : undefined) }}
+      />
     </div>
   );
 }
@@ -117,16 +129,20 @@ export function Spinner({ size = 14 }: { size?: number }) {
   return <span className="spinner" style={{ width: size, height: size }} aria-hidden="true" />;
 }
 
-/** Placeholder block shown while data loads. */
+/** Placeholder block shown while data loads. Whatever replaces it fades in (see `useSkeletonSwap`). */
 export function Skeleton({ h = 14, w = '100%', r = 6, style }: { h?: number; w?: number | string; r?: number; style?: CSSProperties }) {
-  return <span className="skeleton" style={{ height: h, width: w, borderRadius: r, ...style }} aria-hidden="true" />;
+  const ref = useRef<HTMLSpanElement>(null);
+  useSkeletonSwap(ref);
+  return <span ref={ref} className="skeleton" style={{ height: h, width: w, borderRadius: r, ...style }} aria-hidden="true" />;
 }
 
 /** Stacked skeleton rows for list/table placeholders. */
 export function SkeletonRows({ rows = 5, h = 18 }: { rows?: number; h?: number }) {
   const tc = useCommonT();
+  const ref = useRef<HTMLDivElement>(null);
+  useSkeletonSwap(ref);
   return (
-    <div className="stack" style={{ gap: 14, padding: '8px 0' }} role="status" aria-label={tc('states.loadingLabel')}>
+    <div ref={ref} className="stack" style={{ gap: 14, padding: '8px 0' }} role="status" aria-label={tc('states.loadingLabel')}>
       {Array.from({ length: rows }, (_, i) => (
         <Skeleton key={i} h={h} w={`${92 - ((i * 13) % 30)}%`} />
       ))}

@@ -33,8 +33,6 @@ interface UiState {
   cmdRecent: string[];
   notifOpen: boolean;
   provisionOpen: boolean;
-  /** Tenant id currently shown in the read-only impersonation view. */
-  impersonating: string | null;
   toasts: Toast[];
 
   setBrand: (brand: string) => void;
@@ -65,7 +63,6 @@ export const useUi = create<UiState>((set, get) => ({
   })(),
   notifOpen: false,
   provisionOpen: false,
-  impersonating: null,
   toasts: [],
 
   setBrand: (brand) => {

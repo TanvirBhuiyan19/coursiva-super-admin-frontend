@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { cx } from '@/lib/cx';
 import { useT as useCommonT } from '@/lib/i18n/common';
+import { CountUp } from './CountUp';
+import { useChangeFlash } from './freshRows';
 
 export interface KpiItem {
   label: string;
@@ -13,14 +15,25 @@ interface KpiProps extends KpiItem {
   deltaColor?: string;
   deltaSuffix?: string;
   small?: boolean;
+  /**
+   * On self-refreshing screens: what the figure answers (e.g. the selected range). A change of the value within the same
+   * scope tints the tile once; `null` while placeholder data shows. Leave unset elsewhere (no tint).
+   */
+  changeScope?: string | null;
 }
 
-export function Kpi({ label, value, sub, delta, deltaColor, deltaSuffix, small }: KpiProps) {
+export function Kpi({ label, value, sub, delta, deltaColor, deltaSuffix, small, changeScope }: KpiProps) {
   const tc = useCommonT();
+  const flash = useChangeFlash(
+    changeScope !== undefined && (typeof value === 'string' || typeof value === 'number') ? value : null,
+    changeScope ?? null,
+  );
   return (
-    <div className={cx('card', small && 'card--tight')}>
+    <div className={cx('card', small && 'card--tight', flash && 'fx-flash', flash)}>
       <div className="kpi-label">{label}</div>
-      <div className={cx('kpi-value', small && 'kpi-value--sm')}>{value}</div>
+      <div className={cx('kpi-value', small && 'kpi-value--sm')}>
+        <CountUp value={value} />
+      </div>
       {delta != null && (
         <div style={{ fontSize: 12, marginTop: 6, color: deltaColor ?? 'var(--gFg)', fontWeight: 600 }}>
           {delta} <span style={{ color: 'var(--tx4)', fontWeight: 400 }}>{deltaSuffix ?? tc('time.vsPreviousPeriod')}</span>

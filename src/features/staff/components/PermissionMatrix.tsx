@@ -1,4 +1,5 @@
-import { Card, QueryState, SkeletonRows } from '@/components/ui';
+import { useState } from 'react';
+import { Card, ConfirmDialog, QueryState, SkeletonRows } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { PERMISSIONS, type Permission } from '@/features/auth/permissions';
 import { toast } from '@/store/ui';
@@ -28,6 +29,27 @@ function Cell({ role, permission, manage }: { role: RolePermissions; permission:
   const on = role.locked || role.permissions.includes(permission);
   const label = t(`permissions.labels.${permission}`);
   const disabled = role.locked || !manage;
+  const roleName = t(`roles.${role.role}`);
+  // A change applies to every member of the role at once (and granting can escalate it), so it names the members and
+  // asks for the role typed back first.
+  const [confirming, setConfirming] = useState(false);
+  const apply = () => {
+    const permissions = on ? role.permissions.filter((p) => p !== permission) : [...role.permissions, permission];
+    set.mutate(
+      { role: role.role, permissions, permission, granted: !on },
+      {
+        onSuccess: () =>
+          toast(
+            tStaff(on ? 'permissions.toasts.removed' : 'permissions.toasts.granted', {
+              permission: label,
+              role: tStaff(`roles.${role.role}`),
+              count: role.members,
+            }),
+          ),
+      },
+    );
+    setConfirming(false);
+  };
   return (
     <div role="cell" style={{ display: 'flex', justifyContent: 'center' }}>
       <button
@@ -38,22 +60,7 @@ function Cell({ role, permission, manage }: { role: RolePermissions; permission:
           permission: label,
           role: t(`roles.${role.role}`),
         })}
-        onClick={() => {
-          const permissions = on ? role.permissions.filter((p) => p !== permission) : [...role.permissions, permission];
-          set.mutate(
-            { role: role.role, permissions, permission, granted: !on },
-            {
-              onSuccess: () =>
-                toast(
-                  tStaff(on ? 'permissions.toasts.removed' : 'permissions.toasts.granted', {
-                    permission: label,
-                    role: tStaff(`roles.${role.role}`),
-                    count: role.members,
-                  }),
-                ),
-            },
-          );
-        }}
+        onClick={() => setConfirming(true)}
         style={{
           width: '100%',
           maxWidth: 88,
@@ -73,6 +80,18 @@ function Cell({ role, permission, manage }: { role: RolePermissions; permission:
       >
         <span aria-hidden="true">{on ? '✓' : ''}</span>
       </button>
+      {confirming && (
+        <ConfirmDialog
+          title={t(on ? 'permissions.confirm.removeTitle' : 'permissions.confirm.grantTitle', { permission: label, role: roleName })}
+          phrase={roleName}
+          confirmLabel={t(on ? 'permissions.confirm.remove' : 'permissions.confirm.grant', { role: roleName })}
+          tone={on ? 'danger' : 'primary'}
+          onConfirm={apply}
+          onCancel={() => setConfirming(false)}
+        >
+          {t(on ? 'permissions.confirm.removeBody' : 'permissions.confirm.grantBody', { count: role.members, role: roleName })}
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

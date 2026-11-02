@@ -5,7 +5,8 @@
 import { liveRoomAllowance, tenants } from '@/mocks/collections';
 import { ago, singleton } from '@/mocks/db';
 import { effectiveLimits } from '@/mocks/derive';
-import { authorize, handle, http, invalid, notFound, ok, readBody, recordAudit, route } from '@/mocks/http';
+import { toConnection as baseConnection, mergeCredentials, type CredentialDef, type CredentialFieldDef } from '@/mocks/credentials';
+import { authorize, handle, http, invalid, notFound, ok, readBody, recordAudit, requireRecentPassword, route } from '@/mocks/http';
 import { PLANS } from '@/lib/domain';
 import {
   DRM_AVAILABILITY,
@@ -36,8 +37,6 @@ import {
 
 // ---------- Reference ----------
 const LR_POLICIES: Record<LiveRoomPolicyKey, [string, string]> = {
-  byo_providers: ['Let tenants connect their own Zoom / Meet / Teams', 'Per-tenant OAuth. No platform cost, no recording liability.'],
-  built_in_rooms: ['Offer built-in rooms', 'Platform-hosted video. Costs participant-minutes — gate it by plan.'],
   pull_recordings: ['Allow pulling provider recordings into tenant storage', 'Counts against the tenant’s storage and inherits their DRM.'],
   fallback_to_built_in: ['Fall back to built-in rooms on provider failure', 'Keeps classes running when a tenant’s token is revoked.'],
 };
@@ -55,24 +54,62 @@ const DRM: Record<DrmProtectionKey, [string, string, boolean]> = {
 };
 
 type Kind = 'drm' | 'storage';
-interface ConnectionDef {
-  key: string;
+interface ConnectionDef extends CredentialDef {
   kind: Kind;
-  name: string;
-  description: string;
-  role: string | null;
-  fields: { key: string; label: string; secret: boolean }[];
 }
 
-const f = (key: string, label: string, secret = true) => ({ key, label, secret });
-const CONNECTIONS: ConnectionDef[] = [
+const f = (key: string, label: string, secret = true, extra: Pick<CredentialFieldDef, 'optional' | 'check' | 'maxLength'> = {}) => ({
+  key,
+  label,
+  secret,
+  ...extra,
+});
+const alnumId = (message: string) => (v: string) => (/^[A-Za-z0-9]{8,128}$/.test(v) ? undefined : message);
+const oneOf =
+  (label: string, ...options: string[]) =>
+  (v: string) =>
+    options.includes(v) ? undefined : `The ${label} must be ${options.join(' or ')}.`;
+
+/**
+ * The backend's MuxCredentials::pem: Mux shows the signing key's private half as base64 of a PEM (a pasted PEM
+ * also works); anything that isn't an RSA private key is refused. The browser can't parse the key with openssl,
+ * so the mock checks the PEM armour of the decoded text instead.
+ */
+function isRsaPrivateKey(pasted: string): boolean {
+  let pem = pasted;
+  if (!pem.includes('-----BEGIN')) {
+    try {
+      pem = atob(pem);
+    } catch {
+      return false;
+    }
+  }
+  return /-----BEGIN (RSA )?PRIVATE KEY-----[\s\S]+-----END (RSA )?PRIVATE KEY-----/.test(pem);
+}
+
+export const CONNECTIONS: ConnectionDef[] = [
   {
+    // Transcoding (backend docs/storage-and-media.md): the signing key's private half signs every playback URL,
+    // the webhook secret verifies asset events at {API}/api/v1/webhooks/mux, and a DRM configuration turns on Mux DRM.
     key: 'mux',
     kind: 'drm',
     name: 'Mux',
     description: 'Video hosting · encoding · signed playback URLs',
     role: null,
-    fields: [f('token_id', 'Token ID'), f('token_secret', 'Token secret'), f('signing_key_id', 'Signing key ID')],
+    fields: [
+      f('token_id', 'Token ID'),
+      f('token_secret', 'Token secret'),
+      f('signing_key_id', 'Signing key ID', true, { check: alnumId('The signing key ID is letters and digits only.') }),
+      f('signing_private_key', 'Signing private key (base64, as Mux shows it)', true, {
+        check: (v) => (isRsaPrivateKey(v) ? undefined : 'Paste the base64 private key Mux showed when the signing key was created.'),
+        maxLength: 8192, // Mux's base64 of a 2048-bit RSA PEM is ~2,200 characters
+      }),
+      f('webhook_secret', 'Webhook signing secret', true, { optional: true }),
+      f('drm_configuration_id', 'DRM configuration ID', false, {
+        optional: true,
+        check: alnumId('The DRM configuration ID is letters and digits only (Mux → Settings → Digital Rights Management).'),
+      }),
+    ],
   },
   {
     key: 'ezdrm',
@@ -96,7 +133,12 @@ const CONNECTIONS: ConnectionDef[] = [
     name: 'Cloudflare R2',
     description: 'Delivery — HLS renditions behind Cloudflare CDN · zero egress',
     role: 'Hot delivery',
-    fields: [f('account_id', 'Account ID', false), f('access_key_id', 'Access key ID'), f('secret_access_key', 'Secret access key')],
+    fields: [
+      f('account_id', 'Account ID', false),
+      f('access_key_id', 'Access key ID'),
+      f('secret_access_key', 'Secret access key'),
+      f('bucket', 'Bucket', false),
+    ],
   },
   {
     key: 's3',
@@ -104,7 +146,64 @@ const CONNECTIONS: ConnectionDef[] = [
     name: 'AWS S3',
     description: 'Masters — original uploads · lifecycle to Glacier Deep Archive',
     role: 'Archive masters',
-    fields: [f('access_key_id', 'Access key ID'), f('secret_access_key', 'Secret access key'), f('region', 'Region', false)],
+    fields: [
+      f('access_key_id', 'Access key ID'),
+      f('secret_access_key', 'Secret access key'),
+      f('region', 'Region', false),
+      f('bucket', 'Bucket', false),
+    ],
+  },
+  {
+    // Public images (backend docs/connections.md → Public assets): logos, covers, thumbnails and the platform's brand
+    // images, loaded straight from the bucket's public URL. The backend verifies it by writing a probe file, reading
+    // it back, fetching it through the public base URL and deleting it.
+    key: 'public_assets',
+    kind: 'storage',
+    name: 'Public assets',
+    description:
+      'Public images — school logos, course covers, product thumbnails and the platform’s brand images · a Cloudflare R2 or AWS S3 bucket served from a public URL (custom domain or CDN)',
+    role: 'Public images',
+    fields: [
+      {
+        ...f('provider', 'Provider', false, { optional: true, check: oneOf('provider', 'r2', 's3') }),
+        options: [
+          { value: 'r2', label: 'Cloudflare R2' },
+          { value: 's3', label: 'AWS S3' },
+        ],
+        default: 'r2',
+      },
+      f('account_id', 'Account ID (R2)', false, {
+        optional: true,
+        check: (v) => (/^[0-9a-f]{32}$/i.test(v) ? undefined : 'The account ID is 32 hexadecimal characters.'),
+      }),
+      f('region', 'Region (S3)', false, {
+        optional: true,
+        check: (v) => (/^[a-z]{2}(-[a-z]+)+-\d$/.test(v) ? undefined : 'The region looks like eu-west-1.'),
+      }),
+      f('access_key_id', 'Access key ID'),
+      f('secret_access_key', 'Secret access key'),
+      f('bucket', 'Bucket', false),
+      f('public_url', 'Public base URL', false, {
+        check: (v) =>
+          /^https:\/\/[^\s/?#@]+(\/[^\s?#]*)?$/.test(v)
+            ? undefined
+            : 'The public base URL is the https:// address that serves the bucket, e.g. https://assets.example.com.',
+      }),
+      {
+        ...f('acl', 'Object ACL', false, { optional: true, check: oneOf('ACL', 'none', 'public-read') }),
+        options: [
+          { value: 'none', label: 'None (bucket policy)' },
+          { value: 'public-read', label: 'public-read' },
+        ],
+        default: 'none',
+      },
+    ],
+    // The provider's location field is required (the backend answers it on that field).
+    verify: (v) => {
+      const [field, label] = v.provider === 's3' ? ['region', 'Region (S3)'] : ['account_id', 'Account ID (R2)'];
+      if (!v[field]) throw invalid({ [`credentials.${field}`]: `Enter the ${label}.` });
+      return undefined;
+    },
   },
 ];
 
@@ -165,13 +264,33 @@ export const mediaStore = singleton<MediaStore>('mediaSettings', () => ({
   availableOn: 'growth',
   keysRotatedAt: ago({ d: 41 }),
   credentials: [
-    cred('mux', { token_id: 'mux-tok-51d8a0c2', token_secret: 'mux-sec-f02b7e19c4d3', signing_key_id: 'mux-sig-8c1e' }, ago({ d: 63 })),
+    cred(
+      'mux',
+      {
+        token_id: 'mux-tok-51d8a0c2',
+        token_secret: 'mux-sec-f02b7e19c4d3',
+        signing_key_id: 'muxSig8c1e',
+        // base64 of a (fake) PEM, as Mux shows it once when the signing key is created.
+        signing_private_key:
+          'LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBbW9ja0tleQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQo=',
+      },
+      ago({ d: 63 }),
+    ),
     cred(
       'r2',
-      { account_id: '7f2c91d0e4ab4c55', access_key_id: 'r2-ak-3be90f4a', secret_access_key: 'r2-sk-c8d27f1e90ab' },
+      {
+        account_id: '7f2c91d0e4ab4c55',
+        access_key_id: 'r2-ak-3be90f4a',
+        secret_access_key: 'r2-sk-c8d27f1e90ab',
+        bucket: 'coursiva-media',
+      },
       ago({ d: 120 }),
     ),
-    cred('s3', { access_key_id: 'AKIA4MOCK2Q7WXY9', secret_access_key: 's3-sk-0a9d4e7b2f61', region: 'eu-west-1' }, ago({ d: 120 })),
+    cred(
+      's3',
+      { access_key_id: 'AKIA4MOCK2Q7WXY9', secret_access_key: 's3-sk-0a9d4e7b2f61', region: 'eu-west-1', bucket: 'coursiva-masters' },
+      ago({ d: 120 }),
+    ),
   ],
   archiveAfterDays: 90,
   renditionLadder: 'standard',
@@ -186,26 +305,10 @@ export const mediaStore = singleton<MediaStore>('mediaSettings', () => ({
 
 // ---------- Resources ----------
 function toConnection(def: ConnectionDef): Connection {
-  const stored = mediaStore.get().credentials.find((c) => c.connection === def.key);
-  return {
-    key: def.key,
-    name: def.name,
-    description: def.description,
-    role: def.role,
-    connected: !!stored,
-    verifiedAt: stored?.verifiedAt ?? null,
-    fields: def.fields.map((fd) => {
-      const v = stored?.values[fd.key];
-      return {
-        key: fd.key,
-        label: fd.label,
-        secret: fd.secret,
-        configured: !!v,
-        last4: v ? v.slice(-4) : null,
-        value: fd.secret ? null : (v ?? null),
-      };
-    }),
-  };
+  return baseConnection(
+    def,
+    mediaStore.get().credentials.find((c) => c.connection === def.key),
+  );
 }
 
 function liveRooms(): LiveRoomSettings {
@@ -289,21 +392,11 @@ function findConnection(kind: Kind, key: string | readonly string[] | undefined)
 
 async function connect(kind: Kind, key: string | readonly string[] | undefined, request: Request) {
   authorize('platform.manage');
+  requireRecentPassword();
   const def = findConnection(kind, key);
   const { credentials } = await readBody<CredentialsInput>(request);
   const stored = mediaStore.get().credentials.find((c) => c.connection === def.key);
-  const values: Record<string, string> = { ...stored?.values };
-  const errors: Record<string, string> = {};
-  for (const c of Array.isArray(credentials) ? credentials : []) {
-    const fd = def.fields.find((x) => x.key === c.field);
-    if (!fd) continue;
-    const v = typeof c.value === 'string' ? c.value.trim() : '';
-    if (v.length > 500) errors[`credentials.${fd.key}`] = `${fd.label} may not be longer than 500 characters.`;
-    else if (v) values[fd.key] = v;
-  }
-  for (const fd of def.fields)
-    if (!values[fd.key] && !errors[`credentials.${fd.key}`]) errors[`credentials.${fd.key}`] = `Enter the ${fd.label}.`;
-  if (Object.keys(errors).length) throw invalid(errors);
+  const values = mergeCredentials(def, stored, credentials);
   const rest = mediaStore.get().credentials.filter((c) => c.connection !== def.key);
   mediaStore.patch({ credentials: [...rest, { connection: def.key, values, verifiedAt: new Date().toISOString() }] });
   const what = kind === 'drm' ? 'DRM provider' : 'storage backend';
@@ -313,6 +406,7 @@ async function connect(kind: Kind, key: string | readonly string[] | undefined, 
 
 function disconnect(kind: Kind, key: string | readonly string[] | undefined) {
   authorize('platform.manage');
+  requireRecentPassword();
   const def = findConnection(kind, key);
   const s = mediaStore.get();
   if (s.credentials.some((c) => c.connection === def.key)) {

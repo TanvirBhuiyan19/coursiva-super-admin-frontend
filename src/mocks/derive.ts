@@ -20,9 +20,18 @@ export const minutesSince = (iso: string) => Math.max(0, Math.round((Date.now() 
 /** Paying MRR: trials and suspended tenants contribute nothing. */
 export const tenantMrr = (t: TenantRow) => (t.status === 'Trial' || t.status === 'Suspended' ? 0 : t.monthlyPrice);
 
+/** Suspension reasons that are billing holds (Laravel TenantAccessGuard::BILLING_HOLD_REASONS). */
+export const BILLING_HOLD_REASONS = ['billing', 'canceled', 'payment_method_required'];
+/** A card-less trial ended: the school is paused until a card is added (or staff extend the trial). */
+export const PAUSED_FOR_CARD = 'payment_method_required';
+
 export function tenantHealth(t: TenantRow): { health: TenantHealth; reason: string | null } {
   if (t.status === 'Past due') return { health: 'At risk', reason: 'Payment failing · 2 retries left' };
-  if (t.status === 'Suspended') return { health: 'At risk', reason: 'Suspended by staff' };
+  if (t.status === 'Suspended')
+    return {
+      health: 'At risk',
+      reason: BILLING_HOLD_REASONS.includes(t.suspensionReason ?? '') ? 'Suspended for billing' : 'Suspended by staff',
+    };
   if (t.status === 'Trial') {
     const days = t.trialEndsAt ? Math.max(0, Math.ceil((new Date(t.trialEndsAt).getTime() - Date.now()) / DAY)) : 0;
     return { health: 'Watch', reason: `Trial converts in ${days} day${days === 1 ? '' : 's'}` };
