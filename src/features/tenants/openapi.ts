@@ -38,7 +38,14 @@ export const spec = defineSpec({
       path: '/tenants',
       summary: 'List tenants',
       auth: 'tenants.view',
-      query: { ...listParams(['name', 'students', 'mrr', 'created_at', 'last_active_at']), ...directoryFilters },
+      query: {
+        ...listParams(['name', 'students', 'mrr', 'created_at', 'last_active_at']),
+        ...directoryFilters,
+        ids: {
+          type: 'string',
+          description: 'Comma-separated tenant ids (at most 100 read): only those tenants (pickers resolve saved selections).',
+        },
+      },
       response: paginated(ref('Tenant')),
       example: { query: { per_page: 5, sort: '-mrr' } },
     },
@@ -114,6 +121,25 @@ export const spec = defineSpec({
       path_params: id,
       response: resource(ref('TenantDetail')),
       example,
+    },
+    {
+      method: 'GET',
+      path: '/tenants/{id}/activity',
+      summary: 'Tenant activity, newest first (paginated)',
+      description:
+        'The school’s whole history: lifecycle state changes and console audit entries merged. The detail’s `timeline` carries only the newest 20.',
+      auth: 'tenants.view',
+      path_params: id,
+      query: {
+        page: { type: 'integer', description: 'Page number (1-based).' },
+        per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
+      },
+      response: paginated({
+        type: 'object',
+        required: ['at', 'text'],
+        properties: { at: { type: 'string', format: 'date-time' }, text: { type: 'string' } },
+      }),
+      example: { ...example, query: { per_page: 10 } },
     },
     {
       method: 'PATCH',

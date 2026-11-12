@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { api } from '@/lib/api/client';
 import { audit, flags, platformStatus } from '@/mocks/collections';
 import { renderApp, signInAs } from '@/test/utils';
-import { apiKeys, certificates, deliveries, imports, policies, senders } from './mock';
+import { apiKeys, certificates, connectionStore, deliveries, imports, policies, senders } from './mock';
 
 const sectionLink = (nav: string, name: string | RegExp) =>
   within(screen.getByRole('navigation', { name: nav })).getByRole('link', { name });
@@ -170,6 +170,35 @@ describe('email deliverability', () => {
     await within(table).findByRole('row', { name: /DevPath Bootcamp/ });
     expect(within(table).queryByRole('button', { name: /Pause sending/ })).not.toBeInTheDocument();
     await expect(api.post('/platform/sender-domains/sd_devpath/pause')).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe('sending IPs', () => {
+  it('hints at a public IP and promises a Spamhaus check only once Spamhaus is connected', async () => {
+    signInAs('Owner');
+    const { user } = renderApp('/platform/deliverability?section=reputation');
+    expect(await screen.findByText(/Blocklists aren’t monitored/)).toBeInTheDocument();
+    const ip = screen.getByLabelText('IP address');
+    expect(ip).toHaveAttribute('placeholder', 'e.g. a public IPv4 address');
+    await user.type(ip, '93.184.216.34');
+    await user.click(screen.getByRole('button', { name: 'Add to the pool' }));
+    expect(await screen.findByText('93.184.216.34 added to the sending IPs')).toBeInTheDocument();
+    expect(screen.queryByText(/checked on Spamhaus with the next daily run/)).not.toBeInTheDocument();
+  });
+
+  it('promises the Spamhaus check when Spamhaus DQS is connected', async () => {
+    connectionStore.patch({
+      credentials: [
+        ...connectionStore.get().credentials,
+        { connection: 'spamhaus', values: { dqs_key: 'a'.repeat(26) }, verifiedAt: new Date().toISOString() },
+      ],
+    });
+    signInAs('Owner');
+    const { user } = renderApp('/platform/deliverability?section=reputation');
+    expect(await screen.findByText(/Checked daily on Spamhaus ZEN/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('IP address'), '93.184.216.35');
+    await user.click(screen.getByRole('button', { name: 'Add to the pool' }));
+    expect(await screen.findByText('93.184.216.35 added — checked on Spamhaus with the next daily run')).toBeInTheDocument();
   });
 });
 

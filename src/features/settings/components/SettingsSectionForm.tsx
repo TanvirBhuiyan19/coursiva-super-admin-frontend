@@ -7,6 +7,7 @@ import {
   Card,
   ConfirmButton,
   ConfirmDialog,
+  ErrorState,
   FormError,
   Input,
   Seg,
@@ -15,11 +16,13 @@ import {
   Toggle,
   UnsavedChangesGuard,
 } from '@/components/ui';
+import { SearchPicker } from '@/components/ui/SearchPicker';
 import { SettingRow, WhereRead, type SettingControlProps } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import { usePlatformConnections } from '@/features/platform/api';
-import { useTenants } from '@/features/tenants/api';
+import { useTenants, useTenantSearch, useTenantsByIds } from '@/features/tenants/api';
 import { ApiError, errorMessage } from '@/lib/api/errors';
+import { useDebounced } from '@/lib/useDebounced';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast } from '@/store/ui';
 import { useResetSettingsSection, useSendTestEmail, useUpdatePlatformSettings } from '../api';
@@ -406,6 +409,10 @@ function BillingProviderPicker({
   );
 }
 
+/**
+ * The exempt schools: chosen ones listed by name (resolved by id, so a school on any page of the directory shows), more
+ * added through a server-side search — every school is pickable however many there are.
+ */
 function TenantPicker({
   labelId,
   value,
@@ -418,41 +425,62 @@ function TenantPicker({
   onChange: (v: string[]) => void;
 }) {
   const t = useT();
-  const list = useTenants({ perPage: 100, sort: 'name' });
-  const tenants = list.data?.data ?? [];
+  const [query, setQuery] = useState('');
+  const search = useDebounced(query);
+  const matches = useTenantSearch(search, !disabled);
+  const chosen = useTenantsByIds(value);
+  const names = new Map((chosen.data?.data ?? []).map((tn) => [tn.id, tn.name]));
+  const toggle = (id: string) => onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id]);
   return (
-    <div style={{ width: 280 }}>
-      <div
-        role="group"
-        aria-labelledby={labelId}
-        className="card card--inset"
-        style={{ maxHeight: 220, overflowY: 'auto', padding: '4px 10px' }}
-      >
-        {list.isPending ? (
-          <Spinner />
-        ) : tenants.length === 0 ? (
-          <p className="t-sm muted">{t('options.noTenants')}</p>
-        ) : (
-          <ul className="plain-list">
-            {tenants.map((tn) => (
-              <li key={tn.id}>
-                <label className="hstack t-sm" style={{ gap: 8, padding: '6px 0', cursor: disabled ? 'default' : 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    className="checkbox"
-                    checked={value.includes(tn.id)}
-                    disabled={disabled}
-                    onChange={(e) => onChange(e.target.checked ? [...value, tn.id] : value.filter((id) => id !== tn.id))}
-                  />
-                  <span className="min0 ellipsis">{tn.name}</span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+    <div role="group" aria-labelledby={labelId} style={{ width: 280 }}>
+      {value.length > 0 && (
+        <div className="card card--inset" style={{ maxHeight: 220, overflowY: 'auto', padding: '4px 10px', marginBottom: 8 }}>
+          {chosen.isPending ? (
+            <Spinner />
+          ) : chosen.isError ? (
+            <ErrorState compact error={chosen.error} onRetry={() => void chosen.refetch()} />
+          ) : (
+            <ul className="plain-list" aria-label={t('options.exemptList')}>
+              {value.map((id) => {
+                const name = names.get(id) ?? id;
+                return (
+                  <li key={id} className="hstack t-sm" style={{ gap: 8, padding: '6px 0' }}>
+                    <span className="min0 ellipsis" style={{ flex: 1 }}>
+                      {name}
+                    </span>
+                    {!disabled && (
+                      <button
+                        type="button"
+                        className="link"
+                        style={{ fontSize: 12 }}
+                        aria-label={t('options.removeTenant', { name })}
+                        onClick={() => toggle(id)}
+                      >
+                        {t('options.remove')}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+      {!disabled && (
+        <SearchPicker
+          label={t('options.findTenant')}
+          placeholder={t('options.findTenant')}
+          query={query}
+          onQueryChange={setQuery}
+          options={(matches.data?.data ?? []).map((tn) => ({ value: tn.id, label: tn.name, sub: tn.domain }))}
+          loading={matches.isFetching}
+          error={matches.isError ? t('options.searchFailed') : null}
+          isChosen={(id) => value.includes(id)}
+          onPick={(o) => toggle(o.value)}
+        />
+      )}
       <div className="t-xs muted" style={{ marginTop: 4 }}>
-        {t('options.exemptCount', { count: value.length })}
+        {value.length === 0 && disabled ? t('options.noExempt') : t('options.exemptCount', { count: value.length })}
       </div>
     </div>
   );

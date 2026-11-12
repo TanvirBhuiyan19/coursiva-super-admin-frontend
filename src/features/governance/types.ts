@@ -72,7 +72,26 @@ export interface ModerationReport {
   decision: ModerationDecision | null;
   decidedAt: string | null;
   decidedBy: string | null;
+  /** Intake category (null on reports filed before intake existed). */
+  category: ReportCategory | null;
+  /** The reported item in the school's database; null when the report names only a URL. */
+  contentType: ReportContentType | null;
+  contentId: string | null;
+  /** Who reported it (console only — never shown to the school); null for anonymous reports. */
+  reporter: { name: string | null; email: string } | null;
+  /** False for learner posts and the school's own reports: removing them is no strike. */
+  countsAsStrike: boolean;
+  /** What the decision did in the school: hidden, the item no longer exists, or restored after "kept". */
+  enforcement: 'hidden' | 'not_found' | 'restored' | null;
+  /** When the reporter was emailed the final outcome. */
+  reporterNotifiedAt: string | null;
+  /** How many people reported the item: later reports about it are merged into this one (severity only rises). */
+  reporterCount?: number;
 }
+
+export const REPORT_CATEGORIES = ['csam', 'illegal', 'copyright', 'harassment', 'privacy', 'impersonation', 'spam', 'other'] as const;
+export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
+export type ReportContentType = 'community_post' | 'course' | 'lesson' | 'blog_post' | 'product';
 
 /** `open` = no final decision yet (undecided or access limited); `decided` = removed or kept. */
 export type ReportStatus = 'open' | 'decided';
@@ -153,6 +172,12 @@ export interface PolicyAcceptance {
   reminders: number;
 }
 
+/** Extra `meta` on the acceptance list: every live school counted (the search does not narrow these). */
+export interface PolicyAcceptanceMeta {
+  accepted: number;
+  pending: number;
+}
+
 // ---------- Data residency ----------
 export interface RegionInfo {
   region: Region;
@@ -177,7 +202,10 @@ export interface TenantResidency {
 
 export interface RegionSummary {
   regions: RegionInfo[];
+  /** The first 100 schools by name (kept for older clients); the console pages GET /governance/regions/tenants. */
   tenants: TenantResidency[];
+  /** Every live school. */
+  tenantsTotal: number;
   pendingMigrations: number;
   subProcessors: number;
 }

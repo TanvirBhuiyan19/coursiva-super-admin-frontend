@@ -71,6 +71,30 @@ describe('tenant drawer', () => {
     expect(router.state.location.pathname).toBe('/tenants');
   });
 
+  it('pages through the whole activity history, 10 entries at a time', async () => {
+    for (let i = 0; i < 25; i++)
+      audit.insert({
+        id: `au_page${String(i)}`,
+        createdAt: new Date(Date.now() - (i + 1) * 60_000).toISOString(),
+        actorId: null,
+        actorName: 'System',
+        action: `Paged entry ${String(i)}`,
+        category: 'Tenants',
+        tenantId: 'tn_amplify',
+        ip: null,
+      });
+    signInAs('Owner');
+    const { user } = renderApp('/tenants/tn_amplify');
+    const drawer = await screen.findByRole('dialog', { name: 'Amplify Coaching' });
+    const activity = within(drawer).getByRole('region', { name: 'Activity' });
+    expect(await within(activity).findByText('Paged entry 0')).toBeInTheDocument();
+    expect(within(activity).getAllByRole('listitem')).toHaveLength(10);
+    expect(within(activity).queryByText('Paged entry 10')).not.toBeInTheDocument();
+    await user.click(within(activity).getByRole('button', { name: /Next/ }));
+    expect(await within(activity).findByText('Paged entry 10')).toBeInTheDocument();
+    expect(within(activity).getByText(/11–20 of \d+ entries/)).toBeInTheDocument();
+  });
+
   it('suspends only after confirming, and records it in the audit log', async () => {
     signInAs('Owner');
     const { user } = renderApp('/tenants/tn_silva');

@@ -6,7 +6,20 @@ import { liveRoomAllowance, tenants } from '@/mocks/collections';
 import { ago, singleton } from '@/mocks/db';
 import { effectiveLimits } from '@/mocks/derive';
 import { toConnection as baseConnection, mergeCredentials, type CredentialDef, type CredentialFieldDef } from '@/mocks/credentials';
-import { authorize, handle, http, invalid, notFound, ok, readBody, recordAudit, requireRecentPassword, route } from '@/mocks/http';
+import {
+  authorize,
+  handle,
+  http,
+  invalid,
+  notFound,
+  ok,
+  paginate,
+  query,
+  readBody,
+  recordAudit,
+  requireRecentPassword,
+  route,
+} from '@/mocks/http';
 import { PLANS } from '@/lib/domain';
 import {
   DRM_AVAILABILITY,
@@ -28,6 +41,7 @@ import {
   type DrmUpdate,
   type LiveRoomPolicyKey,
   type LiveRoomSettings,
+  type LiveRoomUsage,
   type LiveRoomUpdate,
   type RenditionLadder,
   type StorageSettings,
@@ -324,22 +338,33 @@ function liveRooms(): LiveRoomSettings {
     allowances: PLANS.map((plan) => ({ plan, minutes: allowance[plan] })),
     overageRate: 0.004,
     topUp: { minutes: 1000, price: 12 },
-    usage: s.liveRoomUsage.flatMap(({ tenantId, usedMinutes }) => {
-      const t = tenants.find(tenantId);
-      if (!t) return [];
-      const cap = effectiveLimits(t).liveRoomMinutes;
-      return [
-        {
-          tenantId,
-          name: t.name,
-          plan: t.plan,
-          usedMinutes: cap ? usedMinutes : 0,
-          allowanceMinutes: cap,
-          status: cap === 0 ? ('byo' as const) : usedMinutes > cap ? ('over' as const) : ('within' as const),
-        },
-      ];
-    }),
+    // The first schools A–Z; the whole list pages through GET /media/live-rooms/usage.
+    usage: liveUsageRows().slice(0, LIVE_USAGE_EMBEDDED),
+    usageTotal: liveUsageRows().length,
   };
+}
+
+const LIVE_USAGE_EMBEDDED = 10;
+
+/** This month's built-in room minutes for every school, A–Z by name (unmetered schools show 0). */
+function liveUsageRows(search = ''): LiveRoomUsage[] {
+  const used = new Map(mediaStore.get().liveRoomUsage.map((u) => [u.tenantId, u.usedMinutes]));
+  return tenants
+    .all()
+    .filter((t) => !search || t.name.toLowerCase().includes(search))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+    .map((t) => {
+      const cap = effectiveLimits(t).liveRoomMinutes;
+      const usedMinutes = used.get(t.id) ?? 0;
+      return {
+        tenantId: t.id,
+        name: t.name,
+        plan: t.plan,
+        usedMinutes: cap ? usedMinutes : 0,
+        allowanceMinutes: cap,
+        status: cap === 0 ? ('byo' as const) : usedMinutes > cap ? ('over' as const) : ('within' as const),
+      };
+    });
 }
 
 function drm(): DrmSettings {
@@ -425,6 +450,14 @@ export const handlers = [
     handle(() => {
       authorize('platform.view');
       return ok(liveRooms());
+    }),
+  ),
+
+  http.get(
+    route('/media/live-rooms/usage'),
+    handle(({ request }) => {
+      authorize('platform.view');
+      return paginate(liveUsageRows(query(request).search), request);
     }),
   ),
 

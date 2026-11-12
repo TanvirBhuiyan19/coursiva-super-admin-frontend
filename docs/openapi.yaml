@@ -37,6 +37,8 @@ tags:
     description: "Platform media settings: live-room policies and allowances, video DRM and providers, storage & delivery backends."
   - name: Overview
     description: Dashboard headline numbers. Figures only — the client applies labels and colour bands.
+  - name: Partners
+    description: "Coursiva's own partner programme: applications, partners, referrals, commissions, payout batches on the shared payout rail, tax forms and the programme terms. Money in minor units. Every change is audited (category Billing)."
   - name: Platform
     description: Feature flags, system status & incidents, email deliverability, certificate registry, standards imports, API keys and webhooks.
   - name: Settings
@@ -134,6 +136,72 @@ paths:
       x-audit:
         text: Set the AI monthly cost cap to ${cap} · Changed AI model routing to {policy}
         category: Billing
+  /analytics/ai/tenants:
+    get:
+      operationId: getAnalyticsAiTenants
+      tags:
+        - Analytics
+      summary: AI usage per tenant this month (paginated)
+      description: Every tenant with AI usage this month (rows as in `AiUsage.tenants`, which carries the 10 heaviest). Ranked and paginated in SQL.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: sort
+          in: query
+          required: false
+          description: "`tokens_k` or `name`; prefix with - for descending (default `-tokens_k`)."
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AiTenantUsage"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `analytics.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: analytics.view
   /analytics/ai/tenants/{id}/throttle:
     post:
       operationId: postAnalyticsAiTenantsByIdThrottle
@@ -410,6 +478,72 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: analytics.view
+  /analytics/growth/health-scores:
+    get:
+      operationId: getAnalyticsGrowthHealthScores
+      tags:
+        - Analytics
+      summary: Every school’s health score, ranked (paginated)
+      description: The whole ranking behind `health_scores` on `/analytics/growth` (which carries the top 10). Ranked and paginated in SQL.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: sort
+          in: query
+          required: false
+          description: Comma-separated from `score`, `name`; prefix with - for descending (default `-score,name`).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HealthScore"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `analytics.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
       security:
         - sanctumSession: []
       x-permission: analytics.view
@@ -1460,6 +1594,12 @@ paths:
           description: Items per page (max 100, default 25).
           schema:
             type: integer
+        - name: tenant
+          in: query
+          required: false
+          description: "Tenant id: only that school’s exports (its latest first; unknown id → empty page)."
+          schema:
+            type: string
       responses:
         "200":
           description: Paginated list.
@@ -1542,6 +1682,54 @@ paths:
       x-audit:
         text: Queued {format} data export for {tenant}
         category: Security
+  /backup/exports/{id}:
+    get:
+      operationId: getBackupExportsById
+      tags:
+        - Backup
+      summary: One per-tenant data export
+      description: The export the "Your data export is ready" email links to, wherever it falls in the list. 404 unknown id.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Export id.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/TenantExport"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
   /backup/exports/{id}/download:
     get:
       operationId: getBackupExportsByIdDownload
@@ -2045,6 +2233,20 @@ paths:
       tags:
         - Billing
       summary: Past-due invoices and the retry policy
+      description: Oldest failure first. `items` is one page (`page`, `per_page`, max 100, default 25); `meta` is the standard pagination meta.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
       responses:
         "200":
           description: OK
@@ -2054,9 +2256,12 @@ paths:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     $ref: "#/components/schemas/DunningQueue"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
                 additionalProperties: false
         "401":
           description: Not signed in or session expired.
@@ -2105,6 +2310,12 @@ paths:
           in: query
           required: false
           description: Invoice id; when `page` is omitted, returns the page containing it.
+          schema:
+            type: string
+        - name: tenant
+          in: query
+          required: false
+          description: "Tenant id: only that school’s invoices (the tenant drawer’s “View all invoices”)."
           schema:
             type: string
       responses:
@@ -2329,6 +2540,20 @@ paths:
       tags:
         - Billing
       summary: Usage overages for the current metering period
+      description: Largest first. `items` is one page (`page`, `per_page`, max 100, default 25); `unbilled_total` covers the whole month; `meta` is the standard pagination meta.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
       responses:
         "200":
           description: OK
@@ -2338,9 +2563,12 @@ paths:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     $ref: "#/components/schemas/OverageList"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
                 additionalProperties: false
         "401":
           description: Not signed in or session expired.
@@ -3880,22 +4108,39 @@ paths:
       tags:
         - Governance
       summary: Unresolved abuse signals
-      description: Sorted by severity, then newest.
+      description: Sorted by severity, then newest; paginated.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
       responses:
         "200":
-          description: OK
+          description: Paginated list.
           content:
             application/json:
               schema:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/AbuseSignal"
-                additionalProperties: false
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
         "401":
           description: Not signed in or session expired.
           content:
@@ -4025,22 +4270,46 @@ paths:
       operationId: getGovernanceBlockedIps
       tags:
         - Governance
-      summary: Blocked IPs, newest first
+      summary: Blocked IPs, newest first (paginated)
+      description: "`search` matches the address or range."
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Address or range contains.
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: Paginated list.
           content:
             application/json:
               schema:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/BlockedIp"
-                additionalProperties: false
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
         "401":
           description: Not signed in or session expired.
           content:
@@ -4346,22 +4615,40 @@ paths:
       operationId: getGovernanceModerationStrikes
       tags:
         - Governance
-      summary: Tenants with upheld strikes
+      summary: Tenants with upheld strikes (paginated)
+      description: Most strikes first, then the most recently struck; paginated by school (grouped, ordered and paged in SQL).
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
       responses:
         "200":
-          description: OK
+          description: Paginated list.
           content:
             application/json:
               schema:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/TenantStrikes"
-                additionalProperties: false
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
         "401":
           description: Not signed in or session expired.
           content:
@@ -4466,7 +4753,7 @@ paths:
       tags:
         - Governance
       summary: Per-tenant acceptance of a document version
-      description: Not-yet-accepted tenants first, then by name.
+      description: Not-yet-accepted tenants first, then by name; paginated. `search` matches the tenant name. `meta.accepted` / `meta.pending` count every live tenant (the search does not narrow them).
       parameters:
         - name: id
           in: path
@@ -4474,21 +4761,53 @@ paths:
           description: Document id, e.g. `pd_tos_41`.
           schema:
             type: string
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Tenant name contains (case-insensitive).
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: Paginated list.
           content:
             application/json:
               schema:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/PolicyAcceptance"
-                additionalProperties: false
+                  meta:
+                    allOf:
+                      - $ref: "#/components/schemas/PaginationMeta"
+                      - type: object
+                        required:
+                          - accepted
+                          - pending
+                        properties:
+                          accepted:
+                            type: integer
+                          pending:
+                            type: integer
+                  links:
+                    type: object
         "401":
           description: Not signed in or session expired.
           content:
@@ -4750,7 +5069,7 @@ paths:
       tags:
         - Governance
       summary: Data residency by region
-      description: Moves are scheduled with `PATCH /tenants/{id}` `{ region }` (tenants.manage).
+      description: Counts per region (all tenants). `tenants` lists only the first 100 by name (kept for older clients) and `tenants_total` says how many there are; the full list pages through `GET /governance/regions/tenants`. Moves are scheduled with `PATCH /tenants/{id}` `{ region }` (tenants.manage).
       responses:
         "200":
           description: OK
@@ -4776,6 +5095,82 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: governance.view
+  /governance/regions/tenants:
+    get:
+      operationId: getGovernanceRegionsTenants
+      tags:
+        - Governance
+      summary: Tenant data regions (paginated)
+      description: Every tenant by name. `search` matches the name; `region` narrows to one region (422 `region` if unknown).
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Tenant name contains (case-insensitive).
+          schema:
+            type: string
+        - name: region
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - EU
+              - US
+              - UK
+              - APAC
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TenantResidency"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `governance.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
       security:
         - sanctumSession: []
       x-permission: governance.view
@@ -5390,6 +5785,7 @@ paths:
       tags:
         - Media
       summary: Live-room policies, plan allowances and usage
+      description: "`usage` carries the first 10 schools A–Z; `usage_total` counts them all and `GET /media/live-rooms/usage` pages the list."
       responses:
         "200":
           description: OK
@@ -5467,6 +5863,66 @@ paths:
       x-audit:
         text: Turned on/off live-room policy "{policy}" · Set {plan} built-in room allowance to {n} min/mo / Turned off built-in rooms for {plan} (BYO provider only) (Billing)
         category: Flags
+  /media/live-rooms/usage:
+    get:
+      operationId: getMediaLiveRoomsUsage
+      tags:
+        - Media
+      summary: Built-in room minutes this month per school (paginated)
+      description: Every ready or suspended school A–Z by name, with its effective allowance and status.
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Contains-match on the school name.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/LiveRoomUsage"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
   /media/storage:
     get:
       operationId: getMediaStorage
@@ -5686,21 +6142,42 @@ paths:
       operationId: getNotifications
       tags:
         - Shell
-      summary: Notifications, newest first
+      summary: Notifications, newest first (30 a page)
+      description: The bell reads the first page; `meta.next_cursor` (null when nothing is older) is passed back as `before` for the next older page. A malformed cursor → 422 `before` "The cursor is invalid."
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: Cursor from the previous page’s `next_cursor`; blank = newest page. Max 120 characters.
+          schema:
+            type: string
       responses:
         "200":
-          description: OK
+          description: "Keyset window, newest first: pass `meta.next_cursor` back as `before` for the next older window (null = no more)."
           content:
             application/json:
               schema:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     type: array
                     items:
                       $ref: "#/components/schemas/Notification"
+                  meta:
+                    type: object
+                    required:
+                      - has_more
+                      - next_cursor
+                    properties:
+                      has_more:
+                        type: boolean
+                      next_cursor:
+                        type:
+                          - string
+                          - "null"
                 additionalProperties: false
         "401":
           description: Not signed in or session expired.
@@ -5708,6 +6185,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
       security:
         - sanctumSession: []
       x-permission: authenticated
@@ -5773,6 +6256,1644 @@ paths:
       security:
         - sanctumSession: []
       x-permission: tenants.view
+  /partners:
+    get:
+      operationId: getPartners
+      tags:
+        - Partners
+      summary: Partners (or applications with `applications=1`)
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive contains search.
+          schema:
+            type: string
+        - name: sort
+          in: query
+          required: false
+          description: Sort field; prefix with - for descending.
+          schema:
+            type: string
+            enum:
+              - name
+              - -name
+              - created_at
+              - -created_at
+              - status
+              - -status
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - Pending
+              - Active
+              - Paused
+              - Declined
+              - Banned
+        - name: applications
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Partner"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+  /partners/{partner}:
+    get:
+      operationId: getPartnersByPartner
+      tags:
+        - Partners
+      summary: A partner with figures
+      parameters:
+        - name: partner
+          in: path
+          required: true
+          description: Partner id (ppt_…)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Partner"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+    patch:
+      operationId: patchPartnersByPartner
+      tags:
+        - Partners
+      summary: Update a partner (rate, cookie window, code, linked account)
+      parameters:
+        - name: partner
+          in: path
+          required: true
+          description: Partner id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PartnerUpdate"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Partner"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: Updated partner {name}
+        category: Billing
+  /partners/{partner}/activate:
+    post:
+      operationId: postPartnersByPartnerActivate
+      tags:
+        - Partners
+      summary: Activate a partner
+      description: Banning or declining ends every portal session.
+      parameters:
+        - name: partner
+          in: path
+          required: true
+          description: Partner id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Partner"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: activate partner {name}
+        category: Billing
+  /partners/{partner}/approve:
+    post:
+      operationId: postPartnersByPartnerApprove
+      tags:
+        - Partners
+      summary: Approve a partner
+      description: Needs a confirmed email (409 `email_unconfirmed`); emails the partner the portal link.
+      parameters:
+        - name: partner
+          in: path
+          required: true
+          description: Partner id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Partner"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: approve partner {name}
+        category: Billing
+  /partners/{partner}/ban:
+    post:
+      operationId: postPartnersByPartnerBan
+      tags:
+        - Partners
+      summary: Ban a partner
+      description: Banning or declining ends every portal session.
+      parameters:
+        - name: partner
+          in: path
+          required: true
+          description: Partner id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Partner"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: ban partner {name}
+        category: Billing
+  /partners/{partner}/decline:
+    post:
+      operationId: postPartnersByPartnerDecline
+      tags:
+        - Partners
+      summary: Decline a partner
+      description: Banning or declining ends every portal session.
+      parameters:
+        - name: partner
+          in: path
+          required: true
+          description: Partner id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Partner"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: decline partner {name}
+        category: Billing
+  /partners/{partner}/pause:
+    post:
+      operationId: postPartnersByPartnerPause
+      tags:
+        - Partners
+      summary: Pause a partner
+      description: Banning or declining ends every portal session.
+      parameters:
+        - name: partner
+          in: path
+          required: true
+          description: Partner id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Partner"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: pause partner {name}
+        category: Billing
+  /partners/commissions:
+    get:
+      operationId: getPartnersCommissions
+      tags:
+        - Partners
+      summary: Commissions
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive contains search.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - held
+              - owed
+              - paid
+              - reversed
+        - name: partner_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: tenant_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PartnerCommission"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+  /partners/commissions/{commission}/reverse:
+    post:
+      operationId: postPartnersCommissionsByCommissionReverse
+      tags:
+        - Partners
+      summary: Reverse part of a commission
+      description: Minor units. An unpaid commission shrinks; a paid one leaves a negative due that nets against the next payout.
+      parameters:
+        - name: commission
+          in: path
+          required: true
+          description: Commission id (pcm_…)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: integer
+                reason:
+                  type: string
+              required:
+                - amount
+                - reason
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: object
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: "Reversed {amount} of commission {id}: {reason}"
+        category: Billing
+  /partners/payout-batches:
+    get:
+      operationId: getPartnersPayoutBatches
+      tags:
+        - Partners
+      summary: Payout batches
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive contains search.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PayoutBatch"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+    post:
+      operationId: postPartnersPayoutBatches
+      tags:
+        - Partners
+      summary: Draft a payout batch
+      description: "Every partner's due commissions (net of clawbacks and holds, above the minimum). Partners without a usable payout method or tax form are listed in `blocked`. 409 when nobody is due. Needs an `Idempotency-Key` header (8–100 of `A-Za-z0-9_-`), kept on the batch: a replay answers the same batch."
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PayoutBatch"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: Drafted a partner payout batch of {total}
+        category: Billing
+  /partners/payout-batches/{batch}:
+    get:
+      operationId: getPartnersPayoutBatchesByBatch
+      tags:
+        - Partners
+      summary: A payout batch with its items and blocked partners
+      parameters:
+        - name: batch
+          in: path
+          required: true
+          description: Batch id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PayoutBatch"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+  /partners/payout-batches/{batch}/approve:
+    post:
+      operationId: postPartnersPayoutBatchesByBatchApprove
+      tags:
+        - Partners
+      summary: Approve a draft
+      description: "Four-eyes: above `dual_approval_usd` the creator can't approve (403 `second_approver_required`). Needs an `Idempotency-Key` header (8–100 of `A-Za-z0-9_-`), kept on the batch: a replay answers the same batch."
+      parameters:
+        - name: batch
+          in: path
+          required: true
+          description: Batch id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PayoutBatch"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: Approved partner payout batch {id} ({total})
+        category: Billing
+  /partners/payout-batches/{batch}/cancel:
+    post:
+      operationId: postPartnersPayoutBatchesByBatchCancel
+      tags:
+        - Partners
+      summary: Cancel a draft or approved batch
+      description: "Every commission line goes back to owed. Needs an `Idempotency-Key` header (8–100 of `A-Za-z0-9_-`), kept on the batch: a replay answers the same batch."
+      parameters:
+        - name: batch
+          in: path
+          required: true
+          description: Batch id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PayoutBatch"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: Canceled partner payout batch {id} ({total})
+        category: Billing
+  /partners/payout-batches/{batch}/send:
+    post:
+      operationId: postPartnersPayoutBatchesByBatchSend
+      tags:
+        - Partners
+      summary: Send an approved batch
+      description: "Stripe items are funded from the platform's Stripe balance (409 `insufficient_balance` first); PayPal items go through the console's PayPal Payouts connection. Needs an `Idempotency-Key` header (8–100 of `A-Za-z0-9_-`), kept on the batch: a replay answers the same batch."
+      parameters:
+        - name: batch
+          in: path
+          required: true
+          description: Batch id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PayoutBatch"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: Sent partner payout batch {id} ({total})
+        category: Billing
+  /partners/payout-batches/funding:
+    get:
+      operationId: getPartnersPayoutBatchesFunding
+      tags:
+        - Partners
+      summary: Rails and the platform Stripe balance
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PayoutFunding"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+  /partners/payout-transfers/{transfer}/retry:
+    post:
+      operationId: postPartnersPayoutTransfersByTransferRetry
+      tags:
+        - Partners
+      summary: Retry a failed payout
+      description: "Needs an `Idempotency-Key` header (8–100 of `A-Za-z0-9_-`), kept on the batch: a replay answers the same batch."
+      parameters:
+        - name: transfer
+          in: path
+          required: true
+          description: Transfer id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PayoutBatch"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: Retried a partner payout of {amount}
+        category: Billing
+  /partners/referrals:
+    get:
+      operationId: getPartnersReferrals
+      tags:
+        - Partners
+      summary: Referred schools
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive contains search.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - active
+              - void
+        - name: partner_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PartnerReferral"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+    post:
+      operationId: postPartnersReferrals
+      tags:
+        - Partners
+      summary: Attribute a school by hand
+      description: Only a school with no referral yet; never the partner’s own school (their linked account).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewReferral"
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: object
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: Attributed {school} to partner {partner}
+        category: Billing
+  /partners/referrals/{tenant}/void:
+    post:
+      operationId: postPartnersReferralsByTenantVoid
+      tags:
+        - Partners
+      summary: Void a referral
+      description: No commission from now on; every unpaid commission of the school is reversed (paid ones stay paid).
+      parameters:
+        - name: tenant
+          in: path
+          required: true
+          description: Tenant id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+              required:
+                - reason
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: object
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: Voided a partner referral ({reason}); reversed {amount} unpaid
+        category: Billing
+  /partners/settings:
+    get:
+      operationId: getPartnersSettings
+      tags:
+        - Partners
+      summary: Programme terms (with defaults)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PartnerTermsSettings"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+    put:
+      operationId: putPartnersSettings
+      tags:
+        - Partners
+      summary: Change the programme terms
+      description: Partial update. Tax always stays excluded. Revalidates coursiva.com (`m:affiliate`). Needs a recent password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PartnerTermsSettings"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.manage
+      x-audit:
+        text: "Changed partner programme terms: {keys}"
+        category: Billing
+  /partners/summary:
+    get:
+      operationId: getPartnersSummary
+      tags:
+        - Partners
+      summary: Programme figures
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PartnersSummary"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+  /partners/tax-forms:
+    get:
+      operationId: getPartnersTaxForms
+      tags:
+        - Partners
+      summary: Tax forms
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/PartnerTaxForms"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.view
+  /partners/tax-forms/{form}/accept:
+    post:
+      operationId: postPartnersTaxFormsByFormAccept
+      tags:
+        - Partners
+      summary: Accept a tax form
+      parameters:
+        - name: form
+          in: path
+          required: true
+          description: Tax form id
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: object
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: Accepted the tax form of {name}
+        category: Billing
+  /partners/tax-forms/{form}/reject:
+    post:
+      operationId: postPartnersTaxFormsByFormReject
+      tags:
+        - Partners
+      summary: Reject a tax form
+      description: The partner is emailed the note.
+      parameters:
+        - name: form
+          in: path
+          required: true
+          description: Tax form id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+              required:
+                - note
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    type: object
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
+      x-audit:
+        text: Rejected the tax form of {name}
+        category: Billing
+  /partners/tax-forms/1099.csv:
+    get:
+      operationId: getPartnersTaxForms1099.csv
+      tags:
+        - Partners
+      summary: 1099-NEC worksheet (IRIS CSV layout)
+      description: W-9 partners paid at least the console threshold on the Stripe rail; PayPal amounts in their own column. Needs payout permission and a recent password (it opens the TINs). Audited.
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: File download (`partners-1099-nec-2025.csv`).
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            text/csv:
+              schema:
+                type: string
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `partners.payout`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: partners.payout
   /platform/api-keys:
     get:
       operationId: getPlatformApiKeys
@@ -6592,6 +8713,263 @@ paths:
       security:
         - sanctumSession: []
       x-permission: platform.manage
+  /platform/dedicated-ips:
+    get:
+      operationId: getPlatformDedicatedIps
+      tags:
+        - Platform
+      summary: Dedicated IP requests (pending first); the server token is never returned
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DedicatedIpRequest"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
+  /platform/dedicated-ips/{id}/provision:
+    post:
+      operationId: postPlatformDedicatedIpsByIdProvision
+      tags:
+        - Platform
+      summary: Provision a dedicated IP with a dedicated Postmark server (token verified, sealed)
+      description: Needs a recently confirmed password (423 otherwise).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Request id, e.g. `dip_devpath`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProvisionInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/DedicatedIpRequest"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Provisioned dedicated IP {ip} for {tenant}
+        category: Tenants
+  /platform/dedicated-ips/{id}/reject:
+    post:
+      operationId: postPlatformDedicatedIpsByIdReject
+      tags:
+        - Platform
+      summary: Decline a pending dedicated IP request
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Request id, e.g. `dip_devpath`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/DedicatedIpRequest"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Declined the dedicated IP request of {tenant}
+        category: Tenants
+  /platform/dedicated-ips/{id}/release:
+    post:
+      operationId: postPlatformDedicatedIpsByIdRelease
+      tags:
+        - Platform
+      summary: Release a dedicated IP (the school goes back to the shared pool)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Request id, e.g. `dip_nordic`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/DedicatedIpRequest"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Released the dedicated IP of {tenant}; its mail goes through the shared pool
+        category: Tenants
   /platform/deliverability:
     get:
       operationId: getPlatformDeliverability
@@ -7042,12 +9420,12 @@ paths:
       x-audit:
         text: Resumed email sending for {tenant}
         category: Tenants
-  /platform/standards:
+  /platform/sending-ips:
     get:
-      operationId: getPlatformStandards
+      operationId: getPlatformSendingIps
       tags:
         - Platform
-      summary: Standards support, open failed imports and accessibility conformance
+      summary: Coursiva Mail sending IPs (shared pool and dedicated) with their Spamhaus ZEN result
       responses:
         "200":
           description: OK
@@ -7059,7 +9437,154 @@ paths:
                   - data
                 properties:
                   data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SendingIp"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.view
+    post:
+      operationId: postPlatformSendingIps
+      tags:
+        - Platform
+      summary: Add a sending IP (a public IP; dedicated IPs name their school)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendingIpInput"
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/SendingIp"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Added sending IP {ip} ({kind})
+        category: Tenants
+  /platform/sending-ips/{id}:
+    delete:
+      operationId: deletePlatformSendingIpsById
+      tags:
+        - Platform
+      summary: Remove a sending IP (409 for an active dedicated IP)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Sending IP id, e.g. `sip_pool_2`.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No content.
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Removed sending IP {ip}
+        category: Tenants
+  /platform/standards:
+    get:
+      operationId: getPlatformStandards
+      tags:
+        - Platform
+      summary: Standards support, open failed imports and accessibility conformance
+      description: "`failed_imports` is one page of the open failed imports, newest first; `meta` pages it and `summary.failed_imports` is their total."
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
                     $ref: "#/components/schemas/Standards"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
                 additionalProperties: false
         "401":
           description: Not signed in or session expired.
@@ -7167,6 +9692,20 @@ paths:
       tags:
         - Platform
       summary: Webhook endpoints and failed deliveries
+      description: "`failed_deliveries` is one page of the failed deliveries of the last 24 hours, newest first; `meta` pages it."
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
       responses:
         "200":
           description: OK
@@ -7176,9 +9715,12 @@ paths:
                 type: object
                 required:
                   - data
+                  - meta
                 properties:
                   data:
                     $ref: "#/components/schemas/Webhooks"
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
                 additionalProperties: false
         "401":
           description: Not signed in or session expired.
@@ -8765,6 +11307,12 @@ paths:
               - pending
               - resolved
               - all
+        - name: tenant
+          in: query
+          required: false
+          description: "Tenant id: only that school’s tickets (the ticket panel’s “View all tickets”)."
+          schema:
+            type: string
       responses:
         "200":
           description: Paginated list.
@@ -9157,6 +11705,12 @@ paths:
               - Trial
               - Past due
               - Suspended
+        - name: ids
+          in: query
+          required: false
+          description: "Comma-separated tenant ids (at most 100 read): only those tenants (pickers resolve saved selections)."
+          schema:
+            type: string
       responses:
         "200":
           description: Paginated list.
@@ -9348,6 +11902,81 @@ paths:
       x-audit:
         text: Moved {name} from {a} to {b} (plan) · Scheduled data-residency move … (region, Security)
         category: Tenants
+  /tenants/{id}/activity:
+    get:
+      operationId: getTenantsByIdActivity
+      tags:
+        - Tenants
+      summary: Tenant activity, newest first (paginated)
+      description: "The school’s whole history: lifecycle state changes and console audit entries merged. The detail’s `timeline` carries only the newest 20."
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Tenant id, e.g. `tn_amplify`.
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          description: Page number (1-based).
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          required: false
+          description: Items per page (max 100, default 25).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Paginated list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - meta
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - at
+                        - text
+                      properties:
+                        at:
+                          type: string
+                          format: date-time
+                        text:
+                          type: string
+                  meta:
+                    $ref: "#/components/schemas/PaginationMeta"
+                  links:
+                    type: object
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `tenants.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: tenants.view
   /tenants/{id}/export:
     post:
       operationId: postTenantsByIdExport
@@ -10835,6 +13464,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AiTenantUsage"
+          description: The 10 heaviest tenants; every tenant with usage pages through `/analytics/ai/tenants`.
         by_feature:
           type: array
           items:
@@ -11203,6 +13833,17 @@ components:
         - wal_window_days
         - destinations
       additionalProperties: false
+    BatchStatus:
+      type: string
+      enum:
+        - draft
+        - approved
+        - funding
+        - funded
+        - sending
+        - completed
+        - partially_failed
+        - canceled
     BillingProvider:
       type: string
       enum:
@@ -11230,6 +13871,31 @@ components:
         - blocked_at
         - blocked_by
       additionalProperties: false
+    BlockedPayee:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        code:
+          type: string
+        reason:
+          type: string
+        amount:
+          type: number
+      required:
+        - id
+        - code
+        - reason
+        - amount
+      additionalProperties: false
+    BlocklistCheck:
+      type: string
+      enum:
+        - clear
+        - listed
+        - unknown
     BrandAsset:
       type: object
       properties:
@@ -11459,6 +14125,13 @@ components:
         - password_confirmation
       additionalProperties: false
       description: "`PUT /auth/password` body (signed in). Other sessions of this member end; this one stays signed in."
+    CommissionStatus:
+      type: string
+      enum:
+        - held
+        - owed
+        - paid
+        - reversed
     CompleteTaskInput:
       type: object
       properties:
@@ -11783,6 +14456,90 @@ components:
         - US
         - EU
         - APAC
+    DedicatedIpRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          $ref: "#/components/schemas/DedicatedIpStatus"
+        note:
+          type:
+            - string
+            - "null"
+        reason:
+          type:
+            - string
+            - "null"
+        ip:
+          type:
+            - string
+            - "null"
+        requested_at:
+          type:
+            - string
+            - "null"
+        activated_at:
+          type:
+            - string
+            - "null"
+        daily_cap:
+          type:
+            - number
+            - "null"
+        sent_today:
+          type: number
+        warmup_complete:
+          type: boolean
+        tenant_id:
+          type: string
+        tenant_name:
+          type: string
+        tenant_plan:
+          type: string
+        requested_by:
+          type: string
+        requested_by_email:
+          type: string
+        decided_by:
+          type:
+            - string
+            - "null"
+        token_set:
+          type: boolean
+        message_stream:
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - status
+        - note
+        - reason
+        - ip
+        - requested_at
+        - activated_at
+        - daily_cap
+        - sent_today
+        - warmup_complete
+        - tenant_id
+        - tenant_name
+        - tenant_plan
+        - requested_by
+        - requested_by_email
+        - decided_by
+        - token_set
+        - message_stream
+      additionalProperties: false
+      description: A school's dedicated IP request. The dedicated Postmark server's token is sealed and never returned (`tokenSet`).
+    DedicatedIpStatus:
+      type: string
+      enum:
+        - requested
+        - active
+        - rejected
+        - cancelled
+        - released
     Deliverability:
       type: object
       properties:
@@ -11830,6 +14587,32 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SenderDomain"
+        reputation:
+          type: object
+          properties:
+            blocklists_monitored:
+              type: boolean
+            placement_monitored:
+              type: boolean
+            ips:
+              type: array
+              items:
+                $ref: "#/components/schemas/SendingIp"
+            listed_domains:
+              type: number
+            dedicated_requests_open:
+              type: number
+            flagged:
+              type: number
+          required:
+            - blocklists_monitored
+            - placement_monitored
+            - ips
+            - listed_domains
+            - dedicated_requests_open
+            - flagged
+          additionalProperties: false
+          description: 'Sender reputation: blocklists (Spamhaus) and placement (GlockApps) are "not monitored" until connected.'
         suppression:
           type: array
           items:
@@ -11852,6 +14635,7 @@ components:
       required:
         - summary
         - domains
+        - reputation
         - suppression
       additionalProperties: false
     DnsCheck:
@@ -12239,6 +15023,7 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Invoice"
+          description: One page, oldest failure first (the response's `meta` pages it).
       required:
         - max_attempts
         - retry_days
@@ -12826,23 +15611,8 @@ components:
         health_scores:
           type: array
           items:
-            type: object
-            properties:
-              tenant_id:
-                type: string
-              name:
-                type: string
-              score:
-                type: number
-              driver:
-                type: string
-            required:
-              - tenant_id
-              - name
-              - score
-              - driver
-            additionalProperties: false
-          description: Per-tenant health scores (same score as the tenant drawer), best first.
+            $ref: "#/components/schemas/HealthScore"
+          description: The top 10 health scores (same score as the tenant drawer), best first; the whole ranking pages through `/analytics/growth/health-scores`.
         onboarding:
           type: array
           items:
@@ -12947,6 +15717,24 @@ components:
         - queues
         - deliverability
       additionalProperties: false
+    HealthScore:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+        name:
+          type: string
+        score:
+          type: number
+        driver:
+          type: string
+      required:
+        - tenant_id
+        - name
+        - score
+        - driver
+      additionalProperties: false
+      description: "One school's health score: the tenant drawer's score with its first falling signal as `driver`."
     Impersonation:
       type: object
       properties:
@@ -13153,6 +15941,19 @@ components:
         - ai_credits
         - sms_credits
         - live_sessions
+    LineKind:
+      type: string
+      enum:
+        - plan
+        - extension
+        - bundle
+        - proration
+        - dedicated
+        - overage
+        - tax
+        - domain
+        - discount
+        - credit
     LiveRoomPolicyKey:
       type: string
       enum:
@@ -13197,12 +15998,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LiveRoomUsage"
+          description: The first 10 schools A–Z only; the whole list pages through `GET /media/live-rooms/usage`.
+        usage_total:
+          type: number
+          description: "How many schools can hold built-in rooms (ready or suspended): the full usage list's size."
       required:
         - policies
         - allowances
         - overage_rate
         - top_up
         - usage
+        - usage_total
       additionalProperties: false
     LiveRoomUpdate:
       type: object
@@ -13457,6 +16263,57 @@ components:
           type:
             - string
             - "null"
+        category:
+          anyOf:
+            - $ref: "#/components/schemas/ReportCategory"
+            - type: "null"
+          description: Intake category (null on reports filed before intake existed).
+        content_type:
+          anyOf:
+            - $ref: "#/components/schemas/ReportContentType"
+            - type: "null"
+          description: The reported item in the school's database; null when the report names only a URL.
+        content_id:
+          type:
+            - string
+            - "null"
+        reporter:
+          anyOf:
+            - type: object
+              properties:
+                name:
+                  type:
+                    - string
+                    - "null"
+                email:
+                  type: string
+              required:
+                - name
+                - email
+              additionalProperties: false
+            - type: "null"
+          description: Who reported it (console only — never shown to the school); null for anonymous reports.
+        counts_as_strike:
+          type: boolean
+          description: "False for learner posts and the school's own reports: removing them is no strike."
+        enforcement:
+          type:
+            - string
+            - "null"
+          enum:
+            - hidden
+            - not_found
+            - restored
+            - null
+          description: 'What the decision did in the school: hidden, the item no longer exists, or restored after "kept".'
+        reporter_notified_at:
+          type:
+            - string
+            - "null"
+          description: When the reporter was emailed the final outcome.
+        reporter_count:
+          type: number
+          description: "How many people reported the item: later reports about it are merged into this one (severity only rises)."
       required:
         - id
         - kind
@@ -13470,6 +16327,13 @@ components:
         - decision
         - decided_at
         - decided_by
+        - category
+        - content_type
+        - content_id
+        - reporter
+        - counts_as_strike
+        - enforcement
+        - reporter_notified_at
       additionalProperties: false
     ModerationSummary:
       type: object
@@ -13526,6 +16390,20 @@ components:
         - message
         - audience
         - channel
+      additionalProperties: false
+    NewReferral:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+        partner_id:
+          type: string
+        reason:
+          type: string
+      required:
+        - tenant_id
+        - partner_id
+        - reason
       additionalProperties: false
     NewTicketMessage:
       type: object
@@ -13623,10 +16501,12 @@ components:
           description: First day (ISO date) of the metering month.
         unbilled_total:
           type: number
+          description: Unbilled amount across the whole month, not just this page.
         items:
           type: array
           items:
             $ref: "#/components/schemas/Overage"
+          description: One page, largest first (the response's `meta` pages it).
       required:
         - period
         - unbilled_total
@@ -13871,6 +16751,540 @@ components:
           type:
             - integer
             - "null"
+    Partner:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        slug:
+          type: string
+        link:
+          type: string
+        status:
+          $ref: "#/components/schemas/PartnerStatus"
+        coupon_code:
+          type:
+            - string
+            - "null"
+        commission_pct:
+          type: number
+          description: Effective rate (the override, else the programme's).
+        cookie_days:
+          type: number
+        email_verified:
+          type: boolean
+        created_at:
+          type:
+            - string
+            - "null"
+        website:
+          type:
+            - string
+            - "null"
+        audience:
+          type:
+            - string
+            - "null"
+        pitch:
+          type:
+            - string
+            - "null"
+        status_note:
+          type:
+            - string
+            - "null"
+        commission_pct_override:
+          type:
+            - number
+            - "null"
+        cookie_days_override:
+          type:
+            - number
+            - "null"
+        account_id:
+          type:
+            - string
+            - "null"
+        approved_by:
+          type:
+            - string
+            - "null"
+        approved_at:
+          type:
+            - string
+            - "null"
+        stats:
+          $ref: "#/components/schemas/PartnerStats"
+      required:
+        - id
+        - name
+        - email
+        - slug
+        - link
+        - status
+        - coupon_code
+        - commission_pct
+        - cookie_days
+        - email_verified
+        - created_at
+        - website
+        - audience
+        - pitch
+        - status_note
+        - commission_pct_override
+        - cookie_days_override
+        - account_id
+        - approved_by
+        - approved_at
+      additionalProperties: false
+    PartnerCommission:
+      type: object
+      properties:
+        id:
+          type: string
+        school:
+          type:
+            - string
+            - "null"
+        base:
+          type: number
+        rate:
+          type: number
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          $ref: "#/components/schemas/CommissionStatus"
+        available_at:
+          type:
+            - string
+            - "null"
+        paid_amount:
+          type: number
+        paid_at:
+          type:
+            - string
+            - "null"
+        reversed_amount:
+          type: number
+        reversed_reason:
+          type:
+            - string
+            - "null"
+        due:
+          type: number
+        frozen:
+          type: boolean
+        created_at:
+          type:
+            - string
+            - "null"
+        partner_id:
+          type: string
+        partner_name:
+          type: string
+        tenant_id:
+          type: string
+        invoice_id:
+          type: string
+        invoice_number:
+          type:
+            - string
+            - "null"
+        payout_transfer_id:
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - school
+        - base
+        - rate
+        - amount
+        - currency
+        - status
+        - available_at
+        - paid_amount
+        - paid_at
+        - reversed_amount
+        - reversed_reason
+        - due
+        - frozen
+        - created_at
+        - partner_id
+        - partner_name
+        - tenant_id
+        - invoice_id
+        - invoice_number
+        - payout_transfer_id
+      additionalProperties: false
+    PartnerReferral:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+        tenant_name:
+          type:
+            - string
+            - "null"
+        plan:
+          type:
+            - string
+            - "null"
+        subscription_status:
+          type:
+            - string
+            - "null"
+        partner_id:
+          type: string
+        partner_name:
+          type: string
+        source:
+          type: string
+          enum:
+            - link
+            - coupon
+            - manual
+        click_id:
+          type:
+            - string
+            - "null"
+        attributed_at:
+          type:
+            - string
+            - "null"
+        first_paid_at:
+          type:
+            - string
+            - "null"
+        ends_at:
+          type:
+            - string
+            - "null"
+        self_referral:
+          type: boolean
+        void_reason:
+          type:
+            - string
+            - "null"
+        voided_at:
+          type:
+            - string
+            - "null"
+        note:
+          type:
+            - string
+            - "null"
+        created_by:
+          type:
+            - string
+            - "null"
+      required:
+        - tenant_id
+        - tenant_name
+        - plan
+        - subscription_status
+        - partner_id
+        - partner_name
+        - source
+        - click_id
+        - attributed_at
+        - first_paid_at
+        - ends_at
+        - self_referral
+        - void_reason
+        - voided_at
+        - note
+        - created_by
+      additionalProperties: false
+    PartnersSummary:
+      type: object
+      properties:
+        applications:
+          type: number
+        active_partners:
+          type: number
+        referrals:
+          type: number
+        clicks30d:
+          type: number
+        held:
+          type: number
+        owed:
+          type: number
+        paid:
+          type: number
+        reversed:
+          type: number
+        currency:
+          type: string
+      required:
+        - applications
+        - active_partners
+        - referrals
+        - clicks30d
+        - held
+        - owed
+        - paid
+        - reversed
+        - currency
+      additionalProperties: false
+    PartnerStats:
+      type: object
+      properties:
+        clicks:
+          type: number
+        clicks30d:
+          type: number
+        signups:
+          type: number
+        active_schools:
+          type: number
+        held:
+          type: number
+        owed:
+          type: number
+        paid:
+          type: number
+        reversed:
+          type: number
+        balance:
+          type: number
+      required:
+        - clicks
+        - clicks30d
+        - signups
+        - active_schools
+        - held
+        - owed
+        - paid
+        - reversed
+        - balance
+      additionalProperties: false
+    PartnerStatus:
+      type: string
+      enum:
+        - Pending
+        - Active
+        - Paused
+        - Declined
+        - Banned
+    PartnerTaxForm:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum:
+            - w9
+            - w8ben
+            - w8bene
+        status:
+          type: string
+          enum:
+            - submitted
+            - accepted
+            - rejected
+            - superseded
+            - expired
+        legal_name:
+          type: string
+        country:
+          type: string
+        tin_type:
+          type:
+            - string
+            - "null"
+        tin_last4:
+          type:
+            - string
+            - "null"
+        signed_at:
+          type:
+            - string
+            - "null"
+        expires_at:
+          type:
+            - string
+            - "null"
+        review_note:
+          type:
+            - string
+            - "null"
+        submitted_at:
+          type:
+            - string
+            - "null"
+        partner_id:
+          type: string
+        partner_name:
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - kind
+        - status
+        - legal_name
+        - country
+        - tin_type
+        - tin_last4
+        - signed_at
+        - expires_at
+        - review_note
+        - submitted_at
+        - partner_id
+        - partner_name
+      additionalProperties: false
+    PartnerTaxForms:
+      type: object
+      properties:
+        threshold:
+          type: number
+        forms:
+          type: array
+          items:
+            $ref: "#/components/schemas/PartnerTaxForm"
+      required:
+        - threshold
+        - forms
+      additionalProperties: false
+    PartnerTerms:
+      type: object
+      properties:
+        commission_pct:
+          type: number
+        cookie_days:
+          type: number
+        hold_days:
+          type: number
+        clawback_months:
+          type: number
+        recurring:
+          anyOf:
+            - type: string
+              const: lifetime
+            - type: number
+        min_payout_usd:
+          type: number
+        payout_day:
+          type: number
+        rails:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayoutRail"
+        attribution:
+          type: string
+          enum:
+            - last_click
+            - first_click
+        excluded_line_kinds:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineKind"
+        dual_approval_usd:
+          type: number
+      required:
+        - commission_pct
+        - cookie_days
+        - hold_days
+        - clawback_months
+        - recurring
+        - min_payout_usd
+        - payout_day
+        - rails
+        - attribution
+        - excluded_line_kinds
+        - dual_approval_usd
+      additionalProperties: false
+    PartnerTermsSettings:
+      type: object
+      properties:
+        commission_pct:
+          type: number
+        cookie_days:
+          type: number
+        hold_days:
+          type: number
+        clawback_months:
+          type: number
+        recurring:
+          anyOf:
+            - type: string
+              const: lifetime
+            - type: number
+        min_payout_usd:
+          type: number
+        payout_day:
+          type: number
+        rails:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayoutRail"
+        attribution:
+          type: string
+          enum:
+            - last_click
+            - first_click
+        excluded_line_kinds:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineKind"
+        dual_approval_usd:
+          type: number
+        defaults:
+          $ref: "#/components/schemas/PartnerTerms"
+        line_kinds:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineKind"
+      required:
+        - attribution
+        - clawback_months
+        - commission_pct
+        - cookie_days
+        - defaults
+        - dual_approval_usd
+        - excluded_line_kinds
+        - hold_days
+        - line_kinds
+        - min_payout_usd
+        - payout_day
+        - rails
+        - recurring
+      additionalProperties: false
+    PartnerUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        website:
+          type:
+            - string
+            - "null"
+        commission_pct:
+          type:
+            - number
+            - "null"
+        cookie_days:
+          type:
+            - number
+            - "null"
+        coupon_code:
+          type:
+            - string
+            - "null"
+        account_email:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
     PasswordResetDone:
       type: object
       properties:
@@ -13898,6 +17312,198 @@ components:
         - updated
       additionalProperties: false
       description: "`{ updated: true }` from change-password."
+    PayoutBatch:
+      type: object
+      properties:
+        id:
+          type: string
+        period:
+          type: string
+        status:
+          $ref: "#/components/schemas/BatchStatus"
+        total:
+          type: number
+        currency:
+          type: string
+        rail_totals:
+          type: object
+          additionalProperties:
+            type: number
+        blocked_count:
+          type: number
+        funded_amount:
+          type: number
+        funding_fee:
+          type: number
+        credit_applied:
+          type: number
+        created_at:
+          type:
+            - string
+            - "null"
+        approved_at:
+          type:
+            - string
+            - "null"
+        funded_at:
+          type:
+            - string
+            - "null"
+        completed_at:
+          type:
+            - string
+            - "null"
+        needs_second_approver:
+          type: boolean
+        item_count:
+          type: number
+        created_by:
+          type:
+            - string
+            - "null"
+        approved_by:
+          type:
+            - string
+            - "null"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PayoutItem"
+        blocked:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlockedPayee"
+      required:
+        - id
+        - period
+        - status
+        - total
+        - currency
+        - rail_totals
+        - blocked_count
+        - funded_amount
+        - funding_fee
+        - credit_applied
+        - created_at
+        - approved_at
+        - funded_at
+        - completed_at
+        - needs_second_approver
+      additionalProperties: false
+    PayoutFunding:
+      type: object
+      properties:
+        currency:
+          type: string
+        stripe_balance:
+          type:
+            - number
+            - "null"
+          description: "The platform's available Stripe balance (null: Stripe not connected or unreachable)."
+        minimum:
+          type: number
+        dual_approval:
+          type: number
+        payout_day:
+          type: number
+        rails:
+          type: array
+          items:
+            type: object
+            properties:
+              rail:
+                $ref: "#/components/schemas/PayoutRail"
+              available:
+                type: boolean
+              reason:
+                type:
+                  - string
+                  - "null"
+            required:
+              - rail
+              - available
+              - reason
+            additionalProperties: false
+      required:
+        - currency
+        - stripe_balance
+        - minimum
+        - dual_approval
+        - payout_day
+        - rails
+      additionalProperties: false
+    PayoutItem:
+      type: object
+      properties:
+        id:
+          type: string
+        batch_id:
+          type: string
+        payee_id:
+          type: string
+        payee_name:
+          type:
+            - string
+            - "null"
+        rail:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+        reference:
+          type:
+            - string
+            - "null"
+        provider_ref:
+          type:
+            - string
+            - "null"
+        failure_code:
+          type:
+            - string
+            - "null"
+        failure_message:
+          type:
+            - string
+            - "null"
+        reversed_amount:
+          type: number
+        attempt:
+          type: number
+        sent_at:
+          type:
+            - string
+            - "null"
+        settled_at:
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - batch_id
+        - payee_id
+        - payee_name
+        - rail
+        - amount
+        - currency
+        - status
+        - reference
+        - provider_ref
+        - failure_code
+        - failure_message
+        - reversed_amount
+        - attempt
+        - sent_at
+        - settled_at
+      additionalProperties: false
+    PayoutRail:
+      type: string
+      enum:
+        - stripe
+        - paypal
     Permission:
       type: string
       enum:
@@ -13921,6 +17527,9 @@ components:
         - staff.view
         - staff.manage
         - audit.view
+        - partners.view
+        - partners.manage
+        - partners.payout
     Plan:
       type: string
       enum:
@@ -14673,6 +18282,19 @@ components:
         - percent_off
         - duration
       additionalProperties: false
+    ProvisionInput:
+      type: object
+      properties:
+        ip:
+          type: string
+        server_token:
+          type: string
+        message_stream:
+          type: string
+      required:
+        - ip
+        - server_token
+      additionalProperties: false
     ProvisionTenantInput:
       type: object
       properties:
@@ -14771,6 +18393,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TenantResidency"
+          description: The first 100 schools by name (kept for older clients); the console pages GET /governance/regions/tenants.
+        tenants_total:
+          type: number
+          description: Every live school.
         pending_migrations:
           type: number
         sub_processors:
@@ -14778,6 +18404,7 @@ components:
       required:
         - regions
         - tenants
+        - tenants_total
         - pending_migrations
         - sub_processors
       additionalProperties: false
@@ -15191,6 +18818,25 @@ components:
         - standard
         - uhd
         - budget
+    ReportCategory:
+      type: string
+      enum:
+        - csam
+        - illegal
+        - copyright
+        - harassment
+        - privacy
+        - impersonation
+        - spam
+        - other
+    ReportContentType:
+      type: string
+      enum:
+        - community_post
+        - course
+        - lesson
+        - blog_post
+        - product
     ReprocessResult:
       type: object
       properties:
@@ -15598,6 +19244,43 @@ components:
             - "null"
         dns_checked_at:
           type: string
+        flag:
+          anyOf:
+            - type: object
+              properties:
+                reason:
+                  type: string
+                at:
+                  type:
+                    - string
+                    - "null"
+              required:
+                - reason
+                - at
+              additionalProperties: false
+            - type: "null"
+          description: The school's 7-day hard-bounce or complaint rate went over the line (the reputation alert job); null = fine.
+        blocklist:
+          anyOf:
+            - type: object
+              properties:
+                status:
+                  $ref: "#/components/schemas/BlocklistCheck"
+                codes:
+                  type:
+                    - string
+                    - "null"
+                checked_at:
+                  type:
+                    - string
+                    - "null"
+              required:
+                - status
+                - codes
+                - checked_at
+              additionalProperties: false
+            - type: "null"
+          description: The sender domain on the Spamhaus DBL (the school's daily check); null = not checked.
       required:
         - id
         - tenant_id
@@ -15613,6 +19296,8 @@ components:
         - paused
         - paused_at
         - dns_checked_at
+        - flag
+        - blocklist
       additionalProperties: false
     SenderRisk:
       type: string
@@ -15621,6 +19306,89 @@ components:
         - Watch
         - Over threshold
       description: Risk band from provider thresholds (computed server-side).
+    SendingIp:
+      type: object
+      properties:
+        id:
+          type: string
+        ip:
+          type: string
+        kind:
+          type: string
+          enum:
+            - pool
+            - dedicated
+        tenant_id:
+          type:
+            - string
+            - "null"
+        tenant_name:
+          type:
+            - string
+            - "null"
+        label:
+          type:
+            - string
+            - "null"
+        blocklist:
+          anyOf:
+            - type: object
+              properties:
+                status:
+                  $ref: "#/components/schemas/BlocklistCheck"
+                codes:
+                  type:
+                    - string
+                    - "null"
+                since:
+                  type:
+                    - string
+                    - "null"
+                checked_at:
+                  type:
+                    - string
+                    - "null"
+              required:
+                - status
+                - codes
+                - since
+                - checked_at
+              additionalProperties: false
+            - type: "null"
+          description: The latest ZEN answer; null = never checked (or not monitored). Unknown is never clear.
+        created_at:
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - ip
+        - kind
+        - tenant_id
+        - tenant_name
+        - label
+        - blocklist
+        - created_at
+      additionalProperties: false
+      description: "An IP Coursiva Mail sends from: the shared pool or a school's dedicated IP, checked daily on Spamhaus ZEN."
+    SendingIpInput:
+      type: object
+      properties:
+        ip:
+          type: string
+        kind:
+          type: string
+          enum:
+            - pool
+            - dedicated
+        tenant_id:
+          type: string
+        label:
+          type: string
+      required:
+        - ip
+        - kind
+      additionalProperties: false
     ServiceStatus:
       type: string
       enum:
@@ -16374,6 +20142,18 @@ components:
         - watched
       additionalProperties: false
       description: Row in the tenant directory.
+    TenantActivity:
+      type: object
+      properties:
+        at:
+          type: string
+        text:
+          type: string
+      required:
+        - at
+        - text
+      additionalProperties: false
+      description: One entry of a tenant's activity (`GET /tenants/{id}/activity`, and the detail's `timeline`).
     TenantContext:
       type: object
       properties:
@@ -16441,6 +20221,10 @@ components:
               - created_at
               - csat
             additionalProperties: false
+          description: The school's newest 5 other tickets.
+        past_ticket_count:
+          type: number
+          description: How many other tickets the school has in total (`pastTickets` shows at most 5).
       required:
         - id
         - name
@@ -16452,6 +20236,7 @@ components:
         - health_reason
         - signals
         - past_tickets
+        - past_ticket_count
       additionalProperties: false
     TenantDetail:
       type: object
@@ -16643,16 +20428,8 @@ components:
         timeline:
           type: array
           items:
-            type: object
-            properties:
-              at:
-                type: string
-              text:
-                type: string
-            required:
-              - at
-              - text
-            additionalProperties: false
+            $ref: "#/components/schemas/TenantActivity"
+          description: The newest 20 entries; older ones via `GET /tenants/{id}/activity`.
         trial:
           anyOf:
             - $ref: "#/components/schemas/TenantTrial"

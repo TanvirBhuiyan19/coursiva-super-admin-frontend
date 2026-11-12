@@ -18,6 +18,7 @@ Permission `tenants.view`. Paginated `Tenant[]`.
 | `plan`    | `Launch` · `Growth` · `Scale`                                                                                                                    |
 | `status`  | `Active` · `Trial` · `Past due` · `Suspended`                                                                                                    |
 | `sort`    | `name` · `students` · `mrr` · `created_at` · `last_active_at` (prefix `-` for desc)                                                              |
+| `ids`     | Comma-separated tenant ids (at most 100 read; 422 `ids` when malformed): only those tenants. Tenant pickers resolve a saved selection with it.   |
 
 `Tenant`: `id, name, domain, owner_name, owner_email, plan, status, students, mrr, health (Healthy|Watch|At risk), health_reason, utilization (0–100 of student limit), stage, created_at, last_active_at, trial_ends_at, watched, suspension_reason`.
 
@@ -91,7 +92,7 @@ Permission `tenants.view`. `TenantDetail` = `Tenant` plus:
 | `extensions`                    | `[{ key, name, price, state: comped\|paying\|none }]`                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `flags`                         | `[{ key, name, enabled, overridden }]` — flags a tenant can override                                                                                                                                                                                                                                                                                                                                                                                      |
 | `invoices`                      | `[{ id, issued_at, amount, status }]` newest first                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `timeline`                      | `[{ at, text }]`                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `timeline`                      | `[{ at, text }]` — the newest 20 only; the full history is `GET /tenants/{id}/activity`                                                                                                                                                                                                                                                                                                                                                                   |
 | `checkout_frozen_at`            | When the abuse queue's "Freeze checkout" blocked the school's new card payments, else null. The drawer shows a "Checkout frozen" notice with **Unfreeze checkout** (`governance.manage`).                                                                                                                                                                                                                                                                 |
 | `trial`                         | `{ card_verified, requires_card, paused, trial_ends_at } \| null` (null: no subscription yet). `card_verified`: a card saved with Coursiva will be charged when the trial ends. `requires_card`: trialing or paused with no way to charge (no card; or a merchant-of-record school that never checked out). `paused`: the trial ended without a card (`suspension_reason: payment_method_required`). `trial_ends_at`: while trialing or paused, else null |
 
@@ -123,6 +124,13 @@ on the school's cycle is locked in, paid add-ons the new plan includes stop bill
 Squeezy gets the new price from its next renewal (`502`/`503 provider_error`: nothing changed), and the MRR ledger and
 the directory's MRR follow. Staff decide, so there is no downgrade guard and no proration. The same plan is a no-op
 (not audited).
+
+### `GET /tenants/{id}/activity`
+
+Permission `tenants.view`. The school's whole history, newest first: lifecycle state changes and console audit entries
+merged. `page`, `per_page` (1–100, default 25; the drawer asks for 10). `{ data: [{ at, text }], meta }` with the usual
+pagination meta. 404 for an unknown tenant. Each source is read on its `(tenant_id, created_at)` index and cut to
+`page × per_page` rows before merging, so deep pages stay cheap.
 
 ### Step-up (recent password)
 

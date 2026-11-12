@@ -1,6 +1,7 @@
 import { http } from 'msw';
 import { invoices, notifications, platformStatus, staff, tenants, tickets } from '@/mocks/collections';
-import { authorize, handle, invalid, noContent, ok, permissionsOf, query, route } from '@/mocks/http';
+import { newestWindow, parseBefore } from '@/mocks/cursor';
+import { authorize, handle, invalid, json, noContent, ok, permissionsOf, query, route } from '@/mocks/http';
 import type { Notification, SearchResult, SearchType } from './api';
 
 export const handlers = [
@@ -23,12 +24,21 @@ export const handlers = [
 
   http.get(
     route('/notifications'),
-    handle(() => {
+    handle(({ request }) => {
       authorize();
-      const rows = [...notifications.all()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      return ok(
-        rows.map<Notification>((n) => ({ id: n.id, text: n.text, tone: n.tone, createdAt: n.createdAt, read: !!n.readAt, href: n.href })),
-      );
+      // 30 a page, newest first; `?before=` = the previous page's `next_cursor`.
+      const { items, meta } = newestWindow(notifications.all(), parseBefore(request), 30);
+      return json({
+        data: items.map<Notification>((n) => ({
+          id: n.id,
+          text: n.text,
+          tone: n.tone,
+          createdAt: n.createdAt,
+          read: !!n.readAt,
+          href: n.href,
+        })),
+        meta,
+      });
     }),
   ),
 

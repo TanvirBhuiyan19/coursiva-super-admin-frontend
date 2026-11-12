@@ -1,12 +1,14 @@
 import { Link } from 'react-router-dom';
-import { Bar, Card, Empty, ErrorState, Kpi, Screen, SkeletonRows } from '@/components/ui';
+import type { ReactNode } from 'react';
+import { Bar, Card, Empty, ErrorState, Kpi, Pagination, Screen, SkeletonRows } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { money, monthName, num, scoreTone, toneDot, toneFg } from '@/lib/format';
-import { useGrowth } from '../api';
+import { useUrlState } from '@/lib/useUrlState';
+import { useGrowth, useHealthScores } from '../api';
 import { FunnelBar, KpiSkeletons } from '../components/charts';
 import { deltaTone, signed } from '../format';
 import { t as tPlain, useT } from '../i18n';
-import type { FunnelStage, Growth, OnboardingStage } from '../types';
+import type { FunnelStage, Growth, HealthScore, OnboardingStage } from '../types';
 
 const funnelLabel = (s: FunnelStage) => tPlain(`growth.funnel.stage.${s}`);
 const onboardingLabel = (s: OnboardingStage) => tPlain(`growth.onboarding.stage.${s}`);
@@ -186,11 +188,62 @@ function heatFill(v: number) {
   return `oklch(${l.toFixed(3)} calc(var(--brandC) * 0.9) var(--brandH))`;
 }
 
+function HealthRows({ rows, link }: { rows: HealthScore[]; link: (id: string, name: string) => ReactNode }) {
+  const t = useT();
+  return (
+    <ul className="stack plain-list">
+      {rows.map((h) => (
+        <li key={h.tenantId} className="row wrap" style={{ gap: 14 }}>
+          <span className="ellipsis" style={{ width: 190, fontWeight: 600, flexShrink: 0 }}>
+            {link(h.tenantId, h.name)}
+          </span>
+          <Bar value={h.score} color={toneDot(scoreTone(h.score))} size="md" style={{ minWidth: 120 }} />
+          <span style={{ width: 34, textAlign: 'right', fontWeight: 700 }}>
+            <span className="sr-only">{t('growth.health.score')}</span>
+            {h.score}
+          </span>
+          <span className="muted" style={{ flex: '0 1 290px', minWidth: 0, fontSize: 12 }}>
+            {h.driver}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Every school's health score, a page at a time (page in `?healthPage=`). */
+function AllHealthScores({
+  page,
+  onPage,
+  link,
+}: {
+  page: number;
+  onPage: (p: number) => void;
+  link: (id: string, name: string) => ReactNode;
+}) {
+  const t = useT();
+  const q = useHealthScores(page);
+  if (q.isPending) return <SkeletonRows rows={8} h={20} />;
+  if (q.isError) return <ErrorState compact error={q.error} onRetry={() => void q.refetch()} />;
+  if (q.data.data.length === 0) return <Empty>{t('growth.health.empty')}</Empty>;
+  return (
+    <>
+      <div aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+        <HealthRows rows={q.data.data} link={link} />
+      </div>
+      <Pagination meta={q.data.meta} onPage={onPage} noun={t('growth.health.noun')} />
+    </>
+  );
+}
+
 export default function GrowthPage() {
   const t = useT();
   const q = useGrowth();
   const can = useCan();
   const g = q.data;
+  const [f, setF] = useUrlState({ health: '', healthPage: '1' });
+  const allHealth = f.health === 'all';
+  const healthPage = Math.max(1, Number(f.healthPage) || 1);
 
   if (q.error)
     return (
@@ -217,29 +270,34 @@ export default function GrowthPage() {
         <Card title={t('growth.cohorts.title')}>{g ? <CohortTable cohorts={g.cohorts} /> : <SkeletonRows rows={6} h={24} />}</Card>
       </div>
 
-      <Card title={t('growth.health.title')} right={<span className="card-sub">{t('growth.health.sub')}</span>}>
-        {!g ? (
+      <Card
+        title={t('growth.health.title')}
+        right={
+          <div className="hstack wrap" style={{ gap: 10 }}>
+            <span className="card-sub">{t('growth.health.sub')}</span>
+            {allHealth ? (
+              <button type="button" className="btn btn--sm" onClick={() => setF({ health: '', healthPage: '1' })}>
+                {t('growth.health.showTop')}
+              </button>
+            ) : (
+              g &&
+              g.totalTenants > g.healthScores.length && (
+                <button type="button" className="btn btn--sm" onClick={() => setF({ health: 'all', healthPage: '1' })}>
+                  {t('growth.health.viewAll', { count: g.totalTenants })}
+                </button>
+              )
+            )}
+          </div>
+        }
+      >
+        {allHealth ? (
+          <AllHealthScores page={healthPage} onPage={(p) => setF({ healthPage: String(p) })} link={tenantLink} />
+        ) : !g ? (
           <SkeletonRows rows={5} h={20} />
         ) : g.healthScores.length === 0 ? (
           <Empty>{t('growth.health.empty')}</Empty>
         ) : (
-          <ul className="stack plain-list">
-            {g.healthScores.map((h) => (
-              <li key={h.tenantId} className="row wrap" style={{ gap: 14 }}>
-                <span className="ellipsis" style={{ width: 190, fontWeight: 600, flexShrink: 0 }}>
-                  {tenantLink(h.tenantId, h.name)}
-                </span>
-                <Bar value={h.score} color={toneDot(scoreTone(h.score))} size="md" style={{ minWidth: 120 }} />
-                <span style={{ width: 34, textAlign: 'right', fontWeight: 700 }}>
-                  <span className="sr-only">{t('growth.health.score')}</span>
-                  {h.score}
-                </span>
-                <span className="muted" style={{ flex: '0 1 290px', minWidth: 0, fontSize: 12 }}>
-                  {h.driver}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <HealthRows rows={g.healthScores} link={tenantLink} />
         )}
       </Card>
 

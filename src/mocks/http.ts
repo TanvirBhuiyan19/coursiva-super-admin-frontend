@@ -57,6 +57,28 @@ export function query(request: Request) {
   };
 }
 
+/**
+ * One page of `rows` plus the standard pagination meta, for a resource whose list part is paged
+ * (`{ data: { …, items }, meta }`, documented with `pagedResource`).
+ */
+export function pageSlice<T>(rows: T[], request: Request) {
+  const { page, perPage } = query(request);
+  const total = rows.length;
+  const lastPage = Math.max(1, Math.ceil(total / perPage));
+  const current = Math.min(page, lastPage);
+  const start = (current - 1) * perPage;
+  const items = rows.slice(start, start + perPage);
+  const meta = {
+    currentPage: current,
+    lastPage,
+    perPage,
+    total,
+    from: total ? start + 1 : null,
+    to: total ? start + items.length : null,
+  };
+  return { items, meta };
+}
+
 /** Paginates rows into Laravel's `{ data, meta }` envelope. Extra keys merge into `meta`. */
 export function paginate<T>(rows: T[], request: Request, extraMeta: Record<string, unknown> = {}) {
   const { page, perPage } = query(request);

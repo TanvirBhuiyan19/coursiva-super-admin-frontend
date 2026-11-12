@@ -9,6 +9,14 @@ export type FunnelStage = (typeof FUNNEL_STAGES)[number];
 export const ONBOARDING_STAGES = ['provisioned', 'branding', 'first_course', 'first_sale', 'paid'] as const;
 export type OnboardingStage = (typeof ONBOARDING_STAGES)[number];
 
+/** One school's health score: the tenant drawer's score with its first falling signal as `driver`. */
+export interface HealthScore {
+  tenantId: string;
+  name: string;
+  score: number;
+  driver: string;
+}
+
 export interface Growth {
   /** Headline KPIs. `revenuePerTenant` = paying MRR ÷ paying tenants (same rule as `/tenants/summary` `arpa`). */
   kpis: {
@@ -27,8 +35,8 @@ export interface Growth {
   funnel: { stage: FunnelStage; count: number; ratePct: number | null }[];
   /** Monthly signup cohorts, oldest first. `retention[i]` = % of the cohort still active i months after signup. */
   cohorts: { month: string; retention: number[] }[];
-  /** Per-tenant health scores (same score as the tenant drawer), best first. */
-  healthScores: { tenantId: string; name: string; score: number; driver: string }[];
+  /** The top 10 health scores (same score as the tenant drawer), best first; the whole ranking pages through `/analytics/growth/health-scores`. */
+  healthScores: HealthScore[];
   /** Onboarding funnel, last 90 days, in stage order. */
   onboarding: { stage: OnboardingStage; tenants: number }[];
   /** Tenants idle at an onboarding stage for 10+ days. */
@@ -98,6 +106,7 @@ export interface AiUsage {
     modelCost: number;
     capUsedPct: number;
   };
+  /** The 10 heaviest tenants; every tenant with usage pages through `/analytics/ai/tenants`. */
   tenants: AiTenantUsage[];
   /** Our cost by AI feature, largest first. `sharePct` of total spend. */
   byFeature: { feature: AiFeature; cost: number; sharePct: number }[];

@@ -33,15 +33,25 @@ Connections screen ([platform.md](platform.md#connections)).
     allowances: [{ plan, minutes }],                       // built-in room minutes / month; 0 = BYO provider only
     overage_rate,                                          // USD per participant-minute above the allowance
     top_up: { minutes, price },
-    usage: [{ tenant_id, name, plan, used_minutes, allowance_minutes, status: within|over|byo }]
+    usage: [{ tenant_id, name, plan, used_minutes, allowance_minutes, status: within|over|byo }],  // first 10 schools A–Z
+    usage_total                                            // ready + suspended schools (the full usage list's size)
 } }
 ```
+
+`usage` carries only the first 10 schools A–Z; the console pages the whole list through
+`GET /media/live-rooms/usage`.
 
 Whether schools get built-in rooms or Zoom / Meet / Teams at all is a [feature availability](platform.md#feature-availability)
 switch (`live_rooms`, `live_zoom`, `live_meet`, `live_teams`); the old `built_in_rooms` / `byo_providers` policies are gone
 (a `PATCH` naming them answers 422).
 
 `allowance_minutes` is the tenant's **effective** limit (plan allowance, or the tenant's `live_room_minutes` override).
+
+### `GET /media/live-rooms/usage?page=&per_page=&search=`
+
+`platform.view`. This month's built-in room minutes for every ready or suspended school, A–Z by name (not sortable),
+paginated in SQL: `{ data: [{ tenant_id, name, plan, used_minutes, allowance_minutes, status }], meta }`. `search` is a
+contains-match on the school name; `per_page` ≤ 100 (default 25).
 
 ### `PATCH /media/live-rooms`
 

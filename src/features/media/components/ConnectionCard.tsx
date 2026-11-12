@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from 'react';
 import type { UseMutationResult } from '@tanstack/react-query';
 import { ConfirmButton, Dot, FormError, Seg } from '@/components/ui';
+import { BrandLogo } from '@/components/ui/BrandLogo';
 import { useCan } from '@/features/auth/useCan';
 import { toCamel } from '@/lib/api/case';
 import { ApiError, errorMessage } from '@/lib/api/errors';
@@ -19,8 +20,6 @@ interface Props {
   disconnect: UseMutationResult<Connection, Error, string>;
   /** Re-verifies the stored credentials, when the endpoint offers it. */
   test?: UseMutationResult<ConnectionTest, Error, string>;
-  /** Show the provider's initial as a badge (DRM providers). */
-  badge?: boolean;
   connectedToast: string;
   disconnectedToast: string;
   /** Whether the viewer may change it (default: platform.manage). */
@@ -43,7 +42,6 @@ export function MediaConnectionCard({ kind, ...props }: Omit<Props, 'save' | 'di
  */
 export function ConnectionCard({
   connection: c,
-  badge,
   connectedToast,
   disconnectedToast,
   save: connect,
@@ -82,26 +80,10 @@ export function ConnectionCard({
       style={{ border: '1px solid var(--bd)', borderRadius: 11, padding: 14, minWidth: 0, display: 'flex', flexDirection: 'column' }}
     >
       <div className="hstack" style={{ gap: 9 }}>
-        {badge && (
-          <div
-            aria-hidden="true"
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 8,
-              background: 'var(--acT)',
-              color: 'var(--ac)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: 13,
-              flexShrink: 0,
-            }}
-          >
-            {c.name.charAt(0)}
-          </div>
-        )}
+        <span className="ext-tile" aria-hidden="true">
+          {/* Platform OAuth apps are keyed `oauth_<provider>`. */}
+          <BrandLogo brand={c.key.replace(/^oauth_/, '')} name={c.name} size={18} />
+        </span>
         <h3 className="min0" style={{ flex: 1, fontWeight: 700, fontSize: 13 }}>
           {c.name}
           {c.role && (

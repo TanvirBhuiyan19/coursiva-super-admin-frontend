@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Avatar, Badge, Drawer, ErrorState, Input, Seg, Select, SkeletonRows, Spinner } from '@/components/ui';
+import { Link, useParams } from 'react-router-dom';
+import { Avatar, Badge, Drawer, Empty, ErrorState, Input, Pagination, Seg, Select, SkeletonRows, Spinner } from '@/components/ui';
+import { pathOf } from '@/app/screens';
 import { Can } from '@/features/auth/Can';
 import { useCan } from '@/features/auth/useCan';
 import { PLANS, REGIONS } from '@/lib/domain';
@@ -8,7 +9,7 @@ import { ApiError, errorMessage } from '@/lib/api/errors';
 import { avatarColor, formatDay, formatMonth, initials, money, num } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { toast } from '@/store/ui';
-import { useExtendTrial, useTenant, useUpdateTenant, useWatchTenant } from '../api';
+import { useExtendTrial, useTenant, useTenantActivity, useUpdateTenant, useWatchTenant } from '../api';
 import { useT } from '../i18n';
 import { canExtendTrial, EXTEND_TRIAL, isPausedForCard } from '../status';
 import type { TenantDetail } from '../types';
@@ -201,23 +202,54 @@ function TenantDrawerBody({ t: tn, onClose }: { t: TenantDetail; onClose: () => 
               </Badge>
             </div>
           ))}
+          {/* The detail carries the newest 12; the revenue screen pages the school's whole history. */}
+          {tn.invoices.length > 0 && (
+            <div style={{ paddingTop: 6 }}>
+              <Link className="link t-sm" to={`${pathOf('revenue')}?tenant=${encodeURIComponent(tn.id)}`}>
+                {t('drawer.viewAllInvoices')}
+              </Link>
+            </div>
+          )}
         </Section>
       </Can>
       <FlagsSection t={tn} />
-      <Section title={t('drawer.activity')}>
-        {tn.timeline.map((e) => (
-          <div key={e.text} className="row t-sm" style={{ gap: 10, padding: '7px 0', alignItems: 'baseline' }}>
-            <span className="faint t-xs" style={{ width: 64, flexShrink: 0 }}>
-              {formatDay(e.at)}
-            </span>
-            <span>{e.text}</span>
-          </div>
-        ))}
-      </Section>
+      <ActivitySection key={tn.id} tenantId={tn.id} />
       <AccessSection t={tn} />
       <NotesSection t={tn} />
       <DangerZone t={tn} />
     </>
+  );
+}
+
+/** The school's whole history, 10 entries a page (the detail's own `timeline` stops at the newest 20). */
+function ActivitySection({ tenantId }: { tenantId: string }) {
+  const t = useT();
+  const [page, setPage] = useState(1);
+  const q = useTenantActivity(tenantId, page);
+  return (
+    <Section title={t('drawer.activity')}>
+      {q.isPending ? (
+        <SkeletonRows rows={4} h={18} />
+      ) : q.isError ? (
+        <ErrorState compact error={q.error} onRetry={() => void q.refetch()} />
+      ) : q.data.data.length === 0 ? (
+        <Empty>{t('drawer.activityEmpty')}</Empty>
+      ) : (
+        <>
+          <ol className="plain-list" aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+            {q.data.data.map((e, i) => (
+              <li key={`${e.at}-${String(i)}`} className="row t-sm" style={{ gap: 10, padding: '7px 0', alignItems: 'baseline' }}>
+                <span className="faint t-xs" style={{ width: 64, flexShrink: 0 }}>
+                  {formatDay(e.at)}
+                </span>
+                <span>{e.text}</span>
+              </li>
+            ))}
+          </ol>
+          {q.data.meta.lastPage > 1 && <Pagination meta={q.data.meta} onPage={setPage} noun={t('drawer.activityNoun')} />}
+        </>
+      )}
+    </Section>
   );
 }
 

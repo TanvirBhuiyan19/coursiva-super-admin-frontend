@@ -60,6 +60,62 @@ export interface SenderDomain {
   paused: boolean;
   pausedAt: string | null;
   dnsCheckedAt: string;
+  /** The school's 7-day hard-bounce or complaint rate went over the line (the reputation alert job); null = fine. */
+  flag: { reason: string; at: string | null } | null;
+  /** The sender domain on the Spamhaus DBL (the school's daily check); null = not checked. */
+  blocklist: { status: BlocklistCheck; codes: string | null; checkedAt: string | null } | null;
+}
+
+export type BlocklistCheck = 'clear' | 'listed' | 'unknown';
+
+/** An IP Coursiva Mail sends from: the shared pool or a school's dedicated IP, checked daily on Spamhaus ZEN. */
+export interface SendingIp {
+  id: string;
+  ip: string;
+  kind: 'pool' | 'dedicated';
+  tenantId: string | null;
+  tenantName: string | null;
+  label: string | null;
+  /** The latest ZEN answer; null = never checked (or not monitored). Unknown is never clear. */
+  blocklist: { status: BlocklistCheck; codes: string | null; since: string | null; checkedAt: string | null } | null;
+  createdAt: string | null;
+}
+
+export interface SendingIpInput {
+  ip: string;
+  kind: 'pool' | 'dedicated';
+  tenantId?: string;
+  label?: string;
+}
+
+export type DedicatedIpStatus = 'requested' | 'active' | 'rejected' | 'cancelled' | 'released';
+
+/** A school's dedicated IP request. The dedicated Postmark server's token is sealed and never returned (`tokenSet`). */
+export interface DedicatedIpRequest {
+  id: string;
+  status: DedicatedIpStatus;
+  note: string | null;
+  reason: string | null;
+  ip: string | null;
+  requestedAt: string | null;
+  activatedAt: string | null;
+  dailyCap: number | null;
+  sentToday: number;
+  warmupComplete: boolean;
+  tenantId: string;
+  tenantName: string;
+  tenantPlan: string;
+  requestedBy: string;
+  requestedByEmail: string;
+  decidedBy: string | null;
+  tokenSet: boolean;
+  messageStream: string | null;
+}
+
+export interface ProvisionInput {
+  ip: string;
+  serverToken: string;
+  messageStream?: string;
 }
 
 export interface Deliverability {
@@ -72,6 +128,15 @@ export interface Deliverability {
     thresholds: { bounceWatch: number; bounceMax: number; complaintWatch: number; complaintMax: number };
   };
   domains: SenderDomain[];
+  /** Sender reputation: blocklists (Spamhaus) and placement (GlockApps) are "not monitored" until connected. */
+  reputation: {
+    blocklistsMonitored: boolean;
+    placementMonitored: boolean;
+    ips: SendingIp[];
+    listedDomains: number;
+    dedicatedRequestsOpen: number;
+    flagged: number;
+  };
   /** `count` null = not aggregated platform-wide (suppressions live in each school's database). */
   suppression: { list: string; count: number | null; note: string }[];
 }

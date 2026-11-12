@@ -23,6 +23,9 @@ export const PERMISSIONS = [
   'staff.view',
   'staff.manage',
   'audit.view',
+  'partners.view',
+  'partners.manage', // applications, partners, referrals, programme terms
+  'partners.payout', // payout batches (four-eyes above the threshold), tax-form review, commission reversals
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -36,7 +39,7 @@ const VIEW: Permission[] = PERMISSIONS.filter((p) => p.endsWith('.view'));
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   Owner: PERMISSIONS,
   Admin: PERMISSIONS.filter((p) => p !== 'tenants.purge'),
-  Support: [...VIEW.filter((p) => p !== 'billing.view'), 'support.manage', 'tenants.impersonate'],
+  Support: [...VIEW.filter((p) => p !== 'billing.view' && p !== 'partners.view'), 'support.manage', 'tenants.impersonate'],
   Finance: ['tenants.view', 'billing.view', 'billing.manage', 'billing.refund', 'analytics.view', 'audit.view'],
   'Read-only': VIEW,
 };
@@ -62,4 +65,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'staff.view': 'View staff',
   'staff.manage': 'Manage staff',
   'audit.view': 'View audit log',
+  'partners.view': 'View partners',
+  'partners.manage': 'Manage partners',
+  'partners.payout': 'Pay partners',
 };

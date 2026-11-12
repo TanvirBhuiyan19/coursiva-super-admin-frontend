@@ -39,12 +39,20 @@ interface ChipGroupProps<V extends string> {
   accent?: boolean;
   /** Accessible name for the group, e.g. "Filter by plan". */
   label: string;
+  /** Short visible caption before the chips (e.g. "Plan"), for rows with more than one group. */
+  caption?: string;
 }
 
 /** Single-select filter chips. */
-export function ChipGroup<V extends string>({ options, value, onChange, size, accent, label }: ChipGroupProps<V>) {
+export function ChipGroup<V extends string>({ options, value, onChange, size, accent, label, caption }: ChipGroupProps<V>) {
   return (
     <div role="group" aria-label={label} className="hstack wrap" style={{ gap: 6 }}>
+      {caption != null && (
+        // The group's accessible name already says this; the caption is the visual version of it.
+        <span className="chip-caption" aria-hidden="true">
+          {caption}
+        </span>
+      )}
       {options.map((o) => {
         const [v, text] = split(o);
         return (

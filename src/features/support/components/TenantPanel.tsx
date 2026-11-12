@@ -124,6 +124,11 @@ export function TenantPanel({ ticket: tk }: { ticket: TicketDetail }) {
             ))}
           </ul>
         )}
+        {ctx.pastTicketCount > ctx.pastTickets.length && (
+          <Link to={`/support?view=all&tenant=${encodeURIComponent(ctx.id)}`} className="link t-sm">
+            {t('tenant.viewAllTickets', { count: ctx.pastTicketCount })}
+          </Link>
+        )}
       </Card>
     </div>
   );

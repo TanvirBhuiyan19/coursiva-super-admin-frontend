@@ -1,4 +1,4 @@
-import { useState, type SyntheticEvent } from 'react';
+import { useEffect, useState, type SyntheticEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Badge,
@@ -9,6 +9,7 @@ import {
   Field,
   Input,
   KpiRow,
+  Pagination,
   QueryState,
   Screen,
   Select,
@@ -21,6 +22,7 @@ import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import type { Tone } from '@/lib/domain';
 import { daysUntil, formatDate, formatDateTime, formatMonth, pct, timeAgo } from '@/lib/format';
+import { useDebounced } from '@/lib/useDebounced';
 import { useSection } from '@/lib/useSection';
 import { useUrlState } from '@/lib/useUrlState';
 import { useT as useCommonT } from '@/lib/i18n/common';
@@ -218,8 +220,13 @@ function AcceptanceRow({ a, doc }: { a: PolicyAcceptance; doc: PolicyDocument })
 
 function AcceptanceCard({ docs, doc, onDoc }: { docs: PolicyDocument[]; doc: PolicyDocument | undefined; onDoc: (key: string) => void }) {
   const t = useT();
-  const q = usePolicyAcceptance(doc?.id);
-  const accepted = q.data?.filter((a) => a.acceptedAt).length ?? 0;
+  const [f, setF] = useUrlState({ acceptanceQ: '', acceptancePage: '' });
+  const [search, setSearch] = useState(f.acceptanceQ);
+  const debounced = useDebounced(search, 300);
+  useEffect(() => {
+    if (debounced !== f.acceptanceQ) setF({ acceptanceQ: debounced, acceptancePage: '' });
+  }, [debounced, f.acceptanceQ, setF]);
+  const q = usePolicyAcceptance(doc?.id, { page: Number(f.acceptancePage) || 1, search: f.acceptanceQ || undefined });
   return (
     <Card
       title={t('policies.acceptance.title')}
@@ -231,7 +238,10 @@ function AcceptanceCard({ docs, doc, onDoc }: { docs: PolicyDocument[]; doc: Pol
             options={docs.map((d) => [d.docKey, t('policies.acceptance.docOption', { name: d.name, version: d.version })] as const)}
             label={t('policies.acceptance.document')}
             style={{ width: 'auto', maxWidth: '100%', padding: '5px 8px', fontSize: 12, marginLeft: 'auto' }}
-            onChange={onDoc}
+            onChange={(key) => {
+              setF({ acceptancePage: '' });
+              onDoc(key);
+            }}
           />
         ) : undefined
       }
@@ -240,16 +250,42 @@ function AcceptanceCard({ docs, doc, onDoc }: { docs: PolicyDocument[]; doc: Pol
         <Empty>{t('policies.acceptance.noLive')}</Empty>
       ) : (
         <QueryState query={q} skeleton={<SkeletonRows rows={6} h={26} />} compact>
-          {(rows) => (
+          {(page) => (
             <>
               <p className="t-sm muted" style={{ margin: '0 0 4px' }}>
-                {t('policies.acceptance.summary', { accepted, total: rows.length, name: doc.name, version: doc.version })}
+                {t('policies.acceptance.summary', {
+                  accepted: page.meta.accepted,
+                  total: page.meta.accepted + page.meta.pending,
+                  name: doc.name,
+                  version: doc.version,
+                })}
               </p>
-              <ul className="plain-list" aria-label={t('policies.acceptance.listLabel', { name: doc.name, version: doc.version })}>
-                {rows.map((a) => (
-                  <AcceptanceRow key={a.tenantId} a={a} doc={doc} />
-                ))}
-              </ul>
+              <input
+                className="input"
+                type="search"
+                style={{ width: 240, margin: '6px 0' }}
+                placeholder={t('policies.acceptance.searchPlaceholder')}
+                aria-label={t('policies.acceptance.searchLabel')}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {page.data.length === 0 ? (
+                <Empty>{t('policies.acceptance.noMatch')}</Empty>
+              ) : (
+                <ul
+                  className="plain-list"
+                  aria-label={t('policies.acceptance.listLabel', { name: doc.name, version: doc.version })}
+                  aria-busy={q.isPlaceholderData}
+                  style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}
+                >
+                  {page.data.map((a) => (
+                    <AcceptanceRow key={a.tenantId} a={a} doc={doc} />
+                  ))}
+                </ul>
+              )}
+              {page.meta.lastPage > 1 && (
+                <Pagination meta={page.meta} onPage={(p) => setF({ acceptancePage: String(p) })} noun={t('policies.acceptance.noun')} />
+              )}
             </>
           )}
         </QueryState>

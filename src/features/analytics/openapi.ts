@@ -1,4 +1,4 @@
-import { defineSpec, ref, resource, type ParamDef } from '@/openapi/dsl';
+import { defineSpec, paginated, ref, resource, type ParamDef } from '@/openapi/dsl';
 
 const tenantId: Record<string, ParamDef> = {
   id: { type: 'string', description: 'Tenant id (must have AI studio usage), e.g. `tn_amplify`.' },
@@ -15,6 +15,25 @@ export const spec = defineSpec({
       summary: 'Growth funnel, cohorts, health scores and onboarding',
       auth: 'analytics.view',
       response: resource(ref('Growth')),
+    },
+    {
+      method: 'GET',
+      path: '/analytics/growth/health-scores',
+      summary: 'Every school’s health score, ranked (paginated)',
+      description:
+        'The whole ranking behind `health_scores` on `/analytics/growth` (which carries the top 10). Ranked and paginated in SQL.',
+      auth: 'analytics.view',
+      query: {
+        page: { type: 'integer', description: 'Page number (1-based).' },
+        per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
+        sort: {
+          type: 'string',
+          description: 'Comma-separated from `score`, `name`; prefix with - for descending (default `-score,name`).',
+        },
+      },
+      response: paginated(ref('HealthScore')),
+      errors: [422],
+      example: { query: { per_page: 5 } },
     },
     {
       method: 'GET',
@@ -59,6 +78,22 @@ export const spec = defineSpec({
       summary: 'AI usage, cost, margin and routing settings',
       auth: 'analytics.view',
       response: resource(ref('AiUsage')),
+    },
+    {
+      method: 'GET',
+      path: '/analytics/ai/tenants',
+      summary: 'AI usage per tenant this month (paginated)',
+      description:
+        'Every tenant with AI usage this month (rows as in `AiUsage.tenants`, which carries the 10 heaviest). Ranked and paginated in SQL.',
+      auth: 'analytics.view',
+      query: {
+        page: { type: 'integer', description: 'Page number (1-based).' },
+        per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
+        sort: { type: 'string', description: '`tokens_k` or `name`; prefix with - for descending (default `-tokens_k`).' },
+      },
+      response: paginated(ref('AiTenantUsage')),
+      errors: [422],
+      example: { query: { per_page: 5 } },
     },
     {
       method: 'PUT',

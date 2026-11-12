@@ -11,7 +11,9 @@ import {
   invalid,
   noContent,
   notFound,
+  json,
   ok,
+  pageSlice,
   paginate,
   query,
   readBody,
@@ -243,8 +245,10 @@ export const handlers = [
       authorize('billing.view');
       const q = query(request);
       const status = q.get('status') as InvoiceStatus | undefined;
+      if (status && !['Paid', 'Past due', 'Waived'].includes(status)) throw invalid({ status: 'The selected status is invalid.' });
+      const tenant = q.get('tenant');
       const rows = sortedInvoices()
-        .filter((v) => !status || v.status === status)
+        .filter((v) => (!status || v.status === status) && (!tenant || v.tenantId === tenant))
         .map(toInvoice);
       const focus = q.get('focus');
       const idx = focus && !q.get('page') ? rows.findIndex((v) => v.id === focus) : -1;
@@ -259,16 +263,18 @@ export const handlers = [
 
   http.get(
     route('/billing/dunning'),
-    handle(() => {
+    handle(({ request }) => {
       authorize('billing.view');
       const { dunningRetries, autoSuspend } = platformSettings.get();
-      return ok({
-        maxAttempts: dunningRetries + 1,
-        retryDays: RETRY_SCHEDULE.slice(0, dunningRetries),
-        autoSuspend,
-        items: sortedInvoices()
-          .filter((v) => v.status === 'Past due')
-          .map(toInvoice),
+      // Oldest failure first (it is closest to suspension); `items` is one page, `meta` pages it.
+      const pastDue = sortedInvoices()
+        .filter((v) => v.status === 'Past due')
+        .reverse()
+        .map(toInvoice);
+      const { items, meta } = pageSlice(pastDue, request);
+      return json({
+        data: { maxAttempts: dunningRetries + 1, retryDays: RETRY_SCHEDULE.slice(0, dunningRetries), autoSuspend, items },
+        meta,
       });
     }),
   ),
@@ -323,15 +329,20 @@ export const handlers = [
 
   http.get(
     route('/billing/overages'),
-    handle(() => {
+    handle(({ request }) => {
       authorize('billing.view');
-      const items: Overage[] = overages.all().map((o) => ({ ...o, tenantName: tenantName(o.tenantId) }));
+      // Largest first; `items` is one page, `unbilledTotal` covers the whole month.
+      const all: Overage[] = overages
+        .all()
+        .map((o) => ({ ...o, tenantName: tenantName(o.tenantId) }))
+        .sort((a, b) => b.amount - a.amount || a.id.localeCompare(b.id));
+      const { items, meta } = pageSlice(all, request);
       const body: OverageList = {
         period: monthStart(0),
-        unbilledTotal: items.filter((o) => !o.billedAt).reduce((s, o) => s + o.amount, 0),
+        unbilledTotal: all.filter((o) => !o.billedAt).reduce((s, o) => s + o.amount, 0),
         items,
       };
-      return ok(body);
+      return json({ data: body, meta });
     }),
   ),
 

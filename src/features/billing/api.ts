@@ -1,7 +1,7 @@
 import { keepPreviousData, type QueryClient, queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateTenantData } from '@/features/tenants/api';
 import { api } from '@/lib/api/client';
-import type { Paginated, Resource } from '@/lib/api/types';
+import type { Paginated, PaginationMeta, Resource } from '@/lib/api/types';
 import type { Plan } from '@/lib/domain';
 import type {
   DunningQueue,
@@ -23,7 +23,9 @@ export const billingKeys = {
   invoices: () => [...billingKeys.all, 'invoices'] as const,
   invoiceList: (params: InvoiceListParams) => [...billingKeys.invoices(), params] as const,
   dunning: () => [...billingKeys.all, 'dunning'] as const,
+  dunningPage: (page: number) => [...billingKeys.dunning(), page] as const,
   overages: () => [...billingKeys.all, 'overages'] as const,
+  overagesPage: (page: number) => [...billingKeys.overages(), page] as const,
   pricing: () => [...billingKeys.all, 'pricing'] as const,
   promos: () => [...billingKeys.all, 'promos'] as const,
 };
@@ -54,16 +56,23 @@ export const useInvoices = (params: InvoiceListParams) =>
     placeholderData: keepPreviousData,
   });
 
-export const useDunning = () =>
-  useQuery({
-    queryKey: billingKeys.dunning(),
-    queryFn: ({ signal }) => api.get<Resource<DunningQueue>>('/billing/dunning', { signal }).then((r) => r.data),
+/** A resource whose list part (`items`) is one page; `meta` pages it. */
+export type PagedResource<T> = Resource<T> & { meta: PaginationMeta };
+
+export const QUEUE_PER_PAGE = 25;
+
+export const useDunning = (page = 1) =>
+  useQuery<PagedResource<DunningQueue>>({
+    queryKey: billingKeys.dunningPage(page),
+    queryFn: ({ signal }) => api.get<PagedResource<DunningQueue>>('/billing/dunning', { query: { page, perPage: QUEUE_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
   });
 
-export const useOverages = () =>
-  useQuery({
-    queryKey: billingKeys.overages(),
-    queryFn: ({ signal }) => api.get<Resource<OverageList>>('/billing/overages', { signal }).then((r) => r.data),
+export const useOverages = (page = 1) =>
+  useQuery<PagedResource<OverageList>>({
+    queryKey: billingKeys.overagesPage(page),
+    queryFn: ({ signal }) => api.get<PagedResource<OverageList>>('/billing/overages', { query: { page, perPage: QUEUE_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
   });
 
 /** Retry a failed charge or waive the invoice. Both settle the tenant, so tenant data is refreshed too. */
@@ -90,13 +99,16 @@ export function usePauseDunning() {
       api.put<Resource<Invoice>>(`/billing/invoices/${id}/dunning`, { paused }).then((r) => r.data),
     onMutate: async ({ id, paused }) => {
       await qc.cancelQueries({ queryKey: key });
-      const prev = qc.getQueryData<DunningQueue>(key);
-      if (prev)
-        qc.setQueryData<DunningQueue>(key, { ...prev, items: prev.items.map((v) => (v.id === id ? { ...v, dunningPaused: paused } : v)) });
+      const prev = qc.getQueriesData<PagedResource<DunningQueue>>({ queryKey: key });
+      qc.setQueriesData<PagedResource<DunningQueue>>({ queryKey: key }, (old) =>
+        old
+          ? { ...old, data: { ...old.data, items: old.data.items.map((v) => (v.id === id ? { ...v, dunningPaused: paused } : v)) } }
+          : old,
+      );
       return { prev };
     },
     onError: (_e, _v, ctx) => {
-      if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      for (const [k, v] of ctx?.prev ?? []) qc.setQueryData(k, v);
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: key });

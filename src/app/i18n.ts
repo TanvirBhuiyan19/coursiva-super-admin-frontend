@@ -37,6 +37,7 @@ export const { t, useT, source } = defineMessages('app', {
     announce: 'Announcements',
     staff: 'Platform staff',
     account: 'Account security',
+    partners: 'Partner programme',
   },
   nav: {
     groups: {
@@ -53,6 +54,7 @@ export const { t, useT, source } = defineMessages('app', {
       domains: 'Domains',
       revenue: 'Revenue',
       analytics: 'Analytics',
+      partners: 'Partners',
       governance: 'Governance',
       platform: 'Platform settings',
       announce: 'Announcements',

@@ -205,7 +205,10 @@ describe('console settings — saving', () => {
     expect(platformSettings.get().maintenanceMode).toBe(false);
 
     await user.type(within(f).getByLabelText('Maintenance message'), 'Upgrading the database — back by 06:00 UTC.');
-    await user.click(within(f).getByRole('checkbox', { name: 'Kodo Design School' }));
+    // Exempt schools are added through a server-side search (any school, not just the first page).
+    await user.type(within(f).getByRole('combobox', { name: 'Add a tenant…' }), 'Kodo');
+    await user.click(await within(f).findByRole('option', { name: /Kodo Design School/ }));
+    expect(await within(f).findByRole('button', { name: 'Remove Kodo Design School' })).toBeInTheDocument();
     await user.click(within(f).getByRole('button', { name: 'Save maintenance' }));
     // Nothing goes offline until the operator types the confirmation; the dialog names the reach and the exemption.
     const dialog = await screen.findByRole('dialog', { name: 'Turn maintenance mode on?' });

@@ -77,12 +77,16 @@ Permission `announcements.send`. Body `{ message, audience }` → `201 { data: B
   summary: { sent_30d, bounce_rate, complaint_rate, domains_at_risk,
              thresholds: { bounce_watch: 2, bounce_max: 5, complaint_watch: 0.1, complaint_max: 0.3 } },
   domains: SenderDomain[],
+  reputation: { blocklists_monitored, placement_monitored, ips: SendingIp[], listed_domains, dedicated_requests_open, flagged },
   suppression: [{ list, count, note }]
 } }
 ```
 
 `SenderDomain`: `id, tenant_id, tenant_name, domain, spf, dkim (Pass|Fail|Not set), dmarc (policy string or "none"), sent_30d,
-bounce_rate, complaint_rate (percent), risk, paused, paused_at, dns_checked_at`.
+bounce_rate, complaint_rate (percent), risk, paused, paused_at, dns_checked_at, flag ({ reason, at } — the school's
+7-day hard-bounce or complaint rate went over 2 % / 0.1 %; null otherwise), blocklist ({ status: clear|listed|unknown,
+codes, checked_at } — the sender domain on the Spamhaus DBL; null = not checked)`. `domains_at_risk` also counts
+flagged and DBL-listed domains.
 
 **Not measured = null, never 0.** The summary `bounce_rate` / `complaint_rate` are the bounces (hard + soft) and spam
 complaints the providers' webhooks reported in 30 days, as a percent of `sent_30d` — measured once the Postmark
@@ -104,6 +108,28 @@ Permission `platform.manage`. All return `{ data: SenderDomain }`; 404 unknown d
 | `POST /platform/sender-domains/{id}/pause`     | Stops all sending from the tenant's domain (422 if already paused) | `Paused email sending for {tenant}`  |
 | `POST /platform/sender-domains/{id}/resume`    | Resumes sending (422 if not paused)                                | `Resumed email sending for {tenant}` |
 | `POST /platform/sender-domains/{id}/dns-check` | Re-reads SPF/DKIM/DMARC, updates `dns_checked_at`                  | `Re-checked DNS for {domain}`        |
+
+### Sender reputation
+
+`SendingIp`: `id, ip, kind (pool|dedicated), tenant_id, tenant_name, label, blocklist ({ status, codes, since,
+checked_at } — the latest Spamhaus ZEN answer; "unknown" is never clear) or null, created_at`.
+
+`DedicatedIpRequest`: `id, status (requested|active|rejected|cancelled|released), note, reason, ip, requested_at,
+activated_at, daily_cap, sent_today, warmup_complete, tenant_id, tenant_name, tenant_plan, requested_by,
+requested_by_email, decided_by, token_set, message_stream` — never the server token.
+
+| Endpoint                                      | Permission                          | Effect                                                                                                                          | Audit (Tenants)                                                                |
+| --------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `GET /platform/sending-ips`                   | `platform.view`                     | `{ data: SendingIp[] }`                                                                                                         | —                                                                              |
+| `POST /platform/sending-ips`                  | `platform.manage`                   | `{ ip, kind, tenant_id? (dedicated), label? }`, a public IP, unique → 201                                                       | `Added sending IP {ip} ({kind})`                                               |
+| `DELETE /platform/sending-ips/{id}`           | `platform.manage`                   | 204; 409 for an active dedicated IP                                                                                             | `Removed sending IP {ip}`                                                      |
+| `GET /platform/dedicated-ips`                 | `platform.view`                     | paginated, pending first; `?status=`                                                                                            | —                                                                              |
+| `POST /platform/dedicated-ips/{id}/provision` | `platform.manage` + recent password | `{ ip, server_token, message_stream? }`: the token is checked with Postmark, sealed, never returned; the IP joins `sending_ips` | `Provisioned dedicated IP {ip} for {tenant}`                                   |
+| `POST /platform/dedicated-ips/{id}/reject`    | `platform.manage`                   | `{ reason }` (≥ 5), pending only (409)                                                                                          | `Declined the dedicated IP request of {tenant}`                                |
+| `POST /platform/dedicated-ips/{id}/release`   | `platform.manage`                   | active only (409); the token is erased, the school uses the shared pool                                                         | `Released the dedicated IP of {tenant}; its mail goes through the shared pool` |
+
+Blocklists and placement are watched only once the console has the `spamhaus` (DQS key) and `glockapps` (API key +
+project) connections (`kind: email`); until then the pages say "not monitored".
 
 ## Certificate authority
 
@@ -135,16 +161,19 @@ Audit: `Enabled/Disabled registry policy "{label}"` (Security).
 
 ## Standards & conformance
 
-### `GET /platform/standards`
+### `GET /platform/standards?page=&per_page=`
 
 ```
 { data: {
   summary: { scorm_packages, xapi_statements_24h, lti_launches_30d, failed_imports },   // xapi/lti: null = not measured yet ("—")
   standards: [{ id, name, direction: Import|Export|Both, packages, note, support: Supported|Partial|Not supported }],
-  failed_imports: [{ id, tenant_id, tenant_name, file, reason, failed_at }],   // open queue only
+  failed_imports: [{ id, tenant_id, tenant_name, file, reason, failed_at }],   // one page of the open queue, newest first
   accessibility: [{ surface, level, status: Conformant|Partial|Not conformant, note }]
-} }
+}, meta }                                                                      // standard pagination meta for failed_imports
 ```
+
+`failed_imports` is paged in SQL (`per_page` ≤ 100, default 25, newest first — not sortable); `summary.failed_imports`
+and `meta.total` are the whole open queue.
 
 ### `POST /platform/imports/{id}/reprocess`
 
@@ -169,12 +198,12 @@ Types: `PlatformConnection`, `ConnectionInput`, `ConnectionTestResult` in `src/f
 | `DELETE /platform/connections/{key}`    | as above                                           | Deletes the stored credentials → the connection (`connected: false`). 409 for `paddle` / `lemon_squeezy` (below).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `POST /platform/connections/{key}/test` | `platform.manage`                                  | Re-verifies → `{ ok, latency_ms, message }`; 409 when not connected. No audit.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-Keys: `stripe` (secret key, publishable key, webhook signing secret, optional Connect webhook signing secret) · `paddle`, `lemon_squeezy` (below) · `cloudflare` (API token, zone ID) · `cloudflare_registrar` (below) · `expo` (access token; only
+Keys: `stripe` (secret key, publishable key, webhook signing secret, optional Connect webhook signing secret) · `paddle`, `lemon_squeezy` (below) · `paypal_payouts` (kind payments: client ID, client secret, optional webhook ID, mode `sandbox`|`live` default sandbox — Coursiva's partner payouts by PayPal, verified by issuing a token; webhook `/api/v1/webhooks/paypal-payouts?scope=platform`; `PAYPAL_PAYOUTS_*` only as the fallback; docs/payouts.md) · `cloudflare` (API token, zone ID) · `cloudflare_registrar` (below) · `expo` (access token; only
 needed when the Expo project enables enhanced push security; Expo refuses → `Expo push rejected these credentials: the
 access token was refused`) · `postmark` (server token, optional message stream, optional secret `webhook_password` — 24+ characters without spaces or
 colons, else 422 `Use at least 24 characters without spaces or colons, e.g. from \`openssl rand -hex 24\`.`; the HTTP Basic
 auth password of the bounce/complaint webhook `{API}/api/v1/webhooks/postmark`, backend docs/communications.md) · `smtp`(host, port, security`STARTTLS`/`SSL/TLS`, username, password;
-Postmark wins when both are connected) · `google_ads`, `microsoft_ads`, `google_crux`(below) ·`anthropic`, `assemblyai`(below) ·`clamav`, `metrics`(below) ·`daily`(below) ·`oauth_{provider}` (below).
+Postmark wins when both are connected) · `google_ads`, `microsoft_ads`, `google_crux`(below) ·`anthropic`, `assemblyai`(below) ·`clamav`, `turnstile`, `metrics`(below) ·`daily`(below) ·`oauth_{provider}` (below).
 
 Screen sections, in this order: Payments · Custom domains · Push notifications · Platform email · Ads & channels ·
 Insights · AI studio · Security · Monitoring · Live video · Sign-in apps
@@ -241,10 +270,11 @@ the Claude Console` · `Speech-to-text for AI captions and lesson transcripts`.
 
 ### Security (`kind: security`) and monitoring (`kind: monitoring`)
 
-| Key       | Name               | Fields                           | Check (message)                                                                                                                                                    |
-| --------- | ------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `clamav`  | ClamAV             | `host`, `port` (both non-secret) | host: an IP address or a hostname — `The host must be a hostname or an IP address, e.g. clamav.internal.`; port: 1–65535 — `The port must be between 1 and 65535.` |
-| `metrics` | Prometheus metrics | `token` (secret, "Scrape token") | `^[A-Za-z0-9._~+/=-]{32,256}$` — `Use a random token of at least 32 characters (for example: openssl rand -hex 32).`                                               |
+| Key         | Name                 | Fields                            | Check (message)                                                                                                                                                                                               |
+| ----------- | -------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clamav`    | ClamAV               | `host`, `port` (both non-secret)  | host: an IP address or a hostname — `The host must be a hostname or an IP address, e.g. clamav.internal.`; port: 1–65535 — `The port must be between 1 and 65535.`                                            |
+| `turnstile` | Cloudflare Turnstile | `site_key`, `secret_key` (secret) | both `^[0-9]x[A-Za-z0-9_-]{10,…}$` — `The site key looks like 0x4AAAAAAA… (Cloudflare → Turnstile → the widget).` / `The secret key looks like 0x4AAAAAAA… (Cloudflare → Turnstile → the widget → Settings).` |
+| `metrics`   | Prometheus metrics   | `token` (secret, "Scrape token")  | `^[A-Za-z0-9._~+/=-]{32,256}$` — `Use a random token of at least 32 characters (for example: openssl rand -hex 32).`                                                                                          |
 
 - `clamav` scans every upload (media library, assignment files, SCORM packages) with a clamd daemon reachable over
   TCP, usually on the private network (the address is not SSRF-filtered; only platform staff enter it). It is
@@ -252,6 +282,10 @@ the Claude Console` · `Speech-to-text for AI captions and lesson transcripts`.
   `ClamAV rejected these credentials: no clamd answered PING at {host}:{port}` (the mock's clamd never answers on
   `clamav.down.internal`). Description: `Virus scanning of every upload (media library, assignment files, SCORM
 packages) · a clamd daemon reachable over TCP`.
+- `turnstile` protects coursiva.com's report form from bots (console only; no environment fallback). The secret is
+  **verified live** against Cloudflare's siteverify with a dummy token: `invalid-input-secret` → 422 `credentials`
+  `Cloudflare Turnstile rejected these credentials: Cloudflare rejected the secret key`. Description: `Bot protection
+on coursiva.com’s report form · a Turnstile widget for the marketing site’s hostname (Cloudflare → Turnstile)`.
 - `metrics` is the bearer token Prometheus scrapes `GET /api/metrics` with. Nothing is called: the operator generates
   it (`openssl rand -hex 32`) and puts the same value in the scrape config, so it is **format-checked only**.
 
@@ -405,14 +439,17 @@ Audit: `Revoked API key "{name}" ({prefix})` (Security).
 
 ## Webhooks
 
-### `GET /platform/webhooks`
+### `GET /platform/webhooks?page=&per_page=`
 
 ```
 { data: {
   endpoints: [{ id, tenant_id (null = platform-level), url, events: string[] ("*" = all events), success_rate_7d, status: Healthy|Failing }],
-  failed_deliveries: [{ id, event, url, error, attempts, last_attempt_at }]    // last 24 h, newest first
-} }
+  failed_deliveries: [{ id, event, url, error, attempts, last_attempt_at }]    // one page of the last 24 h, newest first
+}, meta }                                                                      // standard pagination meta for failed_deliveries
 ```
+
+`failed_deliveries` is paged in SQL (`per_page` ≤ 100, default 25, newest first — not sortable); `meta.total` counts every
+failed delivery of the last 24 hours (the console's section badge).
 
 ### `POST /platform/webhook-deliveries/{id}/retry`
 

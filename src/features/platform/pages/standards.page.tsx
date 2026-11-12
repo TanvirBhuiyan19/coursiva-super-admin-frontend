@@ -1,10 +1,11 @@
-import { Badge, Card, ErrorState, Screen, SkeletonRows, Spinner, TRow } from '@/components/ui';
+import { Badge, Card, ErrorState, Pagination, Screen, SkeletonRows, Spinner, TRow } from '@/components/ui';
 import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { useCan } from '@/features/auth/useCan';
 import type { Tone } from '@/lib/domain';
 import { num, timeAgo } from '@/lib/format';
 import { intlLocale } from '@/lib/i18n';
 import { useSection } from '@/lib/useSection';
+import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
 import { useReprocessImport, useStandards } from '../api';
 import { Tiles } from '../components/Tiles';
@@ -60,11 +61,12 @@ function ImportRow({ row, canManage }: { row: FailedImport; canManage: boolean }
 export default function StandardsPage() {
   const t = useT();
   const can = useCan();
-  const q = useStandards();
-  const d = q.data;
+  const [f, setF] = useUrlState({ importsPage: '' });
+  const q = useStandards(Number(f.importsPage) || 1);
+  const d = q.data?.data;
   const canManage = can('platform.manage');
   const [section, setSection, sectionHref] = useSection(SECTIONS, 'support');
-  const failed = d?.failedImports.length ?? 0;
+  const failed = d?.summary.failedImports ?? 0;
 
   if (q.error)
     return (
@@ -141,11 +143,16 @@ export default function StandardsPage() {
             {!d ? (
               <SkeletonRows rows={2} h={22} />
             ) : d.failedImports.length ? (
-              <ul className="plain-list">
-                {d.failedImports.map((r) => (
-                  <ImportRow key={r.id} row={r} canManage={canManage} />
-                ))}
-              </ul>
+              <>
+                <ul className="plain-list" aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+                  {d.failedImports.map((r) => (
+                    <ImportRow key={r.id} row={r} canManage={canManage} />
+                  ))}
+                </ul>
+                {q.data && q.data.meta.lastPage > 1 && (
+                  <Pagination meta={q.data.meta} onPage={(p) => setF({ importsPage: String(p) })} noun={t('standards.importsNoun')} />
+                )}
+              </>
             ) : (
               <div className="muted t-sm" style={{ padding: '14px 0' }}>
                 {t('standards.allClean')}

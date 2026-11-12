@@ -46,9 +46,18 @@ Rules:
   `trials` = converted + current trials + 2; upstream stages are scaled with benchmark rates (53 % activated→trial, 62 % signup→activated,
   4 % visitor→signup). `rate_pct` = share of the previous stage, one decimal. The UI draws bars on a log scale.
 - `cohorts`: the last six signup months, oldest first; `retention[i]` = % of that cohort still active _i_ months after signup.
-- `health_scores`: every tenant, best first. `score` is the same score as `GET /tenants/{id}` `health_score.score`.
+- `health_scores`: the **top 10** tenants, best first (score desc, then name). `score` is the same score as `GET /tenants/{id}`
+  `health_score.score`. `total_tenants` says how many are ranked; the whole ranking pages through
+  `GET /analytics/growth/health-scores` (the Growth screen's "View all").
 - `onboarding.stage`: `provisioned · branding · first_course · first_sale · paid`. The `paid` stage equals paying tenants; earlier stages
   interpolate up to all tenants. `stuck` lists the tenants that fall out between stages (trials first, then fewest students).
+
+## `GET /analytics/growth/health-scores`
+
+Permission `analytics.view`. Paginated `HealthScore[]` (`{ tenant_id, name, score, driver }`): every listed (not deleted)
+school's health score, ranked and paginated in SQL. `page`, `per_page` (max 100, default 25), `sort` from `score`, `name`
+(comma-separated, `-` = descending; default `-score,name`, best first). 422 `sort` for any other field. The Growth
+screen keeps the full list's page in `?healthPage=` (open while `?health=all`).
 
 ## `GET /analytics/usage`
 
@@ -196,6 +205,15 @@ Rules (per tenant, this month):
 - `margin_pct = (MRR + billed − cost) ÷ (MRR + billed)`, using the tenant's paying MRR (`tenantMrr`). `null` when revenue is 0 (trial or suspended).
 - `feature`: `outlines · quizzes · summaries · chat`. `by_feature` splits each tenant's credits 55 % to their `top_feature` and the rest 20/15/10 %.
 - `routing_policy`: `cost_first · balanced · quality_first`.
+- `tenants` is the **top 10** by `tokens_k` (heaviest first); `totals` and `by_feature` cover every tenant with usage
+  (`totals.tenants` counts them). The whole list pages through `GET /analytics/ai/tenants`.
+
+### `GET /analytics/ai/tenants`
+
+Permission `analytics.view`. Paginated `AiTenantUsage[]` (rows exactly as in `tenants` above): every tenant with AI usage
+this month, ranked and paginated in SQL. `page`, `per_page` (max 100, default 25), `sort` from `tokens_k`, `name`
+(`-` = descending; default `-tokens_k`, heaviest first; ties by tenant id). 422 `sort` for any other field. The AI screen
+keeps the full list's page in `?tenantsPage=` (open while `?tenants=all`).
 
 ### `PUT /analytics/ai/settings`
 

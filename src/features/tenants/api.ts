@@ -12,6 +12,7 @@ import type {
   ProvisionTenantInput,
   Tenant,
   TenantAction,
+  TenantActivity,
   TenantDetail,
   TenantListParams,
   TenantSummary,
@@ -24,6 +25,7 @@ export const tenantKeys = {
   list: (params: TenantListParams) => [...tenantKeys.lists(), params] as const,
   summary: () => [...tenantKeys.all, 'summary'] as const,
   detail: (id: string) => [...tenantKeys.all, 'detail', id] as const,
+  activity: (id: string, page: number) => [...tenantKeys.all, 'detail', id, 'activity', page] as const,
 };
 
 /** Everything a tenant change can affect elsewhere in the console. */
@@ -63,7 +65,35 @@ export const tenantQueries = {
 export const useTenants = (params: TenantListParams, opts: { live?: boolean } = {}) =>
   useQuery({ ...tenantQueries.list(params), placeholderData: keepPreviousData, ...(opts.live ? live : {}) });
 
+/** Tenant pickers: how many matches a search shows. */
+export const TENANT_PICKER_SIZE = 20;
+
+/** Tenant pickers: the schools matching `search`, A–Z, searched server-side (so every school is pickable). */
+export const useTenantSearch = (search: string, enabled = true) =>
+  useQuery({
+    ...tenantQueries.list({ search: search.trim() || undefined, perPage: TENANT_PICKER_SIZE, sort: 'name' }),
+    placeholderData: keepPreviousData,
+    enabled,
+  });
+
+/** Tenant pickers: the saved selection's schools (any page of the directory), by id — at most 100. */
+export const useTenantsByIds = (ids: readonly string[]) =>
+  useQuery({
+    ...tenantQueries.list({ ids: [...ids].sort().slice(0, 100).join(','), perPage: 100, sort: 'name' }),
+    enabled: ids.length > 0,
+  });
+
 export const useTenantSummary = () => useQuery(tenantQueries.summary());
+
+/** One page of the school's activity, newest first. Keyed under the detail, so every tenant mutation refreshes it. */
+export const ACTIVITY_PER_PAGE = 10;
+export const useTenantActivity = (id: string, page: number) =>
+  useQuery<Paginated<TenantActivity>>({
+    queryKey: tenantKeys.activity(id, page),
+    queryFn: ({ signal }) =>
+      api.get<Paginated<TenantActivity>>(`/tenants/${id}/activity`, { query: { page, perPage: ACTIVITY_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
+  });
 
 export const useTenant = (id: string | undefined) =>
   useQuery({

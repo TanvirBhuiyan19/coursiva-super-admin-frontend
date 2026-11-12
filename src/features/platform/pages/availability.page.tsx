@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
 import { Badge, Card, ChipGroup, Dot, Empty, QueryState, Screen, SkeletonRows } from '@/components/ui';
 import { pathOf } from '@/app/screens';
+import { BrandLogo } from '@/components/ui/BrandLogo';
+import { hasBrandLogo } from '@/components/ui/brandMarks';
 import { num } from '@/lib/format';
 import { useUrlState } from '@/lib/useUrlState';
 import { useAvailability, usePlatformConnections } from '../api';
@@ -19,6 +21,14 @@ const TONE = { available: 'good', off: 'flat', notConnected: 'warn' } as const;
 const matches = (c: Capability, q: string) =>
   !q || [c.label, c.key, c.description, ...c.modules, ...c.requires.map((r) => r.label)].some((s) => s.toLowerCase().includes(q));
 
+/** The brand behind a provider switch (`live_zoom`, `ads_google` → Google Ads, `app_google-sheets`), when it has a logo. */
+function brandOf(key: string): string | null {
+  const m = /^(live|ads|app|signin)_(.+)$/.exec(key);
+  if (!m?.[2]) return null;
+  const brand = m[1] === 'ads' ? `${m[2]}-ads` : m[2];
+  return hasBrandLogo(brand) ? brand : null;
+}
+
 /** Media-screen services (storage, DRM, Mux) aren't on Connections; everything else links to its Connections tab. */
 function connectHref(keys: string[], connections: PlatformConnection[] | undefined) {
   const kind = connections?.find((x) => keys.includes(x.key))?.kind;
@@ -30,10 +40,12 @@ function Row({ c, connections }: { c: Capability; connections: PlatformConnectio
   const status = statusOf(c);
   const missing = c.requires.filter((r) => !r.connected);
   const names = missing.map((r) => r.label).join(', ');
+  const brand = brandOf(c.key);
   return (
     <li className="row" style={{ alignItems: 'flex-start', gap: 14, padding: '12px 0' }}>
       <div className="min0" style={{ flex: 1 }}>
         <div className="hstack wrap" style={{ gap: '4px 8px' }}>
+          {brand && <BrandLogo brand={brand} size={16} />}
           <h3 style={{ fontWeight: 650, fontSize: 13, margin: 0 }}>{c.label}</h3>
           <Badge tone={TONE[status]} xs pill style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <Dot tone={TONE[status]} size={6} />

@@ -107,6 +107,13 @@ The UI turns WORM off in two steps (confirm button).
 
 Paginated `TenantExport[]`, newest first: `id, tenant_id, tenant_name, format (json|csv|sql), include_media,
 status (queued|running|ready|failed|expired), requested_at, expires_at (+7 days), requested_by_name, size_bytes (null until ready)`.
+`tenant` (tenant id) narrows to one school's exports — its latest is the first row (unknown id → empty page); the
+console asks for `per_page=1` to show the picked school's latest export. Standard `page`, `per_page` (max 100).
+
+### `GET /backup/exports/{id}`
+
+Permission `platform.view` → `{ data: TenantExport }`; 404 unknown id. The console resolves `?export={id}` (the
+"export is ready" email's link) with it, however old the export is.
 
 ### `POST /backup/exports`
 
@@ -119,7 +126,8 @@ Body `{ tenant_id, format, include_media }` → `201 { data: TenantExport }`. Wh
 Permission `platform.manage` → `{ data: { url, expires_at } }`: a 15-minute signed storage URL (attachment). 409
 `This export is not ready yet.` / `This export has expired.`; 404 unknown id. Audit:
 `Downloaded the data export of {tenant}` (Security). The console opens the export named by `?export=` at the top of
-the Tenant exports section with a Download button, and ready exports have a Download link in the list.
+the Tenant exports section with a Download button, and ready exports have a Download link in the list
+(`?exportsPage=` pages it).
 
 ## Activity
 

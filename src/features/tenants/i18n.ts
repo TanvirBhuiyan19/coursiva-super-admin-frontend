@@ -27,6 +27,8 @@ export const { t, useT } = defineMessages('tenants', {
     searchLabel: 'Search tenants',
     filterPlan: 'Filter by plan',
     filterStatus: 'Filter by status',
+    planCaption: 'Plan',
+    statusCaption: 'Status',
     all: 'All',
     exporting: 'Exporting…',
     bulk: {
@@ -128,8 +130,11 @@ export const { t, useT } = defineMessages('tenants', {
     residencyPendingBadge: 'Move requested',
     residencyPending: 'to {region}. The data is still stored in {current} until the migration is done.',
     billingHistory: 'Billing history',
+    viewAllInvoices: 'View all invoices',
     invoiceStatus: { Paid: 'Paid', 'Past due': 'Failed', Waived: 'Waived', Void: 'Void', Open: 'Open' },
     activity: 'Activity',
+    activityEmpty: 'No activity yet.',
+    activityNoun: 'entries',
     pausedForCard:
       'Paused — the trial ended without a card. The school site and dashboard are closed until the owner adds a card (the first period is charged then), or you give it a new trial.',
     card: {

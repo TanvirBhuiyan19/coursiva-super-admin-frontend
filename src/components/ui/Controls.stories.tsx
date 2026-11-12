@@ -26,6 +26,32 @@ export const ChipGroupFilter: Story = {
   },
 };
 
+/** Two groups in one row: each gets a visible caption so the two "All" chips aren't ambiguous. */
+export const ChipGroupsCaptioned: Story = {
+  render: function Render() {
+    const [plan, setPlan] = useState<'all' | 'Launch' | 'Growth' | 'Scale'>('all');
+    const [status, setStatus] = useState<'all' | 'Active' | 'Trial'>('all');
+    return (
+      <div className="hstack wrap" style={{ gap: 12 }}>
+        <ChipGroup
+          label="Filter by plan"
+          caption="Plan"
+          options={[['all', 'All'], 'Launch', 'Growth', 'Scale']}
+          value={plan}
+          onChange={setPlan}
+        />
+        <ChipGroup
+          label="Filter by status"
+          caption="Status"
+          options={[['all', 'All'], 'Active', 'Trial']}
+          value={status}
+          onChange={setStatus}
+        />
+      </div>
+    );
+  },
+};
+
 export const Segmented: Story = {
   render: function Render() {
     const [value, setValue] = useState<'Light' | 'Dark'>('Light');

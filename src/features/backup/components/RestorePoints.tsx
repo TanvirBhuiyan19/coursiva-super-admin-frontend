@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
-import { Badge, Card, Empty, Field, FormError, Input, SkeletonRows, Spinner, Toggle, TRow, ErrorState } from '@/components/ui';
+import { Badge, Card, Empty, Field, FormError, Input, Pagination, SkeletonRows, Spinner, Toggle, TRow, ErrorState } from '@/components/ui';
+import { SearchPicker } from '@/components/ui/SearchPicker';
 import { useCan } from '@/features/auth/useCan';
-import { useTenants } from '@/features/tenants/api';
+import { useTenantSearch } from '@/features/tenants/api';
 import { errorMessage } from '@/lib/api/errors';
 import { formatDate, formatDateTime, timeAgo } from '@/lib/format';
+import { useDebounced } from '@/lib/useDebounced';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
+import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
-import { useBackupPoints, useRunBackup, useRunDrill, useStageRestore } from '../api';
+import { useBackupPoints, useRestores, useRunBackup, useRunDrill, useStageRestore } from '../api';
 import { t as tStatic, useT } from '../i18n';
 import type { BackupPoint, Restore } from '../types';
 
@@ -40,17 +43,26 @@ const stageSchema = z
 
 const pointName = (p: BackupPoint) => formatDateTime(p.takenAt);
 
-function TenantScopeOptions() {
+/** Restore one school: search every school server-side (the scope select then names the picked one). */
+function TenantScopePicker({ onPick }: { onPick: (tenant: { id: string; name: string }) => void }) {
   const t = useT();
-  const list = useTenants({ perPage: 100, sort: 'name' });
+  const [query, setQuery] = useState('');
+  const search = useDebounced(query);
+  const matches = useTenantSearch(search);
   return (
-    <>
-      {list.data?.data.map((tn) => (
-        <option key={tn.id} value={tn.id}>
-          {t('points.tenantOption', { name: tn.name })}
-        </option>
-      ))}
-    </>
+    <SearchPicker
+      label={t('points.findTenant')}
+      placeholder={t('points.findTenant')}
+      query={query}
+      onQueryChange={setQuery}
+      options={(matches.data?.data ?? []).map((tn) => ({ value: tn.id, label: tn.name, sub: tn.domain }))}
+      loading={matches.isFetching}
+      error={matches.isError ? t('points.searchFailed') : null}
+      onPick={(o) => {
+        onPick({ id: o.value, name: o.label });
+        setQuery('');
+      }}
+    />
   );
 }
 
@@ -63,6 +75,11 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
     defaultValues: { pitrDate: days[0]!.value, pitrTime: '', scope: 'platform', dryRun: true },
   });
   const [formError, setFormError] = useState<string | null>(null);
+  const [tenant, setTenant] = useState<{ id: string; name: string } | null>(null);
+  // Select the picked school once its option is rendered (setting the value before the option exists is lost).
+  useEffect(() => {
+    if (tenant) form.setValue('scope', tenant.id, { shouldDirty: true });
+  }, [tenant, form]);
   const dryRun = form.watch('dryRun');
   const errs = form.formState.errors;
 
@@ -142,10 +159,15 @@ function StageRestoreForm({ point, walDays, onDone }: { point: BackupPoint; walD
           {(p) => (
             <select {...p} {...form.register('scope')} className="select">
               <option value="platform">{t('points.fullPlatform')}</option>
-              {can('tenants.view') && <TenantScopeOptions />}
+              {tenant && <option value={tenant.id}>{t('points.tenantOption', { name: tenant.name })}</option>}
             </select>
           )}
         </Field>
+        {can('tenants.view') && (
+          <div>
+            <TenantScopePicker onPick={setTenant} />
+          </div>
+        )}
       </div>
       <div className="hstack wrap" style={{ gap: 12, marginTop: 14 }}>
         <Toggle on={dryRun} onChange={(v) => form.setValue('dryRun', v, { shouldDirty: true })} label={t('points.dryRunToggle')} />
@@ -176,16 +198,50 @@ const STATUS_TONE: Record<Restore['status'], 'good' | 'warn' | 'flat' | 'info' |
   failed: 'bad',
 };
 
-export function RestorePoints({ walDays, restores }: { walDays: number; restores: Restore[] }) {
+/** Every restore, newest first, one page at a time (`?restoresPage=`). */
+function RestoreHistory() {
+  const t = useT();
+  const [state, setState] = useUrlState({ restoresPage: '1' });
+  const q = useRestores(Math.max(1, Number(state.restoresPage) || 1));
+  if (q.isPending || q.isError || q.data.meta.total === 0) {
+    return q.isError ? <ErrorState compact error={q.error} onRetry={() => void q.refetch()} /> : null;
+  }
+  return (
+    <>
+      <h3 className="eyebrow" style={{ marginTop: 16, marginBottom: 4 }}>
+        {t('points.recent')}
+      </h3>
+      <ul className="plain-list" aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+        {q.data.data.map((r) => (
+          <li key={r.id} className="row wrap" style={{ gap: 10, fontSize: 12.5 }}>
+            <span className="min0" style={{ flex: 1, minWidth: 220 }}>
+              <span style={{ fontWeight: 600 }}>
+                {t('points.historyLine', { kind: r.dryRun ? t('banner.dryRun') : t('banner.live'), scope: r.scopeLabel })}
+              </span>{' '}
+              <span className="muted">← {r.sourceLabel}</span>
+              <div className="t-xs faint">
+                {t('points.stagedBy', { name: r.stagedByName })}
+                {r.approvedByName ? t('points.approvedBy', { name: r.approvedByName }) : ''} · {timeAgo(r.completedAt ?? r.stagedAt)}
+              </div>
+            </span>
+            <Badge tone={STATUS_TONE[r.status]}>{t(`enums.restoreStatus.${r.status}`)}</Badge>
+          </li>
+        ))}
+      </ul>
+      <Pagination meta={q.data.meta} onPage={(p) => setState({ restoresPage: String(p) })} noun={t('points.restoresNoun')} />
+    </>
+  );
+}
+
+export function RestorePoints({ walDays, active }: { walDays: number; active: Restore | undefined }) {
   const t = useT();
   const can = useCan();
-  const list = useBackupPoints();
+  const [state, setState] = useUrlState({ pointsPage: '1' });
+  const list = useBackupPoints(Math.max(1, Number(state.pointsPage) || 1));
   const run = useRunBackup();
   const drill = useRunDrill();
   const [selected, setSelected] = useState<string | null>(null);
-  const active = restores.find((r) => ['staged', 'approved', 'running'].includes(r.status));
-  const history = restores.filter((r) => ['completed', 'cancelled', 'failed'].includes(r.status)).slice(0, 4);
-  const selectedPoint = list.data?.find((p) => p.id === selected);
+  const selectedPoint = list.data?.data.find((p) => p.id === selected);
 
   return (
     <Card
@@ -235,8 +291,8 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
               </div>
             </TRow>
             {list.isPending && <SkeletonRows rows={5} />}
-            {list.data?.length === 0 && <Empty>{t('points.empty')}</Empty>}
-            {list.data?.map((p) => (
+            {list.data?.data.length === 0 && <Empty>{t('points.empty')}</Empty>}
+            {list.data?.data.map((p) => (
               <TRow key={p.id} cols={COLS} min={600} selected={selected === p.id}>
                 <div role="cell" className="min0">
                   <div style={{ fontWeight: 700 }}>{pointName(p)}</div>
@@ -274,32 +330,10 @@ export function RestorePoints({ walDays, restores }: { walDays: number; restores
           </div>
         </div>
       )}
+      {list.data && <Pagination meta={list.data.meta} onPage={(p) => setState({ pointsPage: String(p) })} noun={t('points.pointsNoun')} />}
       {selectedPoint && !active && <StageRestoreForm point={selectedPoint} walDays={walDays} onDone={() => setSelected(null)} />}
 
-      {history.length > 0 && (
-        <>
-          <h3 className="eyebrow" style={{ marginTop: 16, marginBottom: 4 }}>
-            {t('points.recent')}
-          </h3>
-          <ul className="plain-list">
-            {history.map((r) => (
-              <li key={r.id} className="row wrap" style={{ gap: 10, fontSize: 12.5 }}>
-                <span className="min0" style={{ flex: 1, minWidth: 220 }}>
-                  <span style={{ fontWeight: 600 }}>
-                    {t('points.historyLine', { kind: r.dryRun ? t('banner.dryRun') : t('banner.live'), scope: r.scopeLabel })}
-                  </span>{' '}
-                  <span className="muted">← {r.sourceLabel}</span>
-                  <div className="t-xs faint">
-                    {t('points.stagedBy', { name: r.stagedByName })}
-                    {r.approvedByName ? t('points.approvedBy', { name: r.approvedByName }) : ''} · {timeAgo(r.completedAt ?? r.stagedAt)}
-                  </div>
-                </span>
-                <Badge tone={STATUS_TONE[r.status]}>{t(`enums.restoreStatus.${r.status}`)}</Badge>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      <RestoreHistory />
     </Card>
   );
 }

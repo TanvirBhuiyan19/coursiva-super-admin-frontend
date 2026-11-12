@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api/client';
 import type { Paginated, Resource } from '@/lib/api/types';
 import type {
@@ -16,11 +16,13 @@ import type {
 export const backupKeys = {
   all: ['backup'] as const,
   summary: () => [...backupKeys.all, 'summary'] as const,
-  points: () => [...backupKeys.all, 'points'] as const,
-  restores: () => [...backupKeys.all, 'restores'] as const,
+  points: (page = 1) => [...backupKeys.all, 'points', page] as const,
+  restores: (page = 1) => [...backupKeys.all, 'restores', page] as const,
   settings: () => [...backupKeys.all, 'settings'] as const,
   exports: () => [...backupKeys.all, 'exports'] as const,
-  activity: () => [...backupKeys.all, 'activity'] as const,
+  exportList: (params: { page: number; tenant?: string; perPage: number }) => [...backupKeys.exports(), 'list', params] as const,
+  export: (id: string) => [...backupKeys.exports(), 'detail', id] as const,
+  activity: (page = 1) => [...backupKeys.all, 'activity', page] as const,
 };
 
 /** Backup writes touch the summary, activity log and audit log. */
@@ -36,18 +38,27 @@ export const useBackupSummary = () =>
     queryFn: ({ signal }) => api.get<Resource<BackupSummary>>('/backup', { signal }).then((r) => r.data),
   });
 
-export const useBackupPoints = () =>
-  useQuery({
-    queryKey: backupKeys.points(),
-    queryFn: ({ signal }) => api.get<Paginated<BackupPoint>>('/backup/points', { query: { perPage: 20 }, signal }).then((r) => r.data),
+export const POINTS_PER_PAGE = 20;
+export const RESTORES_PER_PAGE = 10;
+export const EXPORTS_PER_PAGE = 10;
+export const ACTIVITY_PER_PAGE = 10;
+
+const isActive = (r: Restore) => ['staged', 'approved', 'running'].includes(r.status);
+
+export const useBackupPoints = (page = 1) =>
+  useQuery<Paginated<BackupPoint>>({
+    queryKey: backupKeys.points(page),
+    queryFn: ({ signal }) => api.get<Paginated<BackupPoint>>('/backup/points', { query: { page, perPage: POINTS_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
   });
 
-/** Restores, newest first. Polls while one is staged or running so approvals and progress show up. */
-export const useRestores = () =>
-  useQuery({
-    queryKey: backupKeys.restores(),
-    queryFn: ({ signal }) => api.get<Paginated<Restore>>('/backup/restores', { query: { perPage: 10 }, signal }).then((r) => r.data),
-    refetchInterval: (q) => (q.state.data?.some((r) => ['staged', 'approved', 'running'].includes(r.status)) ? 15_000 : false),
+/** One page of restores, newest first. Polls while one is staged or running so approvals and progress show up. */
+export const useRestores = (page = 1) =>
+  useQuery<Paginated<Restore>>({
+    queryKey: backupKeys.restores(page),
+    queryFn: ({ signal }) => api.get<Paginated<Restore>>('/backup/restores', { query: { page, perPage: RESTORES_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
+    refetchInterval: (q) => (q.state.data?.data.some(isActive) ? 15_000 : false),
   });
 
 export const useBackupSettings = () =>
@@ -56,16 +67,31 @@ export const useBackupSettings = () =>
     queryFn: ({ signal }) => api.get<Resource<BackupSettings>>('/backup/settings', { signal }).then((r) => r.data),
   });
 
-export const useTenantExports = () =>
+/** School exports, newest first, one page at a time; `tenant` narrows to one school (its latest export is the first row). */
+export const useTenantExports = (params: { page: number; tenant?: string; perPage?: number }, enabled = true) => {
+  const p = { page: params.page, tenant: params.tenant, perPage: params.perPage ?? EXPORTS_PER_PAGE };
+  return useQuery<Paginated<TenantExport>>({
+    queryKey: backupKeys.exportList(p),
+    queryFn: ({ signal }) => api.get<Paginated<TenantExport>>('/backup/exports', { query: { ...p }, signal }),
+    placeholderData: keepPreviousData,
+    enabled,
+  });
+};
+
+/** One export by id (the "Your data export is ready" email links to it), wherever it falls in the list. */
+export const useTenantExport = (id: string) =>
   useQuery({
-    queryKey: backupKeys.exports(),
-    queryFn: ({ signal }) => api.get<Paginated<TenantExport>>('/backup/exports', { query: { perPage: 50 }, signal }).then((r) => r.data),
+    queryKey: backupKeys.export(id),
+    queryFn: ({ signal }) => api.get<Resource<TenantExport>>(`/backup/exports/${encodeURIComponent(id)}`, { signal }).then((r) => r.data),
+    retry: false,
   });
 
-export const useBackupActivity = () =>
-  useQuery({
-    queryKey: backupKeys.activity(),
-    queryFn: ({ signal }) => api.get<Paginated<BackupActivity>>('/backup/activity', { query: { perPage: 8 }, signal }).then((r) => r.data),
+export const useBackupActivity = (page = 1) =>
+  useQuery<Paginated<BackupActivity>>({
+    queryKey: backupKeys.activity(page),
+    queryFn: ({ signal }) =>
+      api.get<Paginated<BackupActivity>>('/backup/activity', { query: { page, perPage: ACTIVITY_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
   });
 
 // ---------- Mutations ----------

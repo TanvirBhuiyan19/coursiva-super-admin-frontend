@@ -170,8 +170,34 @@ function successResponse(r: ResponseDef, feature: string) {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['data'],
-                properties: { data: schemaOf(r.schema, feature) },
+                required: r.paged ? ['data', 'meta'] : ['data'],
+                properties: r.paged
+                  ? { data: schemaOf(r.schema, feature), meta: { $ref: '#/components/schemas/PaginationMeta' } }
+                  : { data: schemaOf(r.schema, feature) },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+      ] as const;
+    case 'cursorPage':
+      return [
+        '200',
+        {
+          description: 'Keyset window, newest first: pass `meta.next_cursor` back as `before` for the next older window (null = no more).',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['data', 'meta'],
+                properties: {
+                  data: { type: 'array', items: schemaOf(r.schema, feature) },
+                  meta: {
+                    type: 'object',
+                    required: ['has_more', 'next_cursor'],
+                    properties: { has_more: { type: 'boolean' }, next_cursor: { type: ['string', 'null'] } },
+                  },
+                },
                 additionalProperties: false,
               },
             },

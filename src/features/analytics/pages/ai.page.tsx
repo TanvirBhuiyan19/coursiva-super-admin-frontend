@@ -11,6 +11,7 @@ import {
   FormError,
   Input,
   KpiRow,
+  Pagination,
   Screen,
   Select,
   SkeletonRows,
@@ -23,8 +24,9 @@ import type { Tone } from '@/lib/domain';
 import { moneyFine, num, toneFg } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
+import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
-import { useAiUsage, useSetAiThrottle, useUpdateAiSettings } from '../api';
+import { useAiTenants, useAiUsage, useSetAiThrottle, useUpdateAiSettings } from '../api';
 import { KpiSkeletons } from '../components/charts';
 import { t as tPlain, useT } from '../i18n';
 import { ROUTING_POLICIES, type AiFeature, type AiTenantUsage, type AiUsage, type RoutingPolicy } from '../types';
@@ -200,6 +202,22 @@ function TenantTable({ rows }: { rows: AiTenantUsage[] }) {
   );
 }
 
+/** Every tenant with AI usage this month, a page at a time (page in `?tenantsPage=`). */
+function AllTenants({ page, onPage }: { page: number; onPage: (p: number) => void }) {
+  const t = useT();
+  const q = useAiTenants(page);
+  if (q.isPending) return <SkeletonRows rows={8} h={22} />;
+  if (q.isError) return <ErrorState compact error={q.error} onRetry={() => void q.refetch()} />;
+  return (
+    <>
+      <div aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+        <TenantTable rows={q.data.data} />
+      </div>
+      <Pagination meta={q.data.meta} onPage={onPage} noun={t('ai.tenantsNoun')} />
+    </>
+  );
+}
+
 function SpendByFeature({ rows }: { rows: AiUsage['byFeature'] }) {
   const t = useT();
   return (
@@ -244,6 +262,9 @@ export default function AiPage() {
   const t = useT();
   const q = useAiUsage();
   const ai = q.data;
+  const [f, setF] = useUrlState({ tenants: '', tenantsPage: '1' });
+  const allTenants = f.tenants === 'all';
+  const tenantsPage = Math.max(1, Number(f.tenantsPage) || 1);
 
   if (q.error)
     return (
@@ -289,8 +310,32 @@ export default function AiPage() {
       {ai ? <CapCard ai={ai} /> : <SkeletonRows rows={3} h={24} />}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
-        <Card title={t('ai.usageByTenant')} className="table-scroll" style={{ flex: '1.6 1 560px', minWidth: 0 }}>
-          {ai ? <TenantTable rows={ai.tenants} /> : <SkeletonRows rows={7} h={22} />}
+        <Card
+          title={t('ai.usageByTenant')}
+          className="table-scroll"
+          style={{ flex: '1.6 1 560px', minWidth: 0 }}
+          right={
+            allTenants ? (
+              <button type="button" className="btn btn--sm" onClick={() => setF({ tenants: '', tenantsPage: '1' })}>
+                {t('ai.showTop')}
+              </button>
+            ) : (
+              ai &&
+              ai.totals.tenants > ai.tenants.length && (
+                <button type="button" className="btn btn--sm" onClick={() => setF({ tenants: 'all', tenantsPage: '1' })}>
+                  {t('ai.viewAllTenants', { count: ai.totals.tenants })}
+                </button>
+              )
+            )
+          }
+        >
+          {allTenants ? (
+            <AllTenants page={tenantsPage} onPage={(p) => setF({ tenantsPage: String(p) })} />
+          ) : ai ? (
+            <TenantTable rows={ai.tenants} />
+          ) : (
+            <SkeletonRows rows={7} h={22} />
+          )}
         </Card>
         <Card title={t('ai.byFeature.title')} style={{ flex: '1 1 300px', minWidth: 0 }}>
           {ai ? (

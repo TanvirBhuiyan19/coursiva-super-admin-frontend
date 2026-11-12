@@ -48,6 +48,7 @@ export const spec = defineSpec({
         per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
         search: { type: 'string', description: 'Case-insensitive contains search.' },
         view: { type: 'string', enum: TICKET_VIEWS, description: 'Inbox view (default `open`).' },
+        tenant: { type: 'string', description: 'Tenant id: only that school’s tickets (the ticket panel’s “View all tickets”).' },
       },
       response: paginated(ref('Ticket')),
       example: { query: { view: 'all', per_page: 5 } },

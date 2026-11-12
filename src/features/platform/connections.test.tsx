@@ -2,7 +2,14 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { audit, platformSettings, session } from '@/mocks/collections';
 import { renderApp, signInAs } from '@/test/utils';
-import { CLAMAV_UNREACHABLE_HOST, connectionStore, DISCORD_REFUSED_BOT_TOKEN, DISCORD_USER_TOKEN, EXPO_REFUSED_TOKEN } from './mock';
+import {
+  CLAMAV_UNREACHABLE_HOST,
+  TURNSTILE_REJECTED_SECRET,
+  connectionStore,
+  DISCORD_REFUSED_BOT_TOKEN,
+  DISCORD_USER_TOKEN,
+  EXPO_REFUSED_TOKEN,
+} from './mock';
 
 const hasAudit = (action: string) => audit.all().some((a) => a.action === action && a.category === 'Security');
 const sectionLink = (name: string) => within(screen.getByRole('navigation', { name: 'Connection types' })).getByRole('link', { name });
@@ -161,7 +168,7 @@ describe('connections', () => {
       within(payments)
         .getAllByRole('region')
         .map((r) => r.getAttribute('aria-label')),
-    ).toEqual(['Stripe', 'Paddle', 'Lemon Squeezy']);
+    ).toEqual(['Stripe', 'Paddle', 'Lemon Squeezy', 'PayPal Payouts']);
     expect(within(payments).getByText(/\/api\/v1\/webhooks\/lemon-squeezy/)).toBeInTheDocument();
 
     const ls = within(payments).getByRole('region', { name: 'Lemon Squeezy' });
@@ -371,6 +378,25 @@ describe('connections', () => {
     expect(await screen.findByText('Daily connected — credentials verified')).toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain(good);
     expect(hasAudit('Connected Daily')).toBe(true);
+  });
+
+  it('connects Cloudflare Turnstile under Security, refusing a secret Cloudflare rejects', async () => {
+    signInAs('Owner');
+    const { user } = renderApp('/platform/connections?section=security');
+    const card = await screen.findByRole('region', { name: 'Cloudflare Turnstile' });
+    await user.type(within(card).getByLabelText('Cloudflare Turnstile Site key'), '0x4AAAAAAAAbcdefghij');
+    await user.type(within(card).getByLabelText('Cloudflare Turnstile Secret key'), TURNSTILE_REJECTED_SECRET);
+    await user.click(within(card).getByRole('button', { name: 'Connect & verify' }));
+    expect(
+      await within(card).findByText('Cloudflare Turnstile rejected these credentials: Cloudflare rejected the secret key'),
+    ).toBeInTheDocument();
+    expect(stored('turnstile')).toBeUndefined();
+
+    await user.clear(within(card).getByLabelText('Cloudflare Turnstile Secret key'));
+    await user.type(within(card).getByLabelText('Cloudflare Turnstile Secret key'), '0x4AAAAgoodsecret');
+    await user.click(within(card).getByRole('button', { name: 'Connect & verify' }));
+    await waitFor(() => expect(stored('turnstile')?.values.site_key).toBe('0x4AAAAAAAAbcdefghij'));
+    expect(document.body.innerHTML).not.toContain('0x4AAAAgoodsecret');
   });
 
   it('hides the Security and Monitoring connect controls from a read-only role', async () => {

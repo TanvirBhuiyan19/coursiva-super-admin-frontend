@@ -8,6 +8,7 @@ import {
   Empty,
   ErrorState,
   KpiRow,
+  Pagination,
   QueryState,
   Screen,
   Skeleton,
@@ -25,10 +26,17 @@ import { SEVERITIES, type ModerationDecision, type ModerationReport, type Report
 
 const DECISION_TONE: Record<ModerationDecision, Tone> = { removed: 'bad', kept: 'good', limited: 'flat' };
 
-const decisionToast = (decision: ModerationDecision, r: ModerationReport) =>
-  decision === 'removed'
-    ? tStatic('moderation.toast.removed', { kind: r.kind, tenant: r.tenantName })
-    : tStatic(`moderation.toast.${decision}`);
+/** What the decision did, from the server's answer (the item hidden or restored, the reporter emailed). */
+const decisionToast = (decision: ModerationDecision, r: ModerationReport) => {
+  const linked = r.contentType !== null && r.enforcement !== 'not_found';
+  const base =
+    decision === 'removed'
+      ? tStatic(linked ? 'moderation.toast.removed' : 'moderation.toast.removedNoRef', { kind: r.kind, tenant: r.tenantName })
+      : decision === 'limited'
+        ? tStatic(linked ? 'moderation.toast.limited' : 'moderation.toast.limitedNoRef', { tenant: r.tenantName })
+        : tStatic(r.enforcement === 'restored' ? 'moderation.toast.keptRestored' : 'moderation.toast.kept');
+  return r.reporterNotifiedAt && decision !== 'limited' ? base + tStatic('moderation.toast.reporterNotified') : base;
+};
 
 function ReportCard({ r }: { r: ModerationReport }) {
   const t = useT();
@@ -39,7 +47,7 @@ function ReportCard({ r }: { r: ModerationReport }) {
     : [t('moderation.priority', { severity: t(`enums.severity.${r.severity}`) }), sevTone(r.severity)];
   const open = r.decision === null || r.decision === 'limited';
   const act = (decision: ModerationDecision) =>
-    decide.mutate({ id: r.id, decision }, { onSuccess: () => toast(decisionToast(decision, r)) });
+    decide.mutate({ id: r.id, decision }, { onSuccess: (next) => toast(decisionToast(decision, next)) });
   const pending = decide.isPending;
 
   return (
@@ -62,9 +70,36 @@ function ReportCard({ r }: { r: ModerationReport }) {
       <div className="t-sm muted" style={{ marginTop: 5 }}>
         <b style={{ color: 'var(--tx)' }}>{r.tenantName}</b> · {r.location}
       </div>
-      <p style={{ fontSize: 13, lineHeight: 1.55, margin: '8px 0 0' }}>{r.detail}</p>
-      <div className="t-xs faint" style={{ marginTop: 6 }}>
+      <p style={{ fontSize: 13, lineHeight: 1.55, margin: '8px 0 0', overflowWrap: 'anywhere' }}>{r.detail}</p>
+      {(r.category || r.enforcement || !r.countsAsStrike) && (
+        <div className="hstack wrap" style={{ gap: 6, marginTop: 8 }}>
+          {r.category && (
+            <Badge tone="flat" xs>
+              {t(`moderation.category.${r.category}`)}
+            </Badge>
+          )}
+          {r.category && (
+            <Badge tone="flat" xs>
+              {r.contentType ? t(`moderation.content.${r.contentType}`) : t('moderation.content.none')}
+            </Badge>
+          )}
+          {r.enforcement && (
+            <Badge tone={r.enforcement === 'hidden' ? 'warn' : 'flat'} xs>
+              {t(`moderation.enforcement.${r.enforcement}`)}
+            </Badge>
+          )}
+          {!r.countsAsStrike && (
+            <Badge tone="flat" xs>
+              {t('moderation.noStrike')}
+            </Badge>
+          )}
+        </div>
+      )}
+      <div className="t-xs faint" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
         {t('moderation.source', { source: r.source })}
+        {r.category &&
+          ` · ${r.reporter ? t('moderation.reporter', { who: r.reporter.name ? `${r.reporter.name} <${r.reporter.email}>` : r.reporter.email }) : t('moderation.anonymous')}`}
+        {(r.reporterCount ?? 0) > 1 && ` · ${t('moderation.reporterCount', { count: r.reporterCount ?? 0 })}`}
         {r.decidedAt &&
           r.decidedBy &&
           t(r.decision === 'limited' ? 'moderation.limitedBy' : 'moderation.decidedBy', { name: r.decidedBy, when: timeAgo(r.decidedAt) })}
@@ -105,55 +140,61 @@ function ReportCard({ r }: { r: ModerationReport }) {
 
 function StrikeRecord({ limit }: { limit: number }) {
   const t = useT();
-  const q = useStrikes();
+  const [f, setF] = useUrlState({ strikesPage: '' });
+  const q = useStrikes(Number(f.strikesPage) || 1);
   return (
     <Card title={t('moderation.strikes.title')} style={{ padding: '18px 20px' }}>
       <p className="t-sm muted" style={{ margin: '0 0 4px' }}>
         {t('moderation.strikes.intro', { limit })}
       </p>
       <QueryState query={q} skeleton={<SkeletonRows rows={3} h={30} />} compact>
-        {(rows) =>
-          rows.length ? (
-            <ul className="plain-list">
-              {rows.map((s) => {
-                const tone = strikeTone(s.strikes, limit);
-                const kinds = [...new Set(s.history.map((h) => h.kind))];
-                return (
-                  <li key={s.tenantId} style={{ padding: '11px 0', borderBottom: '1px solid var(--bd2)' }}>
-                    <div className="hstack t-sm">
-                      <span className="ellipsis t-strong" style={{ flex: 1 }}>
-                        {s.tenantName}
-                      </span>
-                      <Badge tone={tone} style={{ fontSize: 11, padding: '3px 8px' }}>
-                        {t('moderation.strikes.count', { strikes: s.strikes, limit })}
-                      </Badge>
-                    </div>
-                    <Bar
-                      size="thin"
-                      tone={tone}
-                      value={Math.round((Math.min(s.strikes, limit) / limit) * 100)}
-                      style={{ marginTop: 6 }}
-                      label={t('moderation.strikes.barLabel', { tenant: s.tenantName, strikes: s.strikes, limit })}
-                    />
-                    <div className="faint" style={{ fontSize: 11, marginTop: 5 }}>
-                      {kinds
-                        .map((k) =>
-                          t('moderation.strikes.history', {
-                            kind: k,
-                            months: monthList(s.history.filter((h) => h.kind === k).map((h) => h.decidedAt)),
-                          }),
-                        )
-                        .join(' · ')}
-                    </div>
-                    {s.publishingSuspended && (
-                      <div className="t-xs fg-bad" style={{ marginTop: 4, fontWeight: 700 }}>
-                        {t('moderation.strikes.suspended')}
+        {(page) =>
+          page.data.length ? (
+            <>
+              <ul className="plain-list" aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+                {page.data.map((s) => {
+                  const tone = strikeTone(s.strikes, limit);
+                  const kinds = [...new Set(s.history.map((h) => h.kind))];
+                  return (
+                    <li key={s.tenantId} style={{ padding: '11px 0', borderBottom: '1px solid var(--bd2)' }}>
+                      <div className="hstack t-sm">
+                        <span className="ellipsis t-strong" style={{ flex: 1 }}>
+                          {s.tenantName}
+                        </span>
+                        <Badge tone={tone} style={{ fontSize: 11, padding: '3px 8px' }}>
+                          {t('moderation.strikes.count', { strikes: s.strikes, limit })}
+                        </Badge>
                       </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                      <Bar
+                        size="thin"
+                        tone={tone}
+                        value={Math.round((Math.min(s.strikes, limit) / limit) * 100)}
+                        style={{ marginTop: 6 }}
+                        label={t('moderation.strikes.barLabel', { tenant: s.tenantName, strikes: s.strikes, limit })}
+                      />
+                      <div className="faint" style={{ fontSize: 11, marginTop: 5 }}>
+                        {kinds
+                          .map((k) =>
+                            t('moderation.strikes.history', {
+                              kind: k,
+                              months: monthList(s.history.filter((h) => h.kind === k).map((h) => h.decidedAt)),
+                            }),
+                          )
+                          .join(' · ')}
+                      </div>
+                      {s.publishingSuspended && (
+                        <div className="t-xs fg-bad" style={{ marginTop: 4, fontWeight: 700 }}>
+                          {t('moderation.strikes.suspended')}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {page.meta.lastPage > 1 && (
+                <Pagination meta={page.meta} onPage={(p) => setF({ strikesPage: String(p) })} noun={t('moderation.strikes.noun')} />
+              )}
+            </>
           ) : (
             <Empty>{t('moderation.strikes.empty')}</Empty>
           )
@@ -165,11 +206,12 @@ function StrikeRecord({ limit }: { limit: number }) {
 
 export default function ModerationPage() {
   const t = useT();
-  const [f, setF] = useUrlState({ severity: 'All', status: 'open' });
+  const [f, setF] = useUrlState({ severity: 'All', status: 'open', page: '1' });
   const status: ReportStatus = f.status === 'decided' ? 'decided' : 'open';
   const severity = (SEVERITIES as readonly string[]).includes(f.severity) ? (f.severity as Severity) : undefined;
   const summary = useModerationSummary();
-  const list = useReports({ status, ...(severity ? { severity } : {}) });
+  const page = Math.max(1, Number(f.page) || 1);
+  const list = useReports({ status, page, ...(severity ? { severity } : {}) });
   const s = summary.data;
   const counts = list.data?.meta.severityCounts ?? [];
   const total = counts.reduce((n, c) => n + c.count, 0);
@@ -221,7 +263,7 @@ export default function ModerationPage() {
             ['decided', t('moderation.filters.decided')],
           ]}
           value={status}
-          onChange={(v) => setF({ status: v })}
+          onChange={(v) => setF({ status: v, page: '1' })}
         />
         <ChipGroup
           label={t('moderation.filters.severity')}
@@ -233,7 +275,7 @@ export default function ModerationPage() {
             ),
           ]}
           value={severity ?? 'All'}
-          onChange={(v) => setF({ severity: v })}
+          onChange={(v) => setF({ severity: v, page: '1' })}
         />
       </div>
 
@@ -252,11 +294,18 @@ export default function ModerationPage() {
               <Empty>{status === 'open' ? t('moderation.emptyOpen') : t('moderation.emptyDecided')}</Empty>
             </div>
           ) : (
-            <ul className="stack plain-list" style={{ gap: 12 }}>
-              {list.data.data.map((r) => (
-                <ReportCard key={r.id} r={r} />
-              ))}
-            </ul>
+            <>
+              <ul className="stack plain-list" style={{ gap: 12 }}>
+                {list.data.data.map((r) => (
+                  <ReportCard key={r.id} r={r} />
+                ))}
+              </ul>
+              {list.data.meta.lastPage > 1 && (
+                <div className="card card--tight" style={{ marginTop: 12 }}>
+                  <Pagination meta={list.data.meta} noun={t('moderation.noun')} onPage={(p) => setF({ page: String(p) })} />
+                </div>
+              )}
+            </>
           )}
         </section>
 

@@ -55,7 +55,6 @@ function PlatformConnectionCard({ c }: { c: PlatformConnection }) {
       save={save}
       disconnect={disconnect}
       test={test}
-      badge={c.kind === 'oauth'}
       manage={can('platform.manage') && (c.kind !== 'payments' || can('billing.manage'))}
       connectedToast={t('connections.connected', { name: c.name })}
       disconnectedToast={t('connections.disconnected', { name: c.name })}

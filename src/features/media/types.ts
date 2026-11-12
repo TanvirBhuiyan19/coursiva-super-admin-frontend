@@ -36,7 +36,10 @@ export interface LiveRoomSettings {
   /** Overage price per participant-minute, USD. */
   overageRate: number;
   topUp: { minutes: number; price: number };
+  /** The first 10 schools A–Z only; the whole list pages through `GET /media/live-rooms/usage`. */
   usage: LiveRoomUsage[];
+  /** How many schools can hold built-in rooms (ready or suspended): the full usage list's size. */
+  usageTotal: number;
 }
 
 export type LiveRoomUpdate = Partial<{

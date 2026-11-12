@@ -10,8 +10,10 @@ import { useElevateStaff, useStaffAction, useUpdateStaff } from '../api';
 import { useT } from '../i18n';
 import { ASSIGNABLE_ROLES, STAFF_SCOPES, type AssignableRole, type StaffMember, type StaffStatus } from '../types';
 
-const COLS = 'minmax(0,1.5fr) minmax(0,1.3fr) minmax(0,1fr) minmax(0,1.1fr) minmax(0,0.45fr) minmax(0,1fr) minmax(0,0.7fr) minmax(0,1.9fr)';
-const MIN_W = 1180;
+// Controls get the width they need (role and scope pickers, the three action buttons); text columns share the rest, so
+// the whole table fits a 1,440px screen without scrolling sideways.
+const COLS = 'minmax(0,1.5fr) minmax(0,1.2fr) 124px 140px 48px minmax(0,1fr) 84px 248px';
+const MIN_W = 1100;
 
 const STATUS_TONE: Record<StaffStatus, Tone> = { Active: 'good', Invited: 'warn', Suspended: 'bad' };
 
@@ -43,8 +45,7 @@ function RowActions({ m }: { m: StaffMember }) {
     return (
       <button
         type="button"
-        className="link"
-        style={{ fontSize: 12 }}
+        className="btn btn--sm"
         disabled={busy}
         aria-label={t('actions.resendInviteFor', { name: m.name })}
         onClick={() => run('resend-invite', t('toasts.inviteResent', { email: m.email }))}
@@ -57,8 +58,7 @@ function RowActions({ m }: { m: StaffMember }) {
     return (
       <button
         type="button"
-        className="link"
-        style={{ fontSize: 12 }}
+        className="btn btn--sm"
         disabled={busy}
         aria-label={t('actions.reinstateFor', { name: m.name })}
         onClick={() => run('reinstate', t('toasts.reinstated', { name: m.name }))}
@@ -68,11 +68,11 @@ function RowActions({ m }: { m: StaffMember }) {
     );
 
   return (
-    <div className="hstack wrap" style={{ gap: 8 }}>
+    <div className="hstack wrap" style={{ gap: 6 }}>
       <button
         type="button"
-        className={m.elevatedUntil ? 'badge tone-warn' : 'link link--muted'}
-        style={{ fontSize: 11.5, fontWeight: 700, border: 'none', cursor: 'pointer' }}
+        className={m.elevatedUntil ? 'badge tone-warn' : 'btn btn--sm'}
+        style={m.elevatedUntil ? { fontSize: 11.5, fontWeight: 700, border: 'none', cursor: 'pointer' } : undefined}
         title={t('actions.elevateTitle')}
         disabled={busy}
         aria-label={m.elevatedUntil ? t('actions.revokeElevationFor', { name: m.name }) : t('actions.elevateFor', { name: m.name })}
@@ -82,8 +82,7 @@ function RowActions({ m }: { m: StaffMember }) {
       </button>
       <button
         type="button"
-        className="link link--muted"
-        style={{ fontSize: 12 }}
+        className="btn btn--sm"
         disabled={busy}
         aria-label={t('actions.signOutFor', { name: m.name })}
         onClick={() => run('revoke-sessions', t('toasts.signedOut', { name: m.name }))}
@@ -91,8 +90,7 @@ function RowActions({ m }: { m: StaffMember }) {
         {tc('actions.signOut')}
       </button>
       <ConfirmButton
-        className="link link--muted"
-        style={{ fontSize: 12 }}
+        className="btn btn--sm btn--danger"
         confirmLabel={t('actions.confirmSuspend')}
         pending={action.isPending && action.variables.action === 'suspend'}
         onConfirm={() => run('suspend', t('toasts.suspended', { name: m.name }))}

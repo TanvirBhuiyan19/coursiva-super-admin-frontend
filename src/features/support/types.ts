@@ -27,6 +27,8 @@ export interface TicketListParams {
   perPage?: number;
   view?: TicketView;
   search?: string;
+  /** Only this tenant's tickets (the ticket panel's "View all tickets"). */
+  tenant?: string;
 }
 
 export interface StaffRef {
@@ -80,7 +82,10 @@ export interface TenantContext {
   health: TenantHealth;
   healthReason: string | null;
   signals: { label: string; value: string; tone: Tone }[];
+  /** The school's newest 5 other tickets. */
   pastTickets: { id: string | null; number: number; subject: string; status: TicketStatus; createdAt: string; csat: number | null }[];
+  /** How many other tickets the school has in total (`pastTickets` shows at most 5). */
+  pastTicketCount: number;
 }
 
 export interface TicketDetail extends Ticket {

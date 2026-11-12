@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Bar, Card, QueryState, SkeletonRows } from '@/components/ui';
+import { BrandLogo } from '@/components/ui/BrandLogo';
 import { pathOf } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
 import { toast } from '@/store/ui';
@@ -38,6 +39,9 @@ export function IntegrationsCard() {
             <ul className="plain-list">
               {d.adoption.map((a) => (
                 <li key={a.name} className="row wrap" style={{ fontSize: 12.5, gap: 12 }}>
+                  <span className="ext-tile ext-tile--sm" aria-hidden="true">
+                    <BrandLogo brand={a.name} size={14} />
+                  </span>
                   <span style={{ fontWeight: 600, width: 170 }}>
                     {a.name}{' '}
                     <span className="faint" style={{ fontWeight: 500 }}>

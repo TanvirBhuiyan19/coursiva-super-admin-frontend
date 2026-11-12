@@ -111,8 +111,22 @@ export const spec = defineSpec({
       path: '/backup/exports',
       summary: 'Per-tenant data exports, newest first',
       auth: 'platform.view',
-      query: page,
+      query: {
+        ...page,
+        tenant: { type: 'string', description: 'Tenant id: only that school’s exports (its latest first; unknown id → empty page).' },
+      },
       response: paginated(ref('TenantExport')),
+    },
+    {
+      method: 'GET',
+      path: '/backup/exports/{id}',
+      summary: 'One per-tenant data export',
+      description: 'The export the "Your data export is ready" email links to, wherever it falls in the list. 404 unknown id.',
+      auth: 'platform.view',
+      path_params: { id: { type: 'string', description: 'Export id.' } },
+      response: resource(ref('TenantExport')),
+      errors: [404],
+      example: { skip: 'Needs an export (covered by src/features/backup/backup.test.tsx).' },
     },
     {
       method: 'POST',
