@@ -138,6 +138,7 @@ export const { t, useT } = defineMessages('staff', {
       announcements: { send: 'Send announcements' },
       staff: { view: 'View staff', manage: 'Manage staff' },
       audit: { view: 'View audit log' },
+      partners: { view: 'View partners', manage: 'Manage partners', payout: 'Pay partners' },
     },
     title: 'Role permissions',
     introManage:
@@ -170,6 +171,7 @@ export const { t, useT } = defineMessages('staff', {
       governance: 'Governance',
       platform: 'Platform',
       staffAudit: 'Staff & audit',
+      partners: 'Partners',
       ungrouped: 'Other',
     },
     toasts: {

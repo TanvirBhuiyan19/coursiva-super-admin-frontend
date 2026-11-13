@@ -38,6 +38,7 @@ import {
   type PolicyState,
   type RateLimit,
   type RegionSummary,
+  type TenantResidency,
   type RetentionPeriod,
   type RetentionSetting,
   type Severity,
@@ -88,6 +89,14 @@ export interface ReportRow {
   decision: ModerationDecision | null;
   decidedAt: string | null;
   decidedBy: string | null;
+  /** Intake fields (absent on rows filed before intake existed). */
+  category?: ModerationReport['category'];
+  contentType?: ModerationReport['contentType'];
+  contentId?: string | null;
+  reporter?: ModerationReport['reporter'];
+  countsAsStrike?: boolean;
+  enforcement?: ModerationReport['enforcement'];
+  reporterNotifiedAt?: string | null;
 }
 const decided = (
   rowId: string,
@@ -117,16 +126,24 @@ const decided = (
 export const reports = collection<ReportRow>('governanceReports', () => [
   {
     id: 'rp_1',
-    kind: 'DMCA',
+    kind: 'DMCA notice',
     tenantId: 'tn_silva',
-    location: 'Course · “Pasta Masterclass”',
+    location: 'https://silva.coursiva.app/courses/pasta-masterclass',
     detail: 'Rights holder claims 4 lesson videos are re-uploads of their paid course.',
-    source: 'Legal notice · 10-day counter window',
+    source: 'School site report form',
     severity: 'High',
     receivedAt: ago({ h: 2 }),
     decision: null,
     decidedAt: null,
     decidedBy: null,
+    category: 'copyright',
+    contentType: 'course',
+    contentId: 'co_pasta',
+    reporter: { name: 'Giulia Romano', email: 'legal@romano-cucina.example' },
+    countsAsStrike: true,
+    enforcement: null,
+    reporterNotifiedAt: null,
+    reporterCount: 2,
   },
   {
     id: 'rp_2',
@@ -347,12 +364,23 @@ export const blockedIps = collection<BlockedIp>('governanceBlockedIps', () => [
 // ---------- Resources ----------
 const toDsar = (r: DsarRow): Dsar => ({ ...r, tenantName: tenantName(r.tenantId) });
 
-const toReport = (r: ReportRow): ModerationReport => ({ ...r, tenantName: tenantName(r.tenantId) });
+const toReport = (r: ReportRow): ModerationReport => ({
+  category: null,
+  contentType: null,
+  contentId: null,
+  reporter: null,
+  countsAsStrike: true,
+  enforcement: null,
+  reporterNotifiedAt: null,
+  ...r,
+  tenantName: tenantName(r.tenantId),
+});
 const isOpenReport = (r: ReportRow) => r.decision === null || r.decision === 'limited';
 
 function strikeRecords(): TenantStrikes[] {
   const byTenant = new Map<string, ReportRow[]>();
-  for (const r of reports.where((x) => x.decision === 'removed')) byTenant.set(r.tenantId, [...(byTenant.get(r.tenantId) ?? []), r]);
+  for (const r of reports.where((x) => x.decision === 'removed' && x.countsAsStrike !== false))
+    byTenant.set(r.tenantId, [...(byTenant.get(r.tenantId) ?? []), r]);
   return [...byTenant.entries()]
     .map(([tenantId, rows]) => ({
       tenantId,
@@ -421,6 +449,22 @@ function migratingTenants() {
 const SEVERITY_RANK: Record<Severity, number> = { High: 0, Medium: 1, Low: 2 };
 
 type Params = { id: string };
+
+/** Every school's data region, by name (GET /governance/regions + /governance/regions/tenants). */
+function residencyRows(): TenantResidency[] {
+  const migrating = migratingTenants();
+  return [...tenants.all()]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((t) => ({
+      tenantId: t.id,
+      name: t.name,
+      plan: t.plan,
+      students: t.students,
+      region: t.region,
+      migrating: migrating.has(t.id),
+      requestedRegion: t.regionRequest?.region ?? null,
+    }));
+}
 
 export const handlers = [
   // ---------- Compliance & privacy ----------
@@ -542,9 +586,10 @@ export const handlers = [
 
   http.get(
     route('/governance/moderation/strikes'),
-    handle(() => {
+    handle(({ request }) => {
       authorize('governance.view');
-      return ok(strikeRecords());
+      // Most strikes first, paginated by school (Laravel/Go group and page in SQL).
+      return paginate(strikeRecords(), request);
     }),
   ),
 
@@ -580,7 +625,16 @@ export const handlers = [
       if (r.decision === 'limited' && decision === 'limited') throw invalid({ decision: 'Access is already limited.' });
       const tenant = tenantName(r.tenantId);
       const before = strikeRecords().find((s) => s.tenantId === r.tenantId)?.strikes ?? 0;
-      reports.update(r.id, { decision, decidedAt: new Date().toISOString(), decidedBy: user.name });
+      const now = new Date().toISOString();
+      const linked = !!r.contentType;
+      reports.update(r.id, {
+        decision,
+        decidedAt: now,
+        decidedBy: user.name,
+        ...(decision !== 'kept' && linked ? { enforcement: 'hidden' as const } : {}),
+        ...(decision === 'kept' && r.decision === 'limited' && r.enforcement === 'hidden' ? { enforcement: 'restored' as const } : {}),
+        ...(decision !== 'limited' && r.reporter && !r.reporterNotifiedAt ? { reporterNotifiedAt: now } : {}),
+      });
       if (decision === 'removed') {
         recordAudit(`${r.kind} upheld — removed content on ${tenant}`, 'Tenants', r.tenantId);
         if (before + 1 === STRIKE_LIMIT)
@@ -590,7 +644,7 @@ export const handlers = [
       } else {
         recordAudit(`Closed ${r.kind} report on ${tenant} as no violation`, 'Tenants', r.tenantId);
       }
-      return ok(toReport(r));
+      return ok(toReport(reports.find(r.id)!));
     }),
   ),
 
@@ -614,15 +668,17 @@ export const handlers = [
 
   http.get<Params>(
     route('/governance/policies/:id/acceptance'),
-    handle<Params>(({ params }) => {
+    handle<Params>(({ request, params }) => {
       authorize('governance.view');
       const p = findOr404(policies.find(params.id), 'Document');
-      return ok(
-        tenants
-          .all()
-          .map((t) => toAcceptance(p, t.id))
-          .sort((a, b) => Number(!!a.acceptedAt) - Number(!!b.acceptedAt) || a.tenantName.localeCompare(b.tenantName)),
-      );
+      const all = tenants.all().map((t) => toAcceptance(p, t.id));
+      const accepted = all.filter((a) => a.acceptedAt).length;
+      const { search } = query(request);
+      const rows = all
+        .filter((a) => !search || a.tenantName.toLowerCase().includes(search))
+        .sort((a, b) => Number(!!a.acceptedAt) - Number(!!b.acceptedAt) || a.tenantName.localeCompare(b.tenantName));
+      // `accepted`/`pending` count every school, whatever the search.
+      return paginate(rows, request, { accepted, pending: all.length - accepted });
     }),
   ),
 
@@ -712,17 +768,9 @@ export const handlers = [
             learners: rows.reduce((s, t) => s + t.students, 0),
           };
         }),
-        tenants: [...all]
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map((t) => ({
-            tenantId: t.id,
-            name: t.name,
-            plan: t.plan,
-            students: t.students,
-            region: t.region,
-            migrating: migrating.has(t.id),
-            requestedRegion: t.regionRequest?.region ?? null,
-          })),
+        // The first 100 by name (older clients); the console pages GET /governance/regions/tenants.
+        tenants: residencyRows().slice(0, 100),
+        tenantsTotal: all.length,
         pendingMigrations: all.filter((t) => migrating.has(t.id)).length,
         subProcessors: subProcessors.all().length,
       };
@@ -730,16 +778,32 @@ export const handlers = [
     }),
   ),
 
+  // Every school's data region by name, paginated; `search` matches the name, `region` narrows to one region.
+  http.get(
+    route('/governance/regions/tenants'),
+    handle(({ request }) => {
+      authorize('governance.view');
+      const q = query(request);
+      const region = q.get('region');
+      if (region && !REGIONS.some((r) => r === region)) throw invalid({ region: 'The selected region is invalid.' });
+      const rows = residencyRows().filter(
+        (t) => (!region || t.region === region) && (!q.search || t.name.toLowerCase().includes(q.search)),
+      );
+      return paginate(rows, request);
+    }),
+  ),
+
   // ---------- Abuse & limits ----------
   http.get(
     route('/governance/abuse-signals'),
-    handle(() => {
+    handle(({ request }) => {
       authorize('governance.view');
-      return ok(
+      return paginate(
         signals
           .where((s) => !s.resolvedAt)
           .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.detectedAt.localeCompare(a.detectedAt))
           .map(toSignal),
+        request,
       );
     }),
   ),
@@ -826,9 +890,16 @@ export const handlers = [
 
   http.get(
     route('/governance/blocked-ips'),
-    handle(() => {
+    handle(({ request }) => {
       authorize('governance.view');
-      return ok([...blockedIps.all()].sort((a, b) => b.blockedAt.localeCompare(a.blockedAt)));
+      const { search } = query(request);
+      return paginate(
+        blockedIps
+          .all()
+          .filter((b) => !search || b.ip.toLowerCase().includes(search))
+          .sort((a, b) => b.blockedAt.localeCompare(a.blockedAt)),
+        request,
+      );
     }),
   ),
 

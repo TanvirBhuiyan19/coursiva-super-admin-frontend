@@ -109,6 +109,9 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
+    // Each test renders the whole console (router, lazy pages, mock API); the first one in a file also loads its
+    // page chunk, which on a 2-core CI runner with coverage takes longer than Vitest's 5s default.
+    testTimeout: 20_000,
     coverage: {
       provider: 'v8',
       include: ['src/**/*.{ts,tsx}'],

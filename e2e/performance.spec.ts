@@ -37,10 +37,10 @@ test('compiled form screens keep live validation and unsaved-change tracking', a
   await page.getByRole('button', { name: 'Discard' }).click();
   await expect(page.getByLabel('Growth monthly price')).toHaveValue('399');
 
-  await page.goto('/settings');
+  await page.goto('/settings?section=signup');
   await waitForScreen(page, 'Console settings');
   await page.getByLabel('Trial length (days)').fill('91');
-  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page.getByRole('button', { name: 'Save signup & provisioning' }).click();
   await expect(page.getByText('The trial length must be between 0 and 90 days.')).toBeVisible();
   expect(errors).toEqual([]);
 });

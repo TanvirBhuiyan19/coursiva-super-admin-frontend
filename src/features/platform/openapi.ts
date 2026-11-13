@@ -1,4 +1,4 @@
-import { arrayOf, defineSpec, paginated, ref, resource, type EndpointDef, type ParamDef } from '@/openapi/dsl';
+import { arrayOf, defineSpec, noContent, pagedResource, paginated, ref, resource, type EndpointDef, type ParamDef } from '@/openapi/dsl';
 
 const idParam = (description: string): Record<string, ParamDef> => ({ id: { type: 'string', description } });
 const keyParam = (description: string): Record<string, ParamDef> => ({ key: { type: 'string', description } });
@@ -193,6 +193,81 @@ export const spec = defineSpec({
     ),
     senderAction('dns-check', 'Re-check SPF/DKIM/DMARC records', { text: 'Re-checked DNS for {domain}', category: 'Tenants' }),
 
+    // ---------- Sender reputation ----------
+    {
+      method: 'GET',
+      path: '/platform/sending-ips',
+      summary: 'Coursiva Mail sending IPs (shared pool and dedicated) with their Spamhaus ZEN result',
+      auth: 'platform.view',
+      response: resource(arrayOf(ref('SendingIp'))),
+    },
+    {
+      method: 'POST',
+      path: '/platform/sending-ips',
+      summary: 'Add a sending IP (a public IP; dedicated IPs name their school)',
+      auth: 'platform.manage',
+      body: ref('SendingIpInput'),
+      response: resource(ref('SendingIp'), 201),
+      errors: [422],
+      audit: { text: 'Added sending IP {ip} ({kind})', category: 'Tenants' },
+      example: { body: { ip: '198.51.100.20', kind: 'pool', label: 'Shared pool C' } },
+    },
+    {
+      method: 'DELETE',
+      path: '/platform/sending-ips/{id}',
+      summary: 'Remove a sending IP (409 for an active dedicated IP)',
+      auth: 'platform.manage',
+      path_params: idParam('Sending IP id, e.g. `sip_pool_2`.'),
+      response: noContent(),
+      errors: [404, 409],
+      audit: { text: 'Removed sending IP {ip}', category: 'Tenants' },
+      example: { params: { id: 'sip_pool_2' } },
+    },
+    {
+      method: 'GET',
+      path: '/platform/dedicated-ips',
+      summary: 'Dedicated IP requests (pending first); the server token is never returned',
+      auth: 'platform.view',
+      query: { ...pageParams },
+      response: paginated(ref('DedicatedIpRequest')),
+    },
+    {
+      method: 'POST',
+      path: '/platform/dedicated-ips/{id}/provision',
+      summary: 'Provision a dedicated IP with a dedicated Postmark server (token verified, sealed)',
+      description: 'Needs a recently confirmed password (423 otherwise).',
+      auth: 'platform.manage',
+      path_params: idParam('Request id, e.g. `dip_devpath`.'),
+      body: ref('ProvisionInput'),
+      response: resource(ref('DedicatedIpRequest')),
+      errors: [404, 409, 422, 423],
+      audit: { text: 'Provisioned dedicated IP {ip} for {tenant}', category: 'Tenants' },
+      example: { skip: 'Needs a recently confirmed password.' },
+    },
+    {
+      method: 'POST',
+      path: '/platform/dedicated-ips/{id}/reject',
+      summary: 'Decline a pending dedicated IP request',
+      auth: 'platform.manage',
+      path_params: idParam('Request id, e.g. `dip_devpath`.'),
+      body: { type: 'object', required: ['reason'], properties: { reason: { type: 'string' } } },
+      response: resource(ref('DedicatedIpRequest')),
+      errors: [404, 409, 422],
+      audit: { text: 'Declined the dedicated IP request of {tenant}', category: 'Tenants' },
+      example: { params: { id: 'dip_devpath' }, body: { reason: 'Volume is too low for a dedicated IP yet.' } },
+    },
+    {
+      method: 'POST',
+      path: '/platform/dedicated-ips/{id}/release',
+      summary: 'Release a dedicated IP (the school goes back to the shared pool)',
+      auth: 'platform.manage',
+      path_params: idParam('Request id, e.g. `dip_nordic`.'),
+      response: resource(ref('DedicatedIpRequest')),
+      errors: [404, 409],
+      audit: { text: 'Released the dedicated IP of {tenant}; its mail goes through the shared pool', category: 'Tenants' },
+      example: { params: { id: 'dip_nordic' } },
+    },
+
     // ---------- Certificate authority ----------
     {
       method: 'GET',
@@ -243,8 +318,12 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/platform/standards',
       summary: 'Standards support, open failed imports and accessibility conformance',
+      description:
+        '`failed_imports` is one page of the open failed imports, newest first; `meta` pages it and `summary.failed_imports` is their total.',
       auth: 'platform.view',
-      response: resource(ref('Standards')),
+      query: pageParams,
+      response: pagedResource(ref('Standards')),
+      example: { query: { per_page: 25 } },
     },
     {
       method: 'POST',
@@ -299,8 +378,11 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/platform/webhooks',
       summary: 'Webhook endpoints and failed deliveries',
+      description: '`failed_deliveries` is one page of the failed deliveries of the last 24 hours, newest first; `meta` pages it.',
       auth: 'platform.view',
-      response: resource(ref('Webhooks')),
+      query: pageParams,
+      response: pagedResource(ref('Webhooks')),
+      example: { query: { per_page: 25 } },
     },
     {
       method: 'POST',

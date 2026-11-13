@@ -7,7 +7,7 @@ import { useRolePermissions, useSetRolePermission } from '../api';
 import { t as tStaff, useT } from '../i18n';
 import type { RolePermissions } from '../types';
 
-type Group = 'tenants' | 'billing' | 'support' | 'analytics' | 'governance' | 'platform' | 'staffAudit' | 'ungrouped';
+type Group = 'tenants' | 'billing' | 'support' | 'analytics' | 'governance' | 'platform' | 'staffAudit' | 'partners' | 'ungrouped';
 /** Permission prefix → matrix group. */
 const GROUPS: Record<string, Group> = {
   tenants: 'tenants',
@@ -20,6 +20,7 @@ const GROUPS: Record<string, Group> = {
   announcements: 'platform',
   staff: 'staffAudit',
   audit: 'staffAudit',
+  partners: 'partners',
 };
 const groupOf = (p: Permission): Group => GROUPS[p.split('.')[0]!] ?? 'ungrouped';
 

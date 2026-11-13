@@ -49,6 +49,22 @@ describe('support inbox', () => {
     expect(screen.getByText('Renewal invoice failed')).toBeInTheDocument();
   });
 
+  it('links from the tenant panel to all of the school’s tickets, filtered in the URL', async () => {
+    const base = tickets.find('tk_1041')!;
+    for (let i = 0; i < 6; i++)
+      tickets.insert({ ...base, id: `tk_bl${String(i)}`, number: 2000 + i, subject: `Bloom question ${String(i)}`, status: 'Resolved' });
+    signInAs('Owner');
+    const { user, router } = renderApp('/support?ticket=tk_1041');
+    const link = await screen.findByRole('link', { name: 'View all 8 tickets from this school' });
+    expect(link).toHaveAttribute('href', '/support?view=all&tenant=tn_bloom');
+    await user.click(link);
+    await waitFor(() => expect(router.state.location.search).toContain('tenant=tn_bloom'));
+    const inbox = await list();
+    await waitFor(() => expect(within(inbox).getAllByRole('listitem')).toHaveLength(7));
+    expect(within(inbox).queryByText(/Webhook deliveries delayed/)).not.toBeInTheDocument();
+    expect(screen.getByText('One school: Bloom Floristry Courses')).toBeInTheDocument();
+  });
+
   it('sends a reply that persists and clears the composer', async () => {
     signInAs('Owner');
     const { user } = renderApp('/support?ticket=tk_1040');

@@ -20,8 +20,11 @@ import {
   handle,
   HttpError,
   invalid,
+  json,
+  noContent,
   notFound,
   ok,
+  pageSlice,
   paginate,
   query,
   readBody,
@@ -37,6 +40,10 @@ import {
   type ApiKeyScope,
   type Certificate,
   type Deliverability,
+  type DedicatedIpRequest,
+  type ProvisionInput,
+  type SendingIp,
+  type SendingIpInput,
   type DnsCheck,
   type FeatureFlag,
   type FlagUpdate,
@@ -432,8 +439,103 @@ function toSender(s: SenderRow): SenderDomain {
     paused: !!s.pausedAt,
     pausedAt: s.pausedAt,
     dnsCheckedAt: s.dnsCheckedAt,
+    flag: s.bounceRate > 2 ? { reason: `Hard bounces ${String(s.bounceRate)}% (7 days)`, at: s.dnsCheckedAt } : null,
+    blocklist: {
+      status: s.tenantId === 'tn_bloom' ? 'listed' : 'clear',
+      codes: s.tenantId === 'tn_bloom' ? '127.0.1.2' : null,
+      checkedAt: s.dnsCheckedAt,
+    },
   };
 }
+
+// ---------- Sender reputation (Laravel PlatformSendingController) ----------
+type SendingIpRow = Omit<SendingIp, 'tenantName'>;
+export const sendingIps = collection<SendingIpRow>('platform_sendingIps', () => [
+  {
+    id: 'sip_pool_1',
+    ip: '198.51.100.7',
+    kind: 'pool',
+    tenantId: null,
+    label: 'Shared pool A',
+    createdAt: ago({ d: 90 }),
+    blocklist: { status: 'clear', codes: null, since: null, checkedAt: ago({ h: 4 }) },
+  },
+  {
+    id: 'sip_pool_2',
+    ip: '198.51.100.8',
+    kind: 'pool',
+    tenantId: null,
+    label: 'Shared pool B',
+    createdAt: ago({ d: 90 }),
+    blocklist: { status: 'unknown', codes: null, since: null, checkedAt: ago({ h: 4 }) },
+  },
+  {
+    id: 'sip_ded_nordic',
+    ip: '203.0.113.44',
+    kind: 'dedicated',
+    tenantId: 'tn_nordic',
+    label: 'Dedicated · Nordic Yoga',
+    createdAt: ago({ d: 40 }),
+    blocklist: { status: 'clear', codes: null, since: null, checkedAt: ago({ h: 4 }) },
+  },
+]);
+const toSendingIp = (r: SendingIpRow): SendingIp => ({ ...r, tenantName: r.tenantId ? tenantName(r.tenantId) : null });
+
+type DedicatedRow = Omit<DedicatedIpRequest, 'tenantName' | 'tenantPlan' | 'dailyCap' | 'warmupComplete'> & { token: string | null };
+export const dedicatedIps = collection<DedicatedRow>('platform_dedicatedIps', () => [
+  {
+    id: 'dip_nordic',
+    status: 'active',
+    note: null,
+    reason: null,
+    ip: '203.0.113.44',
+    requestedAt: ago({ d: 41 }),
+    activatedAt: ago({ d: 40 }),
+    sentToday: 1840,
+    tenantId: 'tn_nordic',
+    requestedBy: 'Ingrid Olsen',
+    requestedByEmail: 'ingrid@nordicyoga.se',
+    decidedBy: 'Sam Rivera',
+    tokenSet: true,
+    messageStream: null,
+    token: 'sealed',
+  },
+  {
+    id: 'dip_devpath',
+    status: 'requested',
+    note: 'Launching a 40k-subscriber newsletter in March',
+    reason: null,
+    ip: null,
+    requestedAt: ago({ h: 20 }),
+    activatedAt: null,
+    sentToday: 0,
+    tenantId: 'tn_devpath',
+    requestedBy: 'Priya Shah',
+    requestedByEmail: 'priya@devpath.io',
+    decidedBy: null,
+    tokenSet: false,
+    messageStream: null,
+    token: null,
+  },
+]);
+/** Messages a day for each day since activation (Laravel DedicatedIps::WARMUP); uncapped afterwards. */
+const WARMUP = [
+  50, 100, 200, 400, 750, 1000, 1500, 2000, 3000, 4000, 5000, 6500, 8000, 10000, 12500, 15000, 20000, 25000, 30000, 40000, 50000, 60000,
+  75000, 90000, 100000, 120000, 150000, 175000, 200000, 250000,
+];
+function toDedicated({ token: _t, ...r }: DedicatedRow): DedicatedIpRequest {
+  const day = r.activatedAt ? Math.floor((Date.now() - new Date(r.activatedAt).getTime()) / 86_400_000) + 1 : 0;
+  const cap = r.status === 'active' ? (WARMUP[day - 1] ?? null) : null;
+  const ws = tenants.find(r.tenantId);
+  return {
+    ...r,
+    tenantName: tenantName(r.tenantId),
+    tenantPlan: ws?.plan ?? 'Scale',
+    dailyCap: cap,
+    warmupComplete: r.status === 'active' && cap === null,
+  };
+}
+const PUBLIC_IP = /^(?!10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)\d{1,3}(\.\d{1,3}){3}$/;
 
 const toCertificate = (c: CertificateRow): Certificate => ({
   id: c.id,
@@ -494,6 +596,7 @@ export const REGISTRAR_REFUSED_TOKEN = 'cf-registrar-refused-token-0000';
 
 /** The host where the mock's ClamAV daemon doesn't answer PING. */
 export const CLAMAV_UNREACHABLE_HOST = 'clamav.down.internal';
+export const TURNSTILE_REJECTED_SECRET = '0x4AAAAArejectedsecret';
 
 /** FILTER_VALIDATE_IP: a dotted IPv4 address or an IPv6 address. */
 const isIp = (v: string) =>
@@ -703,6 +806,34 @@ export const CONNECTIONS: Def[] = [
       f('password', 'Password'),
     ],
   },
+  // Sender reputation: a DQS key can't be proven without a DNS lookup, so only its format is checked.
+  {
+    key: 'spamhaus',
+    kind: 'email',
+    name: 'Spamhaus DQS',
+    description:
+      'Daily blocklist checks of school sending domains (DBL) and Coursiva Mail IPs (ZEN) · a Data Query Service key from the Spamhaus portal · without it the dashboards say “not monitored”',
+    role: null,
+    fields: [
+      f('dqs_key', 'DQS key', true, (v) =>
+        /^[a-z0-9]{26}$/.test(v) ? undefined : 'A DQS key is 26 lowercase letters and digits (Spamhaus portal → Products → DQS).',
+      ),
+    ],
+  },
+  {
+    key: 'glockapps',
+    kind: 'email',
+    name: 'GlockApps',
+    description:
+      'Inbox placement tests for schools (seed lists across Gmail, Outlook, Yahoo and more) · an API key and the project tests are created in · without it placement shows “not monitored”',
+    role: null,
+    fields: [
+      f('api_key', 'API key', true, (v) => (v.length >= 20 ? undefined : 'The API key is at least 20 characters.')),
+      f('project_id', 'Project ID', false, (v) =>
+        /^[A-Za-z0-9_-]{4,64}$/.test(v) ? undefined : 'The project ID is letters, digits, - or _ (GlockApps → Projects).',
+      ),
+    ],
+  },
   // The ad networks' platform-wide developer tokens (Ads & channels). Neither network can prove a token without a
   // school's OAuth grant, so the backend only checks the format.
   {
@@ -838,6 +969,55 @@ export const CONNECTIONS: Def[] = [
       f('port', 'Port', false, (v) => (/^\d+$/.test(v) && +v >= 1 && +v <= 65535 ? undefined : 'The port must be between 1 and 65535.')),
     ],
     verify: ({ host = '', port = '' }) => (host === CLAMAV_UNREACHABLE_HOST ? `no clamd answered PING at ${host}:${port}` : undefined),
+  },
+  // Bot protection on coursiva.com's report form (console only, no environment fallback). The backend checks the
+  // secret against Cloudflare's siteverify with a dummy token; the mock refuses TURNSTILE_REJECTED_SECRET.
+  {
+    key: 'turnstile',
+    kind: 'security',
+    name: 'Cloudflare Turnstile',
+    description:
+      'Bot protection on coursiva.com’s report form · a Turnstile widget for the marketing site’s hostname (Cloudflare → Turnstile)',
+    role: null,
+    fields: [
+      f('site_key', 'Site key', false, (v) =>
+        /^[0-9]x[A-Za-z0-9_-]{10,64}$/.test(v) ? undefined : 'The site key looks like 0x4AAAAAAA… (Cloudflare → Turnstile → the widget).',
+      ),
+      f('secret_key', 'Secret key', true, (v) =>
+        /^[0-9]x[A-Za-z0-9_-]{10,128}$/.test(v)
+          ? undefined
+          : 'The secret key looks like 0x4AAAAAAA… (Cloudflare → Turnstile → the widget → Settings).',
+      ),
+    ],
+    verify: ({ secret_key: secret = '' }) => (secret === TURNSTILE_REJECTED_SECRET ? 'Cloudflare rejected the secret key' : undefined),
+  },
+  // Coursiva's partner payouts by PayPal (docs/payouts.md): a PayPal REST app with Payouts enabled, verified by issuing a
+  // token; the webhook id verifies PayPal's events. The mode picks PayPal's host. The mock refuses a client id of all Z.
+  {
+    key: 'paypal_payouts',
+    kind: 'payments',
+    name: 'PayPal Payouts',
+    description:
+      'Partner commission payouts by PayPal · a PayPal REST app with Payouts enabled (developer.paypal.com → Apps & Credentials)',
+    role: null,
+    fields: [
+      f('client_id', 'Client ID', false, minLength('client ID', 20)),
+      f('client_secret', 'Client secret', true, minLength('client secret', 20)),
+      optional(
+        f('webhook_id', 'Webhook ID', false, (v) =>
+          /^[A-Z0-9]{10,40}$/.test(v) ? undefined : 'The webhook ID looks like 8PT597110X687430LKGECATA.',
+        ),
+      ),
+      {
+        ...optional(f('mode', 'Mode', false, oneOf('mode', 'live', 'sandbox'))),
+        options: [
+          { value: 'sandbox', label: 'Sandbox (test)' },
+          { value: 'live', label: 'Live' },
+        ],
+        default: 'sandbox',
+      },
+    ],
+    verify: ({ client_id: id = '' }) => (/^Z+$/.test(id) ? 'PayPal refused the client ID and secret (HTTP 401)' : undefined),
   },
   ...OAUTH_PROVIDERS.map(([key, name]): Def => ({
     key: `oauth_${key}`,
@@ -1472,6 +1652,15 @@ export const handlers = [
           thresholds: THRESHOLDS,
         },
         domains,
+        reputation: {
+          // "Not monitored" until the console connected Spamhaus DQS / GlockApps (as the backend reports).
+          blocklistsMonitored: isConnected('spamhaus'),
+          placementMonitored: isConnected('glockapps'),
+          ips: sendingIps.all().map(toSendingIp),
+          listedDomains: domains.filter((d) => d.blocklist?.status === 'listed').length,
+          dedicatedRequestsOpen: dedicatedIps.where((r) => r.status === 'requested').length,
+          flagged: domains.filter((d) => d.flag !== null).length,
+        },
         suppression: SUPPRESSION,
       };
       return ok(body);
@@ -1502,6 +1691,124 @@ export const handlers = [
             break;
         }
         return ok(toSender(s));
+      }),
+    ),
+  ),
+
+  // ---------- Sender reputation ----------
+  http.get(
+    route('/platform/sending-ips'),
+    handle(() => {
+      authorize('platform.view');
+      return ok(sendingIps.all().map(toSendingIp));
+    }),
+  ),
+
+  http.post(
+    route('/platform/sending-ips'),
+    handle(async ({ request }) => {
+      authorize('platform.manage');
+      const b = await readBody<SendingIpInput>(request);
+      const ip = typeof b.ip === 'string' ? b.ip.trim() : '';
+      const e: Record<string, string> = {};
+      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) e.ip = 'The ip field must be a valid IP address.';
+      else if (!PUBLIC_IP.test(ip)) e.ip = 'Enter a public IP address.';
+      else if (sendingIps.all().some((x) => x.ip === ip)) e.ip = 'That IP is already listed.';
+      if (b.kind !== 'pool' && b.kind !== 'dedicated') e.kind = 'The selected kind is invalid.';
+      if (b.kind === 'dedicated' && !b.tenantId) e.tenantId = 'Pick the school the dedicated IP belongs to.';
+      if (Object.keys(e).length) throw invalid(e);
+      const row = sendingIps.insert({
+        id: id('sip'),
+        ip,
+        kind: b.kind,
+        tenantId: b.kind === 'dedicated' ? (b.tenantId ?? null) : null,
+        label: b.label?.trim() || null,
+        blocklist: null,
+        createdAt: new Date().toISOString(),
+      });
+      recordAudit(`Added sending IP ${ip} (${b.kind})`, 'Tenants', row.tenantId ?? undefined);
+      return ok(toSendingIp(row), 201);
+    }),
+  ),
+
+  http.delete<IdParams>(
+    route('/platform/sending-ips/:id'),
+    handle<IdParams>(({ params }) => {
+      authorize('platform.manage');
+      const row = findOr404(sendingIps.find(params.id), 'Sending IP');
+      if (dedicatedIps.where((r) => r.ip === row.ip && r.status === 'active').length)
+        throw new HttpError(409, 'This IP is a school’s active dedicated IP — release it first.');
+      sendingIps.remove(row.id);
+      recordAudit(`Removed sending IP ${row.ip}`, 'Tenants', row.tenantId ?? undefined);
+      return noContent();
+    }),
+  ),
+
+  http.get(
+    route('/platform/dedicated-ips'),
+    handle(({ request }) => {
+      authorize('platform.view');
+      const order = (s: string) => (s === 'requested' ? 0 : s === 'active' ? 1 : 2);
+      const rows = dedicatedIps
+        .all()
+        .sort((a, b) => order(a.status) - order(b.status) || (b.requestedAt ?? '').localeCompare(a.requestedAt ?? ''))
+        .map(toDedicated);
+      return paginate(rows, request);
+    }),
+  ),
+
+  ...(['provision', 'reject', 'release'] as const).map((action) =>
+    http.post<IdParams>(
+      route(`/platform/dedicated-ips/:id/${action}`),
+      handle<IdParams>(async ({ params, request }) => {
+        authorize('platform.manage');
+        const row = findOr404(dedicatedIps.find(params.id), 'Dedicated IP request');
+        const name = tenantName(row.tenantId);
+        if (action === 'provision') {
+          requireRecentPassword();
+          const b = await readBody<ProvisionInput>(request);
+          const ip = typeof b.ip === 'string' ? b.ip.trim() : '';
+          if (row.status !== 'requested' && row.status !== 'active') throw new HttpError(409, 'This request is closed.');
+          const e: Record<string, string> = {};
+          if (!PUBLIC_IP.test(ip)) e.ip = 'Enter a public IP address.';
+          if (typeof b.serverToken !== 'string' || b.serverToken.trim().length < 20)
+            e.serverToken = 'Paste the dedicated Postmark server’s API token.';
+          if (Object.keys(e).length) throw invalid(e);
+          dedicatedIps.update(row.id, {
+            status: 'active',
+            ip,
+            token: 'sealed',
+            tokenSet: true,
+            activatedAt: row.activatedAt ?? new Date().toISOString(),
+            messageStream: b.messageStream?.trim() || null,
+            decidedBy: 'You',
+            reason: null,
+          });
+          if (!sendingIps.all().some((x) => x.ip === ip))
+            sendingIps.insert({
+              id: id('sip'),
+              ip,
+              kind: 'dedicated',
+              tenantId: row.tenantId,
+              label: `Dedicated · ${name}`,
+              blocklist: null,
+              createdAt: new Date().toISOString(),
+            });
+          recordAudit(`Provisioned dedicated IP ${ip} for ${name}`, 'Tenants', row.tenantId);
+        } else if (action === 'reject') {
+          const b = await readBody<{ reason?: string }>(request);
+          if (row.status !== 'requested') throw new HttpError(409, 'Only a pending request can be declined.');
+          const reason = typeof b.reason === 'string' ? b.reason.trim() : '';
+          if (reason.length < 5) throw invalid({ reason: 'The reason field must be at least 5 characters.' });
+          dedicatedIps.update(row.id, { status: 'rejected', reason, decidedBy: 'You' });
+          recordAudit(`Declined the dedicated IP request of ${name}`, 'Tenants', row.tenantId);
+        } else {
+          if (row.status !== 'active') throw new HttpError(409, 'Only an active dedicated IP can be released.');
+          dedicatedIps.update(row.id, { status: 'released', token: null, tokenSet: false, decidedBy: 'You' });
+          for (const x of sendingIps.where((s) => s.ip === row.ip && s.kind === 'dedicated')) sendingIps.remove(x.id);
+          recordAudit(`Released the dedicated IP of ${name}; its mail goes through the shared pool`, 'Tenants', row.tenantId);
+        }
+        return ok(toDedicated(dedicatedIps.find(row.id)!));
       }),
     ),
   ),
@@ -1580,9 +1887,14 @@ export const handlers = [
   // ---------- Standards & conformance ----------
   http.get(
     route('/platform/standards'),
-    handle(() => {
+    handle(({ request }) => {
       authorize('platform.view');
       const open = imports.where((i) => !i.resolvedAt);
+      // `failed_imports` is one page, newest first; `meta` pages it.
+      const { items: openPage, meta } = pageSlice(
+        [...open].sort((a, b) => b.failedAt.localeCompare(a.failedAt)),
+        request,
+      );
       const body: Standards = {
         summary: {
           scormPackages: 580 + imports.where((i) => i.outcome === 'imported').length,
@@ -1592,19 +1904,17 @@ export const handlers = [
           failedImports: open.length,
         },
         standards: STANDARDS,
-        failedImports: open
-          .sort((a, b) => b.failedAt.localeCompare(a.failedAt))
-          .map((i) => ({
-            id: i.id,
-            tenantId: i.tenantId,
-            tenantName: tenantName(i.tenantId),
-            file: i.file,
-            reason: i.reason,
-            failedAt: i.failedAt,
-          })),
+        failedImports: openPage.map((i) => ({
+          id: i.id,
+          tenantId: i.tenantId,
+          tenantName: tenantName(i.tenantId),
+          file: i.file,
+          reason: i.reason,
+          failedAt: i.failedAt,
+        })),
         accessibility: ACCESSIBILITY,
       };
-      return ok(body);
+      return json({ data: body, meta });
     }),
   ),
 
@@ -1684,13 +1994,15 @@ export const handlers = [
   // ---------- Webhooks ----------
   http.get(
     route('/platform/webhooks'),
-    handle(() => {
+    handle(({ request }) => {
       authorize('platform.view');
-      const body: Webhooks = {
-        endpoints: ENDPOINTS,
-        failedDeliveries: [...deliveries.all()].sort((a, b) => b.lastAttemptAt.localeCompare(a.lastAttemptAt)).map(toDelivery),
-      };
-      return ok(body);
+      // `failed_deliveries` is one page, newest first; `meta` pages it.
+      const { items, meta } = pageSlice(
+        [...deliveries.all()].sort((a, b) => b.lastAttemptAt.localeCompare(a.lastAttemptAt)),
+        request,
+      );
+      const body: Webhooks = { endpoints: ENDPOINTS, failedDeliveries: items.map(toDelivery) };
+      return json({ data: body, meta });
     }),
   ),
 

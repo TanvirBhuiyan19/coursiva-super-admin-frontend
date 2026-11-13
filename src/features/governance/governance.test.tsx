@@ -108,7 +108,7 @@ describe('trust & moderation', () => {
   it('filters the queue by severity and keeps it in the URL', async () => {
     signInAs('Owner');
     const { user, router } = renderApp('/governance/moderation');
-    await within(await queue()).findByRole('listitem', { name: /DMCA — Silva/ });
+    await within(await queue()).findByRole('listitem', { name: /DMCA notice — Silva/ });
     await user.click(screen.getByRole('button', { name: 'High · 2' }));
     await waitFor(() => expect(router.state.location.search).toContain('severity=High'));
     await waitFor(async () => expect(within(await queue()).getAllByRole('listitem')).toHaveLength(2));
@@ -117,13 +117,17 @@ describe('trust & moderation', () => {
   it('removes content after confirming; the third strike suspends publishing', async () => {
     signInAs('Owner');
     const { user } = renderApp('/governance/moderation');
-    const card = await within(await queue()).findByRole('listitem', { name: /DMCA — Silva/ });
+    const card = await within(await queue()).findByRole('listitem', { name: /DMCA notice — Silva/ });
     expect(within(card).getByRole('link', { name: 'Open tenant' })).toHaveAttribute('href', '/tenants/tn_silva');
     await user.click(within(card).getByRole('button', { name: 'Remove content' }));
     expect(reports.find('rp_1')!.decision).toBeNull();
     await user.click(within(card).getByRole('button', { name: 'Confirm removal' }));
     await waitFor(() => expect(reports.find('rp_1')!.decision).toBe('removed'));
-    expect(audited('DMCA upheld — removed content on Silva Culinary Arts', 'Tenants')).toBe(true);
+    expect(audited('DMCA notice upheld — removed content on Silva Culinary Arts', 'Tenants')).toBe(true);
+    // The linked course is hidden in the school and the reporter is emailed.
+    expect(reports.find('rp_1')).toMatchObject({ enforcement: 'hidden' });
+    expect(reports.find('rp_1')!.reporterNotifiedAt).not.toBeNull();
+    expect(await screen.findByText(/content hidden on Silva Culinary Arts.*reporter emailed/)).toBeInTheDocument();
     expect(audited('Publishing suspended for Silva Culinary Arts — 3 upheld strikes', 'Tenants')).toBe(true);
     expect(await screen.findByText('3 of 3 strikes')).toBeInTheDocument();
     expect(screen.getByText('Publishing suspended')).toBeInTheDocument();
@@ -141,10 +145,43 @@ describe('trust & moderation', () => {
     expect(within(again).getByRole('button', { name: 'No violation' })).toBeInTheDocument();
   });
 
+  it('shows where a report came from, what it points at and who reported it', async () => {
+    signInAs('Owner');
+    renderApp('/governance/moderation');
+    const card = await within(await queue()).findByRole('listitem', { name: /DMCA notice — Silva/ });
+    expect(within(card).getByText('Copyright')).toBeInTheDocument();
+    expect(within(card).getByText('Course')).toBeInTheDocument();
+    expect(within(card).getByText(/Reporter · Giulia Romano <legal@romano-cucina.example>/)).toBeInTheDocument();
+    expect(within(card).getByText(/2 reporters/)).toBeInTheDocument();
+  });
+
+  it('pages the report queue', async () => {
+    signInAs('Owner');
+    for (let i = 0; i < 55; i++)
+      reports.insert({
+        id: `rp_bulk_${i}`,
+        kind: 'Spam',
+        tenantId: 'tn_amplify',
+        location: 'Community · Wins',
+        detail: `Bulk report ${i}`,
+        source: 'Community flags',
+        severity: 'Low',
+        receivedAt: new Date(Date.UTC(2020, 0, 1, 0, i)).toISOString(),
+        decision: null,
+        decidedAt: null,
+        decidedBy: null,
+      });
+    const { user } = renderApp('/governance/moderation');
+    await within(await queue()).findByRole('listitem', { name: /DMCA notice — Silva/ });
+    expect(within(await queue()).getAllByRole('listitem')).toHaveLength(50);
+    await user.click(screen.getByRole('button', { name: 'Next →' }));
+    expect(await within(await queue()).findByText('Bulk report 0')).toBeInTheDocument();
+  });
+
   it('hides decisions from a view-only role (Support)', async () => {
     signInAs('Support');
     renderApp('/governance/moderation');
-    const card = await within(await queue()).findByRole('listitem', { name: /DMCA — Silva/ });
+    const card = await within(await queue()).findByRole('listitem', { name: /DMCA notice — Silva/ });
     expect(within(card).queryByRole('button', { name: 'Remove content' })).not.toBeInTheDocument();
     expect(within(card).getByRole('link', { name: 'Open tenant' })).toBeInTheDocument();
   });
@@ -166,6 +203,18 @@ describe('policies & terms', () => {
     await user.click(sectionLink('Policy sections', 'Acceptance'));
     const list = await screen.findByRole('list', { name: 'Acceptance of Platform Terms of Service v4.2' });
     expect(within(list).queryByText(/^Accepted/)).not.toBeInTheDocument();
+  });
+
+  it('pages acceptance with whole-platform counts that ignore the search', async () => {
+    signInAs('Owner');
+    const { data, meta } = await api.get<{ data: { tenantName: string }[]; meta: { total: number; accepted: number; pending: number } }>(
+      '/governance/policies/pd_tos_41/acceptance',
+      { query: { search: 'kodo', perPage: 1 } },
+    );
+    expect(data).toHaveLength(1);
+    expect(data[0]!.tenantName).toBe('Kodo Design School');
+    expect(meta.total).toBe(1);
+    expect(meta.accepted + meta.pending).toBe(tenants.all().length);
   });
 
   it('tracks reminders separately from acceptance', async () => {
@@ -252,6 +301,23 @@ describe('data residency', () => {
     renderApp('/governance/regions');
     expect(await screen.findByRole('combobox', { name: 'Data region for Kodo Design School' })).toHaveValue('UK');
     expect(screen.getAllByText('UK · London').length).toBeGreaterThan(0);
+  });
+
+  it('filters the tenant list by region and name (in the URL)', async () => {
+    signInAs('Owner');
+    const { user, router } = renderApp('/governance/regions');
+    await screen.findByRole('combobox', { name: 'Data region for Kodo Design School' });
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filter by data region' }), 'APAC');
+    await waitFor(() => expect(router.state.location.search).toContain('region=APAC'));
+    const table = screen.getByRole('table', { name: 'Tenant data regions' });
+    await waitFor(() => {
+      const shown = within(table)
+        .getAllByRole('combobox')
+        .map((c) => (c as HTMLSelectElement).value);
+      expect(shown.length).toBe(tenants.where((t) => t.region === 'APAC').length);
+    });
+    await user.type(screen.getByRole('searchbox', { name: 'Search tenants by name' }), 'zzz-no-school');
+    expect(await screen.findByText('No tenants match these filters.')).toBeInTheDocument();
   });
 
   it('needs tenants.manage to move a region', async () => {
@@ -342,6 +408,31 @@ describe('abuse & limits', () => {
     expect(audited('Blocked IP 2001:db8::/32', 'Security')).toBe(true);
     const list = screen.getByRole('list', { name: 'Blocked IP addresses' });
     expect(await within(list).findByText('2001:db8::/32')).toBeInTheDocument();
+  });
+
+  it('pages and searches the blocked IPs (page in the URL)', async () => {
+    signInAs('Owner');
+    for (let i = 0; i < 30; i++)
+      blockedIps.insert({
+        id: `ip_page_${String(i)}`,
+        ip: `192.0.2.${String(i)}`,
+        reason: 'Scraper',
+        blockedAt: new Date(Date.now() - i * 1000).toISOString(),
+        blockedBy: 'System',
+      });
+    const total = blockedIps.all().length;
+    const { user, router } = renderApp('/governance/abuse?section=blocked');
+    const nav = await screen.findByRole('navigation', { name: 'Pagination' });
+    expect(within(nav).getByText(`1–25 of ${String(total)} addresses`)).toBeInTheDocument();
+    await user.click(within(nav).getByRole('button', { name: 'Next →' }));
+    await waitFor(() => expect(router.state.location.search).toContain('ipsPage=2'));
+    expect(await within(nav).findByText(`26–${String(total)} of ${String(total)} addresses`)).toBeInTheDocument();
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search blocked addresses' }), '192.0.2.29');
+    const list = screen.getByRole('list', { name: 'Blocked IP addresses' });
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(1));
+    expect(within(list).getByText('192.0.2.29')).toBeInTheDocument();
+    expect(router.state.location.search).not.toContain('ipsPage');
   });
 
   it('unblocks only after confirming', async () => {

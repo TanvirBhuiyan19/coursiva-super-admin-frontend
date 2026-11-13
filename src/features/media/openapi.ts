@@ -1,4 +1,4 @@
-import { defineSpec, ref, resource, type ParamDef } from '@/openapi/dsl';
+import { defineSpec, paginated, ref, resource, type ParamDef } from '@/openapi/dsl';
 
 const providerKey: Record<string, ParamDef> = {
   key: { type: 'string', enum: ['mux', 'ezdrm', 'keyos'], description: 'DRM provider connection.' },
@@ -23,7 +23,23 @@ export const spec = defineSpec({
       path: '/media/live-rooms',
       summary: 'Live-room policies, plan allowances and usage',
       auth: 'platform.view',
+      description:
+        '`usage` carries the first 10 schools A–Z; `usage_total` counts them all and `GET /media/live-rooms/usage` pages the list.',
       response: resource(ref('LiveRoomSettings')),
+    },
+    {
+      method: 'GET',
+      path: '/media/live-rooms/usage',
+      summary: 'Built-in room minutes this month per school (paginated)',
+      description: 'Every ready or suspended school A–Z by name, with its effective allowance and status.',
+      auth: 'platform.view',
+      query: {
+        page: { type: 'integer', description: 'Page number (1-based).' },
+        per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
+        search: { type: 'string', description: 'Contains-match on the school name.' },
+      },
+      response: paginated(ref('LiveRoomUsage')),
+      example: { query: { per_page: 10 } },
     },
     {
       method: 'PATCH',

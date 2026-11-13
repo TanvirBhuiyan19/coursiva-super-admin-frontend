@@ -33,10 +33,10 @@ sla_state, sla_due_at, sla_target_minutes`.
 
 `TicketDetail` = `Ticket` plus:
 
-| Field            | Notes                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `messages`       | `[{ id, author (tenant\|staff), author_name, body, created_at, internal }]`, oldest first. `internal: true` = staff-only note, **never** exposed to the tenant-facing API.                                                                                                                                                                                                                   |
-| `tenant_context` | `{ id, name, plan, status, owner_name, mrr, health, health_reason, signals: [{ label, value, tone }], past_tickets: [{ id \| null, number, subject, status, created_at, csat \| null }] }` — `mrr`/`health` use the same rules as `/tenants`. `past_tickets` (max 5, newest first) includes archived tickets with `id: null` (not openable). `tone` ∈ `good\|warn\|bad\|info\|flat\|accent`. |
+| Field            | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `messages`       | `[{ id, author (tenant\|staff), author_name, body, created_at, internal }]`, oldest first. `internal: true` = staff-only note, **never** exposed to the tenant-facing API.                                                                                                                                                                                                                                                                                                                                                                                 |
+| `tenant_context` | `{ id, name, plan, status, owner_name, mrr, health, health_reason, signals: [{ label, value, tone }], past_tickets: [{ id \| null, number, subject, status, created_at, csat \| null }], past_ticket_count }` — `mrr`/`health` use the same rules as `/tenants`. `past_tickets` (max 5, newest first) includes archived tickets with `id: null` (not openable); `past_ticket_count` is how many other tickets the school has in all (the panel links to `GET /support/tickets?tenant=` when it exceeds 5). `tone` ∈ `good\|warn\|bad\|info\|flat\|accent`. |
 
 Every ticket mutation below returns the updated `{ data: TicketDetail }`.
 
@@ -44,12 +44,15 @@ Every ticket mutation below returns the updated `{ data: TicketDetail }`.
 
 ### `GET /support/tickets`
 
-Permission `support.view`. Paginated `Ticket[]`. Breached tickets first, then newest first.
+Permission `support.view`. Paginated `Ticket[]`. Breached tickets first, then newest first. Filtering, the breach
+ordering and paging all run in SQL (`meta.total` counts every matching ticket); `breached` = not Resolved/Pending, no
+first reply, and `created_at + first-reply target <= now`.
 
 | Param              | Values                                                                                                                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `view`             | `open` (default — not Resolved) · `breaching` (`sla_state = breached`) · `unanswered` (not Resolved, no public staff reply) · `pending` · `resolved` · `all` |
 | `search`           | subject, requester name, tenant name, ticket number (contains, case-insensitive)                                                                             |
+| `tenant`           | Tenant id: only that school's tickets (the ticket panel's "View all tickets" opens `/support?view=all&tenant={id}`)                                          |
 | `page`, `per_page` | standard                                                                                                                                                     |
 
 ### `GET /support/summary`

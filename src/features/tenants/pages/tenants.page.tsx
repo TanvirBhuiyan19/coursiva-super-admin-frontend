@@ -143,7 +143,7 @@ export default function TenantsPage() {
 
   return (
     <Screen max={1250} label={t('directory.title')}>
-      <div className="grid-kpi" style={{ gap: 12 }}>
+      <div className="grid-kpi">
         {portfolio
           ? portfolio.map(([label, val, sub]) => (
               <div key={label} className="card card--tight">
@@ -185,6 +185,7 @@ export default function TenantsPage() {
         />
         <ChipGroup
           label={t('directory.filterPlan')}
+          caption={t('directory.planCaption')}
           options={[['all', t('directory.all')] as const, ...PLANS.map((p) => [p, tc(`enums.plan.${p}`)] as const)]}
           value={f.plan}
           onChange={(v) => setF({ plan: v })}
@@ -192,6 +193,7 @@ export default function TenantsPage() {
         <span className="divider-v" aria-hidden="true" />
         <ChipGroup
           label={t('directory.filterStatus')}
+          caption={t('directory.statusCaption')}
           options={[['all', t('directory.all')] as const, ...TENANT_STATUSES.map((p) => [p, tc(`enums.tenantStatus.${p}`)] as const)]}
           value={f.status}
           onChange={(v) => setF({ status: v })}

@@ -1,9 +1,21 @@
 import { useId, type CSSProperties, type ReactNode } from 'react';
 import { cx } from '@/lib/cx';
 
-export function Screen({ max = 1200, gap, children, label }: { max?: number; gap?: number; children: ReactNode; label?: string }) {
+/** Below this, a screen is a narrow form page: same container, its content capped and kept on the shared left edge. */
+const NARROW = 1000;
+
+/**
+ * Every screen shares one container width and gutter, so moving between pages never shifts the content sideways.
+ * `max` only narrows form pages (under 1,000px); wider values are accepted for compatibility and use the shared width.
+ */
+export function Screen({ max, gap, children, label }: { max?: number; gap?: number; children: ReactNode; label?: string }) {
+  const narrow = max != null && max < NARROW;
   return (
-    <div className="screen" data-screen-label={label} style={{ maxWidth: max, gap }}>
+    <div
+      className={cx('screen', narrow && 'screen--narrow')}
+      data-screen-label={label}
+      style={{ gap, ...(narrow ? ({ '--screen-narrow': `${max}px` } as CSSProperties) : null) }}
+    >
       {children}
     </div>
   );

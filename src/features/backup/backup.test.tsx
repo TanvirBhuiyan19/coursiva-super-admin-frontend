@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { api } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/errors';
-import { audit } from '@/mocks/collections';
+import { audit, tenants } from '@/mocks/collections';
 import { renderApp, signInAs } from '@/test/utils';
 import { backupTables, backupWal } from './mock';
 
@@ -93,9 +93,10 @@ describe('backup & restore', () => {
     const form = await openStageForm(user);
     await user.selectOptions(within(form).getByLabelText('Point-in-time day'), within(form).getByRole('option', { name: 'Yesterday' }));
     await user.type(within(form).getByLabelText(/Point-in-time \(optional/), '13:42');
-    const scope = within(form).getByLabelText('Scope');
-    await within(scope).findByRole('option', { name: 'Tenant: Kodo Design School' });
-    await user.selectOptions(scope, 'tn_kodo');
+    // The school is found by a server-side search (every school is pickable, not just the first page).
+    await user.type(within(form).getByRole('combobox', { name: 'Or restore one tenant — search…' }), 'Kodo');
+    await user.click(await within(form).findByRole('option', { name: /Kodo Design School/ }));
+    expect(within(form).getByLabelText('Scope')).toHaveValue('tn_kodo');
     await user.click(within(form).getByRole('button', { name: 'Stage restore' }));
     expect(await screen.findByRole('status', { name: 'Staged restore' })).toBeInTheDocument();
     const r = backupTables.restores.all()[0]!;
@@ -128,12 +129,50 @@ describe('backup & restore', () => {
     await waitFor(() => expect(backupTables.settings.get().retentionDays).toBe(45));
   });
 
-  it('queues a per-tenant export', async () => {
+  it('queues a per-tenant export for any school, found by a server-side search', async () => {
     signInAs('Owner');
+    // 120 more schools: the one we want sorts after the first 100 (the old picker's limit).
+    const base = tenants.all()[0]!;
+    for (let i = 1; i <= 120; i++)
+      tenants.insert({ ...base, id: `tn_bulk${String(i).padStart(3, '0')}`, name: `Aa Bulk School ${String(i).padStart(3, '0')}` });
+    tenants.insert({ ...base, id: 'tn_zulu', name: 'Zulu Academy' });
     const { user } = renderApp(`${PATH}?section=exports`);
-    await user.click(await screen.findByRole('button', { name: 'Export data for Amplify Coaching' }));
+    await user.type(await screen.findByRole('combobox', { name: 'Find a tenant to export' }), 'Zulu');
+    await user.click(await screen.findByRole('option', { name: /Zulu Academy/ }));
+    expect(await screen.findByText('No export yet.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Export data for Zulu Academy' }));
     await waitFor(() => expect(backupTables.exports.all()).toHaveLength(1));
-    expect(backupTables.exports.all()[0]).toMatchObject({ tenantId: 'tn_amplify', format: 'json', includeMedia: true });
+    expect(backupTables.exports.all()[0]).toMatchObject({ tenantId: 'tn_zulu', format: 'json', includeMedia: true });
+    // The picked school's latest export shows (GET /backup/exports?tenant=), and the recent list has it.
+    expect((await screen.findAllByText(/^(Queued|Building) · JSON/)).length).toBeGreaterThan(0);
+    expect(await within(screen.getByRole('list', { name: 'Recent exports' })).findByText('Zulu Academy')).toBeInTheDocument();
+  });
+
+  it('pages the recent exports and resolves a linked export beyond the first page', async () => {
+    signInAs('Owner');
+    const now = Date.now();
+    for (let i = 0; i < 25; i++)
+      backupTables.exports.insert({
+        id: `ex_${String(i).padStart(2, '0')}`,
+        tenantId: 'tn_amplify',
+        tenantName: 'Amplify Coaching',
+        format: 'json',
+        includeMedia: false,
+        requestedAt: new Date(now - i * 60_000).toISOString(),
+        readyAt: new Date(now - i * 60_000 + 1000).toISOString(),
+        expiresAt: new Date(now + 6 * 86_400_000).toISOString(),
+        requestedByName: 'Sam Ortega',
+      });
+    const { user, router } = renderApp(`${PATH}?section=exports&export=ex_24`);
+    // The oldest export (page 3 of the list) is still found by id.
+    expect(await screen.findByText(/Export of Amplify Coaching \(JSON/)).toBeInTheDocument();
+    const recent = await screen.findByRole('list', { name: 'Recent exports' });
+    expect(within(recent).getAllByRole('listitem')).toHaveLength(10);
+    await user.click(screen.getAllByRole('button', { name: 'Next →' }).at(-1)!);
+    await waitFor(() => expect(router.state.location.search).toContain('exportsPage=2'));
+    const t = (await api.get<{ meta: { total: number } }>('/backup/exports', { query: { tenant: 'tn_amplify', perPage: 1 } })).meta.total;
+    expect(t).toBe(25);
+    expect((await api.get<{ meta: { total: number } }>('/backup/exports', { query: { tenant: 'tn_nope' } })).meta.total).toBe(0);
   });
 
   it('opens the export from the “export is ready” email and downloads it with a signed URL', async () => {

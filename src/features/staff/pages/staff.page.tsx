@@ -32,7 +32,7 @@ function Kpis({ s }: { s: StaffSummary | undefined }) {
       ]
     : null;
   return (
-    <div className="grid-kpi" style={{ gap: 12 }}>
+    <div className="grid-kpi">
       {items
         ? items.map(([label, value, sub]) => (
             <div key={label} className="card card--tight">

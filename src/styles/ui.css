@@ -1,13 +1,20 @@
 /* Shared UI primitives. Screens compose these; only one-off layout goes inline. */
 
 /* ---------- Screen layout ---------- */
+/* One container for every screen (1,320px of content plus the gutter), so pages never shift sideways. */
 .screen {
   margin: 0 auto;
   width: 100%;
+  max-width: calc(1320px + 48px);
   padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+/* Narrow form pages keep the shared left edge; only their content is capped. */
+.screen--narrow > * {
+  width: 100%;
+  max-width: var(--screen-narrow);
 }
 .grid-kpi {
   display: grid;
@@ -134,6 +141,11 @@
 }
 
 /* ---------- KPI ---------- */
+/* Every stat tile looks the same on every screen: one padding, one value size. */
+.kpi,
+.grid-kpi > .card {
+  padding: 16px 18px;
+}
 .kpi-label {
   font-size: 12px;
   color: var(--tx3);
@@ -141,15 +153,17 @@
 }
 .kpi-value {
   font-family: var(--font-display);
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
-  margin-top: 6px;
+  margin-top: 4px;
   line-height: 1.15;
+  font-variant-numeric: tabular-nums;
 }
+/* Kept for older markup; it now matches the shared value size. */
 .kpi-value--sm {
-  font-size: 22px;
-  font-weight: 800;
-  margin-top: 3px;
+  font-size: 24px;
+  font-weight: 700;
+  margin-top: 4px;
 }
 .kpi-sub {
   font-size: 11.5px;
@@ -158,8 +172,19 @@
 }
 
 /* ---------- Chips (filter pills) ---------- */
+/* Visible caption in front of a chip group ("Plan", "Status") when a row holds more than one group. */
+.chip-caption {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tx3);
+  margin-right: 2px;
+  flex-shrink: 0;
+}
 .chip {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 5px;
   font-size: 12.5px;
@@ -200,16 +225,20 @@
 }
 
 /* ---------- Segmented option (plan / region pickers) ---------- */
+/* Options share the row equally but never shrink below their label; a row too narrow for them wraps instead of
+   squeezing the text into the borders. */
 .seg {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .seg > button {
-  flex: 1;
+  flex: 1 0 auto;
+  white-space: nowrap;
   text-align: center;
   font-size: 12.5px;
   font-weight: 700;
-  padding: 8px 0;
+  padding: 8px 14px;
   border-radius: 9px;
   cursor: pointer;
   border: 1.5px solid var(--bd);
@@ -299,8 +328,10 @@
 }
 
 /* ---------- Buttons ---------- */
+/* Buttons never shrink below their label: rows wrap or scroll instead of squeezing the text into the border. */
 .btn {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -516,13 +547,14 @@
   border-radius: inherit;
   background: var(--ac);
 }
+/* Bars stay slim: they compare values, they shouldn't dominate the card. */
 .bar--lg {
-  height: 14px;
+  height: 10px;
   border-radius: 5px;
 }
 .bar--md {
-  height: 9px;
-  border-radius: 5px;
+  height: 7px;
+  border-radius: 4px;
 }
 .bar--thin {
   height: 5px;
@@ -819,6 +851,11 @@
   padding-top: 12px;
   margin-top: 4px;
   border-top: 1px solid var(--bd2);
+}
+.pagination__controls {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
 }
 .trow.is-selected {
   background: var(--acT);
@@ -1175,5 +1212,44 @@
   }
   :focus-visible {
     outline-color: Highlight;
+  }
+}
+
+/* ---------- Brand logos (ui/BrandLogo.tsx) ---------- */
+/* The neutral tile a logo sits on, so every brand's own colour reads on it. */
+.ext-tile {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--pg2);
+  border: 1px solid var(--bd);
+}
+.ext-tile--sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.ext-logo {
+  display: block;
+  flex: none;
+}
+/* A near-black mark on the dark theme's tile, or a pale one on the light theme's, takes the text colour there. */
+:root[data-theme='dark'] .ext-logo--dark path,
+:root:not([data-theme='dark']) .ext-logo--light path {
+  fill: var(--tx);
+}
+.ext-mono {
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--tx2);
+}
+@media (forced-colors: active) {
+  .ext-logo--dark path,
+  .ext-logo--light path {
+    fill: CanvasText;
   }
 }

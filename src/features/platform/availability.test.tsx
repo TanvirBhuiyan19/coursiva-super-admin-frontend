@@ -89,6 +89,10 @@ describe('feature availability', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Turn off for all schools' }));
 
     const prompt = await screen.findByRole('dialog', { name: 'Confirm your password' });
+    // The step-up prompt is shared by every sensitive action (also exports such as the 1099 worksheet), so it must not
+    // claim the action changes credentials (W5 real-browser check).
+    expect(within(prompt).queryByText(/credentials/)).not.toBeInTheDocument();
+    expect(within(prompt).getByText(/sensitive action/)).toBeInTheDocument();
     expect(isOff('live_zoom')).toBe(false);
     await user.type(within(prompt).getByLabelText('Password'), 'password');
     await user.click(within(prompt).getByRole('button', { name: 'Confirm and continue' }));

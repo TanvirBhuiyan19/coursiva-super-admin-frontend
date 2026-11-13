@@ -107,12 +107,12 @@ export default function ApiPage() {
   const t = useT();
   const can = useCan();
   const canManage = can('platform.manage');
-  const [f, setF] = useUrlState({ keysPage: '' });
+  const [f, setF] = useUrlState({ keysPage: '', failedPage: '' });
   const keys = useApiKeys(Number(f.keysPage) || 1);
-  const hooks = useWebhooks();
+  const hooks = useWebhooks(Number(f.failedPage) || 1);
   const [creating, setCreating] = useState(false);
   const [section, setSection, sectionHref] = useSection(SECTIONS, 'keys');
-  const failed = hooks.data?.failedDeliveries.length ?? 0;
+  const failed = hooks.data?.meta.total ?? 0;
 
   return (
     <Screen max={1250} label={t('apiKeys.screenLabel')}>
@@ -173,13 +173,13 @@ export default function ApiPage() {
               <SkeletonRows rows={3} h={24} />
             ) : hooks.error ? (
               <ErrorState compact error={hooks.error} onRetry={() => void hooks.refetch()} />
-            ) : hooks.data.endpoints.length === 0 ? (
+            ) : hooks.data.data.endpoints.length === 0 ? (
               <Empty>{t('webhooks.empty')}</Empty>
             ) : (
               <>
                 <div className="table-scroll">
                   <ul className="plain-list" aria-label={t('webhooks.title')} style={{ minWidth: 560 }}>
-                    {hooks.data.endpoints.map((e) => (
+                    {hooks.data.data.endpoints.map((e) => (
                       <li key={e.id} className="row" style={{ gap: 14, padding: '12px 0' }}>
                         <div className="min0" style={{ flex: 1 }}>
                           <div className="ellipsis mono" style={{ fontSize: 12.5 }}>
@@ -224,14 +224,24 @@ export default function ApiPage() {
               <SkeletonRows rows={3} h={24} />
             ) : hooks.error ? (
               <ErrorState compact error={hooks.error} onRetry={() => void hooks.refetch()} />
-            ) : hooks.data.failedDeliveries.length ? (
-              <div className="table-scroll">
-                <ul className="plain-list" aria-label={t('webhooks.failedList')} style={{ minWidth: 700 }}>
-                  {hooks.data.failedDeliveries.map((d) => (
-                    <DeliveryRow key={d.id} d={d} canManage={canManage} />
-                  ))}
-                </ul>
-              </div>
+            ) : hooks.data.data.failedDeliveries.length ? (
+              <>
+                <div className="table-scroll">
+                  <ul
+                    className="plain-list"
+                    aria-label={t('webhooks.failedList')}
+                    aria-busy={hooks.isPlaceholderData}
+                    style={{ minWidth: 700, opacity: hooks.isPlaceholderData ? 0.6 : 1 }}
+                  >
+                    {hooks.data.data.failedDeliveries.map((d) => (
+                      <DeliveryRow key={d.id} d={d} canManage={canManage} />
+                    ))}
+                  </ul>
+                </div>
+                {hooks.data.meta.lastPage > 1 && (
+                  <Pagination meta={hooks.data.meta} onPage={(p) => setF({ failedPage: String(p) })} noun={t('webhooks.failedNoun')} />
+                )}
+              </>
             ) : (
               <div className="muted" style={{ fontSize: 13, marginTop: 12 }}>
                 {t('webhooks.noFailed')}

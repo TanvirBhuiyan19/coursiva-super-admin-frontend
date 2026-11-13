@@ -13,20 +13,23 @@ export function Pagination({ meta, onPage, noun }: { meta: PaginationMeta; onPag
           : tc('pagination.total', { total: meta.total, noun: n })}
       </span>
       <div className="spacer" />
-      <button type="button" className="btn btn--sm" disabled={meta.currentPage <= 1} onClick={() => onPage(meta.currentPage - 1)}>
-        {tc('pagination.previous')}
-      </button>
-      <span className="t-sm muted" aria-current="page">
-        {tc('pagination.page', { page: meta.currentPage, pages: meta.lastPage })}
-      </span>
-      <button
-        type="button"
-        className="btn btn--sm"
-        disabled={meta.currentPage >= meta.lastPage}
-        onClick={() => onPage(meta.currentPage + 1)}
-      >
-        {tc('pagination.next')}
-      </button>
+      {/* One group: on a narrow screen it wraps below the count as a whole, never splitting Previous from Next. */}
+      <div className="hstack pagination__controls">
+        <button type="button" className="btn btn--sm" disabled={meta.currentPage <= 1} onClick={() => onPage(meta.currentPage - 1)}>
+          {tc('pagination.previous')}
+        </button>
+        <span className="t-sm muted" aria-current="page">
+          {tc('pagination.page', { page: meta.currentPage, pages: meta.lastPage })}
+        </span>
+        <button
+          type="button"
+          className="btn btn--sm"
+          disabled={meta.currentPage >= meta.lastPage}
+          onClick={() => onPage(meta.currentPage + 1)}
+        >
+          {tc('pagination.next')}
+        </button>
+      </div>
     </nav>
   );
 }

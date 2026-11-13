@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Badge, Card, Empty, ErrorState, SkeletonRows } from '@/components/ui';
+import { Badge, Card, Empty, ErrorState, Pagination, SkeletonRows } from '@/components/ui';
 import { pathOf } from '@/app/screens';
 import { useCan } from '@/features/auth/useCan';
 import { money, moneyFine, monthName, num } from '@/lib/format';
@@ -11,13 +11,13 @@ import type { Overage } from '../types';
 const COLS = 'minmax(0,1.6fr) minmax(0,1fr) minmax(0,1.3fr) minmax(0,0.9fr) minmax(0,0.6fr) minmax(0,1fr)';
 const MIN = 720;
 
-export function OveragesCard() {
+export function OveragesCard({ page, onPage }: { page: number; onPage: (page: number) => void }) {
   const t = useT();
   const can = useCan();
   const canManage = can('billing.manage');
-  const list = useOverages();
+  const list = useOverages(page);
   const bill = useBillOverage();
-  const d = list.data;
+  const d = list.data?.data;
 
   const addToInvoice = (o: Overage) =>
     bill.mutate(o.id, { onSuccess: () => toast(t('overages.toasts.added', { amount: money(o.amount), tenant: o.tenantName })) });
@@ -38,10 +38,10 @@ export function OveragesCard() {
         <SkeletonRows rows={4} h={20} />
       ) : list.error ? (
         <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />
-      ) : !list.data.items.length ? (
+      ) : !list.data.data.items.length ? (
         <Empty>{t('overages.empty')}</Empty>
       ) : (
-        <div role="table" aria-label={t('overages.title')}>
+        <div role="table" aria-label={t('overages.title')} aria-busy={list.isPlaceholderData}>
           <div role="row" className="trow trow--head" style={{ gridTemplateColumns: COLS, minWidth: MIN, gap: 10, padding: '9px 0' }}>
             <div role="columnheader">{t('columns.tenant')}</div>
             <div role="columnheader">{t('columns.meter')}</div>
@@ -52,7 +52,7 @@ export function OveragesCard() {
               {t('columns.billing')}
             </div>
           </div>
-          {list.data.items.map((o) => (
+          {list.data.data.items.map((o) => (
             <div
               key={o.id}
               role="row"
@@ -96,6 +96,7 @@ export function OveragesCard() {
           ))}
         </div>
       )}
+      {list.data && list.data.meta.lastPage > 1 && <Pagination meta={list.data.meta} onPage={onPage} noun={t('overages.noun')} />}
       <div className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
         {t('overages.footer')}{' '}
         <Link className="link" style={{ fontSize: 11.5 }} to={pathOf('plans')}>

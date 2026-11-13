@@ -1,13 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateTenantData } from '@/features/tenants/api';
 import { api } from '@/lib/api/client';
-import type { Resource } from '@/lib/api/types';
+import type { Paginated, Resource } from '@/lib/api/types';
 import type {
   Connection,
   CredentialsInput,
   DrmSettings,
   DrmUpdate,
   LiveRoomSettings,
+  LiveRoomUsage,
   LiveRoomUpdate,
   StorageSettings,
   StorageUpdate,
@@ -16,6 +17,7 @@ import type {
 export const mediaKeys = {
   all: ['media'] as const,
   liveRooms: () => [...mediaKeys.all, 'live-rooms'] as const,
+  liveRoomUsage: (page: number, search: string) => [...mediaKeys.all, 'live-room-usage', page, search] as const,
   drm: () => [...mediaKeys.all, 'drm'] as const,
   storage: () => [...mediaKeys.all, 'storage'] as const,
 };
@@ -25,6 +27,19 @@ export const useLiveRooms = () =>
   useQuery({
     queryKey: mediaKeys.liveRooms(),
     queryFn: ({ signal }) => api.get<Resource<LiveRoomSettings>>('/media/live-rooms', { signal }).then((r) => r.data),
+  });
+
+/** One page of this month's built-in room minutes per school, A–Z (the settings resource carries only the first 10). */
+export const LIVE_USAGE_PER_PAGE = 10;
+export const useLiveRoomUsage = (page: number, search: string) =>
+  useQuery<Paginated<LiveRoomUsage>>({
+    queryKey: mediaKeys.liveRoomUsage(page, search),
+    queryFn: ({ signal }) =>
+      api.get<Paginated<LiveRoomUsage>>('/media/live-rooms/usage', {
+        query: { page, perPage: LIVE_USAGE_PER_PAGE, ...(search ? { search } : {}) },
+        signal,
+      }),
+    placeholderData: keepPreviousData,
   });
 
 export const useDrm = () =>
@@ -79,6 +94,7 @@ export function useUpdateLiveRooms() {
     () => {
       invalidateTenantData(qc);
       void qc.invalidateQueries({ queryKey: ['entitlements'] }); // plan limits table
+      void qc.invalidateQueries({ queryKey: [...mediaKeys.all, 'live-room-usage'] }); // allowances and status per school
     },
   );
 }

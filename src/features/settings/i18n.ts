@@ -154,7 +154,12 @@ export const { t, useT } = defineMessages('settings', {
     minutes: { one: '{count} minute', other: '{count} minutes' },
     retries: { one: '{count} retry', other: '{count} retries' },
     exemptCount: { one: '{count} tenant exempt', other: '{count} tenants exempt' },
-    noTenants: 'No tenants yet.',
+    exemptList: 'Exempt tenants',
+    findTenant: 'Add a tenant…',
+    searchFailed: 'Couldn’t search tenants. Try again.',
+    removeTenant: 'Remove {name}',
+    remove: 'Remove',
+    noExempt: 'No tenants exempt',
     provider: { stripe: 'Stripe', paddle: 'Paddle', lemon_squeezy: 'Lemon Squeezy' },
     providersNotConnected: {
       one: '{names} isn’t connected yet — connect it in',

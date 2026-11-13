@@ -85,9 +85,11 @@ export const spec = defineSpec({
     {
       method: 'GET',
       path: '/governance/moderation/strikes',
-      summary: 'Tenants with upheld strikes',
+      summary: 'Tenants with upheld strikes (paginated)',
+      description: 'Most strikes first, then the most recently struck; paginated by school (grouped, ordered and paged in SQL).',
       auth: 'governance.view',
-      response: resource(arrayOf(ref('TenantStrikes'))),
+      query: pageParams,
+      response: paginated(ref('TenantStrikes')),
     },
     {
       method: 'GET',
@@ -146,10 +148,16 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/governance/policies/{id}/acceptance',
       summary: 'Per-tenant acceptance of a document version',
-      description: 'Not-yet-accepted tenants first, then by name.',
+      description:
+        'Not-yet-accepted tenants first, then by name; paginated. `search` matches the tenant name. `meta.accepted` / `meta.pending` count every live tenant (the search does not narrow them).',
       auth: 'governance.view',
       path_params: id('Document', 'pd_tos_41'),
-      response: resource(arrayOf(ref('PolicyAcceptance'))),
+      query: { ...pageParams, search: { type: 'string', description: 'Tenant name contains (case-insensitive).' } },
+      response: paginated(ref('PolicyAcceptance'), {
+        type: 'object',
+        required: ['accepted', 'pending'],
+        properties: { accepted: { type: 'integer' }, pending: { type: 'integer' } },
+      }),
       example: { params: { id: 'pd_tos_41' } },
     },
     {
@@ -195,9 +203,24 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/governance/regions',
       summary: 'Data residency by region',
-      description: 'Moves are scheduled with `PATCH /tenants/{id}` `{ region }` (tenants.manage).',
+      description:
+        'Counts per region (all tenants). `tenants` lists only the first 100 by name (kept for older clients) and `tenants_total` says how many there are; the full list pages through `GET /governance/regions/tenants`. Moves are scheduled with `PATCH /tenants/{id}` `{ region }` (tenants.manage).',
       auth: 'governance.view',
       response: resource(ref('RegionSummary')),
+    },
+    {
+      method: 'GET',
+      path: '/governance/regions/tenants',
+      summary: 'Tenant data regions (paginated)',
+      description: 'Every tenant by name. `search` matches the name; `region` narrows to one region (422 `region` if unknown).',
+      auth: 'governance.view',
+      query: {
+        ...pageParams,
+        search: { type: 'string', description: 'Tenant name contains (case-insensitive).' },
+        region: { type: 'string', enum: ['EU', 'US', 'UK', 'APAC'] },
+      },
+      response: paginated(ref('TenantResidency')),
+      errors: [422],
     },
 
     // ---------- Abuse & limits ----------
@@ -205,9 +228,10 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/governance/abuse-signals',
       summary: 'Unresolved abuse signals',
-      description: 'Sorted by severity, then newest.',
+      description: 'Sorted by severity, then newest; paginated.',
       auth: 'governance.view',
-      response: resource(arrayOf(ref('AbuseSignal'))),
+      query: pageParams,
+      response: paginated(ref('AbuseSignal')),
     },
     {
       method: 'POST',
@@ -268,9 +292,11 @@ export const spec = defineSpec({
     {
       method: 'GET',
       path: '/governance/blocked-ips',
-      summary: 'Blocked IPs, newest first',
+      summary: 'Blocked IPs, newest first (paginated)',
+      description: '`search` matches the address or range.',
       auth: 'governance.view',
-      response: resource(arrayOf(ref('BlockedIp'))),
+      query: { ...pageParams, search: { type: 'string', description: 'Address or range contains.' } },
+      response: paginated(ref('BlockedIp')),
     },
     {
       method: 'POST',

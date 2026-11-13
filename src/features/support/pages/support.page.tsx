@@ -10,7 +10,7 @@ import { TicketList } from '../components/TicketList';
 import { useT } from '../i18n';
 import { TICKET_VIEWS, type TicketListParams, type TicketView } from '../types';
 
-const DEFAULTS = { view: 'open', q: '', ticket: '', page: '1' };
+const DEFAULTS = { view: 'open', q: '', ticket: '', page: '1', tenant: '' };
 
 function DetailSkeleton() {
   return (
@@ -42,6 +42,7 @@ export default function SupportPage() {
     perPage: 25,
     view,
     ...(f.q ? { search: f.q } : {}),
+    ...(f.tenant ? { tenant: f.tenant } : {}),
   };
   const list = useTickets(params);
   const summary = useSupportSummary();
@@ -78,7 +79,7 @@ export default function SupportPage() {
       ) : kpis ? (
         <KpiRow items={kpis} />
       ) : (
-        <div className="grid-kpi" style={{ gap: 12 }}>
+        <div className="grid-kpi">
           {Array.from({ length: 4 }, (_, i) => (
             <div key={i} className="card card--tight">
               <Skeleton h={12} w="40%" />
@@ -96,6 +97,16 @@ export default function SupportPage() {
             </Chip>
           ))}
         </div>
+        {f.tenant && (
+          <span className="hstack wrap" style={{ gap: 8 }}>
+            <span className="t-sm muted">
+              {list.data?.data[0] ? t('list.tenantFilter', { tenant: list.data.data[0].tenant.name }) : t('list.tenantFilterSchool')}
+            </span>
+            <button type="button" className="btn btn--sm" onClick={() => setF({ tenant: '', ticket: '' })}>
+              {t('list.allSchools')}
+            </button>
+          </span>
+        )}
         <div className="spacer" style={{ minWidth: 8 }} />
         <input
           className="input"
@@ -116,7 +127,7 @@ export default function SupportPage() {
           onPage={(page) => setF({ page: String(page), ticket: '' })}
           onClear={() => {
             setSearch('');
-            setF({ view: 'open', q: '', ticket: '' });
+            setF({ view: 'open', q: '', ticket: '', tenant: '' });
           }}
         />
         {detail.error ? (

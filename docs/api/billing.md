@@ -33,6 +33,7 @@ Paginated `Invoice[]`, newest first.
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `status`           | `Paid` · `Past due` · `Waived` · `Void` (cancelled) · `Open` (issued, not charged yet). The `status` list filter takes the first three. |
 | `focus`            | Invoice id. When `page` is absent, returns the page that contains it (deep links from global search: `/revenue?invoice={id}`).          |
+| `tenant`           | Tenant id: only that school's invoices (the tenant drawer's "View all invoices" opens `/revenue?tenant={id}`). Unknown id → empty page. |
 | `page`, `per_page` | Standard                                                                                                                                |
 
 `Invoice`: `id, number, tenant_id, tenant_name, plan, amount, issued_at, status, attempts, next_retry_at (null when paused or settled), dunning_paused, provider`.
@@ -45,7 +46,9 @@ Retry, Pause and Waive.
 
 ### `GET /billing/dunning`
 
-`{ data: { max_attempts, retry_days: int[], auto_suspend, items: Invoice[] } }` — every `Past due` invoice.
+`{ data: { max_attempts, retry_days: int[], auto_suspend, items: Invoice[] }, meta }` — the `Past due` invoices, oldest
+failure first, one page at a time: `page`, `per_page` (max 100, default 25); `meta` is the standard pagination meta
+(`current_page, last_page, per_page, total, from, to`). The Revenue screen keeps the queue's page in `?dunningPage=`.
 `max_attempts` = first charge + `platform_settings.dunning_retries`; `retry_days` is the retry schedule (days after the failed charge).
 
 ### Invoice actions
@@ -64,8 +67,10 @@ For a provider invoice they answer `422 { status }`: `{number} is billed by Padd
 
 ### `GET /billing/overages`
 
-`{ data: { period, unbilled_total, items: Overage[] } }` for the current metering month (`period` = first day, meters reset on the 1st).
-`Overage`: `id, tenant_id, tenant_name, meter, usage, rate, amount, billed_at`.
+`{ data: { period, unbilled_total, items: Overage[] }, meta }` for the current metering month (`period` = first day, meters reset on the 1st).
+Largest first, one page at a time: `page`, `per_page` (max 100, default 25); `meta` is the standard pagination meta.
+`unbilled_total` covers the whole month, not just the page. The Revenue screen keeps the page in `?overagesPage=`.
+`Overage`: `id, tenant_id, tenant_name, meter, usage, allowance, rate, per, amount, billed_at`.
 
 ### `POST /billing/overages/{id}/bill`
 

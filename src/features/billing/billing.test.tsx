@@ -132,6 +132,45 @@ describe('revenue', () => {
     expect(overages.find('ov_3')!.billedAt).toBeNull();
   });
 
+  it('lists one school’s invoices from the tenant drawer link and clears the filter', async () => {
+    signInAs('Owner');
+    const { user, router } = renderApp('/revenue?tenant=tn_peak');
+    const inv = await screen.findByRole('table', { name: 'Latest invoices' });
+    await waitFor(() => expect(within(inv).getAllByRole('row')).toHaveLength(2)); // header + Peak's one invoice
+    expect(within(inv).getByText('Peak Fitness Cert Co')).toBeInTheDocument();
+    expect(screen.getByText('One school: Peak Fitness Cert Co')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show all schools' }));
+    await waitFor(() => expect(router.state.location.search).not.toContain('tenant='));
+    await waitFor(() => expect(within(inv).getAllByRole('row')).toHaveLength(7));
+  });
+
+  it('pages the dunning queue and the overages, keeping each page in the URL', async () => {
+    const base = invoices.find('in_20260818')!;
+    for (let i = 0; i < 30; i++)
+      invoices.insert({
+        ...base,
+        id: `in_dun_${String(i)}`,
+        number: `CV-DUN-${String(i)}`,
+        issuedAt: `2026-07-${String((i % 28) + 1).padStart(2, '0')}T06:00:00Z`,
+      });
+    const res = await (signInAs('Owner'),
+    api.get<{ data: { items: unknown[] }; meta: { total: number; lastPage: number } }>('/billing/dunning'));
+    expect(res.data.items).toHaveLength(25);
+    expect(res.meta).toMatchObject({ total: 31, lastPage: 2 });
+    const { user, router } = renderApp('/revenue');
+    const dunning = await screen.findByRole('table', { name: 'Dunning queue' });
+    const pager = within(dunning.closest('section')!).getByRole('navigation', { name: /pagination/i });
+    await user.click(within(pager).getByRole('button', { name: /next/i }));
+    await waitFor(() => expect(router.state.location.search).toContain('dunningPage=2'));
+    await waitFor(() => expect(within(dunning).getAllByRole('row')).toHaveLength(7)); // header + 6 on page 2
+    const over = await api.get<{ data: { items: unknown[]; unbilledTotal: number }; meta: { total: number } }>('/billing/overages', {
+      query: { perPage: 1 },
+    });
+    expect(over.data.items).toHaveLength(1);
+    expect(over.data.unbilledTotal).toBe(210); // the whole month, not just the page
+    expect(over.meta.total).toBe(overages.all().length);
+  });
+
   it('highlights an invoice deep-linked from search', async () => {
     signInAs('Owner');
     renderApp('/revenue?invoice=in_20260815');

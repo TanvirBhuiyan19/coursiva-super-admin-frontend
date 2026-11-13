@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import { pathOf, screenTitle, type ScreenDef } from '@/app/screens';
@@ -6,13 +6,17 @@ import { useLogout, useSession } from '@/features/auth/api';
 import { Can } from '@/features/auth/Can';
 import { useMarkNotificationsRead, useNotifications, usePlatformStatus, type Notification } from '@/features/shell/api';
 import { useT } from '@/features/shell/i18n';
-import { timeAgo } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
+import { lazyWithPreload } from '@/lib/lazy';
 import { useUi } from '@/store/ui';
 import { Dot } from '../ui/Badge';
 import { Icon } from '../ui/Icon';
 import { useFreshRows } from '../ui/freshRows';
 import { canAnimate, popoverExitRef } from '../ui/motion';
+import { NotificationRow } from './NotificationRow';
+
+/** "Load older" pages of the notifications panel — off the critical path (the bell reads the first page only). */
+const NotificationsOlder = lazyWithPreload(() => import('./NotificationsOlder'));
 
 const SUN =
   'M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z';
@@ -50,28 +54,11 @@ function useDismiss(open: boolean, close: () => void) {
 
 /** The open panel's rows. Notifications that arrive while it is open slide in; the ones already there stay put. */
 function NotificationRows({ data, onPick }: { data: Notification[]; onPick: () => void }) {
-  const navigate = useNavigate();
   const fresh = useFreshRows(data.map((n) => n.id));
   return (
     <>
       {data.map((n) => (
-        <button
-          key={n.id}
-          type="button"
-          className={'notif-row' + (fresh.cls(n.id) ? ' fx-fresh' : '')}
-          style={fresh.style(n.id)}
-          disabled={!n.href}
-          onClick={() => {
-            if (n.href) void navigate(n.href);
-            onPick();
-          }}
-        >
-          <Dot tone={n.read ? 'flat' : n.tone} style={{ position: 'relative', top: -1 }} />
-          <span style={{ flex: 1, lineHeight: 1.45 }}>{n.text}</span>
-          <span className="faint" style={{ fontSize: 11, flexShrink: 0 }}>
-            {timeAgo(n.createdAt)}
-          </span>
-        </button>
+        <NotificationRow key={n.id} n={n} onPick={onPick} className={fresh.cls(n.id) ? 'fx-fresh' : undefined} style={fresh.style(n.id)} />
       ))}
     </>
   );
@@ -82,7 +69,8 @@ function Notifications() {
   const open = useUi((s) => s.notifOpen);
   const setUi = useUi((s) => s.set);
   const notifications = useNotifications();
-  const data = notifications.data ?? [];
+  const data = notifications.data?.data ?? [];
+  const olderCursor = notifications.data?.meta.nextCursor ?? null;
   const markRead = useMarkNotificationsRead();
   const unread = data.filter((n) => !n.read).length;
   const close = () => setUi({ notifOpen: false });
@@ -92,7 +80,7 @@ function Notifications() {
   const bell = useRef<HTMLButtonElement>(null);
   const seen = useRef<Set<string> | null>(null);
   useEffect(() => {
-    const list = notifications.data;
+    const list = notifications.data?.data;
     if (!list) return;
     const ids = list.filter((n) => !n.read).map((n) => n.id);
     if (seen.current && ids.some((id) => !seen.current!.has(id)) && canAnimate()) {
@@ -111,6 +99,9 @@ function Notifications() {
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setUi({ notifOpen: !open })}
+        onPointerEnter={() => {
+          if (olderCursor) void NotificationsOlder.preload();
+        }}
       >
         <Icon d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
         {/* Keyed by the count, so the dot pops in again whenever the unread count changes. */}
@@ -135,7 +126,15 @@ function Notifications() {
             </button>
           </div>
           {data.length === 0 && <div className="empty">{t('notifications.empty')}</div>}
-          <NotificationRows data={data} onPick={close} />
+          {/* Scrolls once older pages are appended; the header row stays put. */}
+          <div style={{ maxHeight: 'min(70vh, 560px)', overflowY: 'auto' }}>
+            <NotificationRows data={data} onPick={close} />
+            {olderCursor && (
+              <Suspense fallback={null}>
+                <NotificationsOlder cursor={olderCursor} onPick={close} />
+              </Suspense>
+            )}
+          </div>
         </div>
       )}
     </div>

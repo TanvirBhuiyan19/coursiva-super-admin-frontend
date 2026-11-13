@@ -104,7 +104,7 @@ export const { t, useT } = defineMessages('auth', {
   },
   stepUp: {
     title: 'Confirm your password',
-    intro: 'This change affects credentials the whole platform uses. Enter your password to continue — it stays confirmed for 15 minutes.',
+    intro: 'This is a sensitive action, so confirm it’s you. Enter your password to continue — it stays confirmed for 15 minutes.',
     cancel: 'Cancel',
     confirm: 'Confirm and continue',
   },

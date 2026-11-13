@@ -6,13 +6,14 @@ import { num, timeAgo } from '@/lib/format';
 import { useSection } from '@/lib/useSection';
 import { toast } from '@/store/ui';
 import { useDeliverability, usePauseSending, useRecheckDns } from '../api';
+import { BlocklistBadge, DedicatedRequests, SendingIps } from '../components/Reputation';
 import { Tiles } from '../components/Tiles';
 import { t, useT } from '../i18n';
 import type { DnsCheck, SenderDomain, SenderRisk } from '../types';
 
 /** Decorative warning glyph (not text). */
 const WARN_ICON = '⚠';
-const SECTIONS = ['domains', 'suppression'] as const;
+const SECTIONS = ['domains', 'reputation', 'dedicated', 'suppression'] as const;
 const COLS =
   'minmax(0,1.8fr) minmax(0,0.6fr) minmax(0,0.6fr) minmax(0,0.9fr) minmax(0,0.7fr) minmax(0,0.7fr) minmax(0,0.8fr) minmax(0,2.1fr)';
 const RISK_TONE: Record<SenderRisk, Tone> = { Healthy: 'good', Watch: 'warn', 'Over threshold': 'bad' };
@@ -51,6 +52,19 @@ function DomainRow({ d, canManage }: { d: SenderDomain; canManage: boolean }) {
         <div className="faint ellipsis" style={{ fontSize: 11 }} title={t('deliver.dnsChecked', { time: timeAgo(d.dnsCheckedAt) })}>
           {d.domain}
         </div>
+        {d.flag && (
+          <div className="fg-bad ellipsis" style={{ fontSize: 11 }}>
+            {t('deliver.flagged', { reason: d.flag.reason })}
+          </div>
+        )}
+        {d.blocklist?.status === 'listed' && (
+          <div className="hstack" style={{ gap: 6, marginTop: 2 }}>
+            <span className="faint" style={{ fontSize: 11 }}>
+              {t('deliver.dbl')}
+            </span>
+            <BlocklistBadge status="listed" />
+          </div>
+        )}
       </div>
       <div role="cell" className={DNS_TONE[d.spf]}>
         {t(`enums.dnsCheck.${d.spf}`)}
@@ -162,7 +176,13 @@ export default function DeliverPage() {
           label: t(`sections.deliver.${id}`),
           ...(id === 'domains'
             ? { badge: over.length, badgeLabel: t('sections.deliver.overBadge', { count: over.length }), badgeTone: 'bad' as const }
-            : {}),
+            : id === 'dedicated' && d
+              ? {
+                  badge: d.reputation.dedicatedRequestsOpen,
+                  badgeLabel: t('sections.deliver.dedicatedBadge', { count: d.reputation.dedicatedRequestsOpen }),
+                  badgeTone: 'warn' as const,
+                }
+              : {}),
         }))}
         active={section}
         onChange={setSection}
@@ -208,6 +228,14 @@ export default function DeliverPage() {
               </>
             )}
           </div>
+        </SectionPanel>
+
+        <SectionPanel active={section === 'reputation'}>
+          <SendingIps canManage={canManage} monitored={d?.reputation.blocklistsMonitored ?? true} />
+        </SectionPanel>
+
+        <SectionPanel active={section === 'dedicated'}>
+          <DedicatedRequests canManage={canManage} />
         </SectionPanel>
 
         <SectionPanel active={section === 'suppression'}>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import {
   Badge,
@@ -8,6 +8,7 @@ import {
   Empty,
   ErrorState,
   FormError,
+  Pagination,
   QueryState,
   Screen,
   SkeletonRows,
@@ -21,7 +22,9 @@ import { PLANS, type Plan } from '@/lib/domain';
 import { formatDateTime, num, sevTone, timeAgo } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
+import { useDebounced } from '@/lib/useDebounced';
 import { useSection } from '@/lib/useSection';
+import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
 import { useAbuseSignals, useBlockIp, useBlockedIps, useRateLimits, useResolveSignal, useSetRateLimits, useUnblockIp } from '../api';
 import { t as tStatic, useT } from '../i18n';
@@ -107,17 +110,28 @@ function SignalRow({ s }: { s: AbuseSignal }) {
 
 function SignalsCard() {
   const t = useT();
-  const q = useAbuseSignals();
+  const [f, setF] = useUrlState({ signalsPage: '' });
+  const q = useAbuseSignals(Number(f.signalsPage) || 1);
   return (
     <Card title={t('abuse.signals')} className="table-scroll">
       <QueryState query={q} skeleton={<SkeletonRows rows={3} h={24} />} compact>
-        {(rows) =>
-          rows.length ? (
-            <div role="table" aria-label={t('abuse.signals')}>
-              {rows.map((s) => (
-                <SignalRow key={s.id} s={s} />
-              ))}
-            </div>
+        {(page) =>
+          page.data.length ? (
+            <>
+              <div
+                role="table"
+                aria-label={t('abuse.signals')}
+                aria-busy={q.isPlaceholderData}
+                style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}
+              >
+                {page.data.map((s) => (
+                  <SignalRow key={s.id} s={s} />
+                ))}
+              </div>
+              {page.meta.lastPage > 1 && (
+                <Pagination meta={page.meta} onPage={(p) => setF({ signalsPage: String(p) })} noun={t('abuse.signalsNoun')} />
+              )}
+            </>
           ) : (
             <Empty>{t('abuse.signalsEmpty')}</Empty>
           )
@@ -285,38 +299,63 @@ function BlockIpForm() {
 function BlockedIpsCard() {
   const t = useT();
   const can = useCan();
-  const q = useBlockedIps();
+  const [f, setF] = useUrlState({ ipsQ: '', ipsPage: '' });
+  const [search, setSearch] = useState(f.ipsQ);
+  const debounced = useDebounced(search, 300);
+  useEffect(() => {
+    if (debounced !== f.ipsQ) setF({ ipsQ: debounced, ipsPage: '' });
+  }, [debounced, f.ipsQ, setF]);
+  const q = useBlockedIps({ page: Number(f.ipsPage) || 1, search: f.ipsQ || undefined });
   const unblock = useUnblockIp();
   return (
     <Card title={t('abuse.blocked.title')}>
       {can('governance.manage') && <BlockIpForm />}
+      <input
+        className="input"
+        type="search"
+        style={{ width: 240, margin: '6px 0' }}
+        placeholder={t('abuse.blocked.searchPlaceholder')}
+        aria-label={t('abuse.blocked.searchLabel')}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
       <QueryState query={q} skeleton={<SkeletonRows rows={3} h={20} />} compact>
-        {(rows) =>
-          rows.length ? (
-            <ul className="plain-list" aria-label={t('abuse.blocked.list')}>
-              {rows.map((b) => (
-                <li key={b.id} className="row wrap" style={{ padding: '10px 0', gap: '4px 12px' }}>
-                  <span className="mono t-strong">{b.ip}</span>
-                  <span className="t-sm muted" style={{ flex: 1, minWidth: 140 }} title={formatDateTime(b.blockedAt)}>
-                    {b.reason} · {timeAgo(b.blockedAt)}
-                    {b.blockedBy !== 'System' && ` · ${b.blockedBy}`}
-                  </span>
-                  {can('governance.manage') && (
-                    <ConfirmButton
-                      className="link"
-                      style={{ fontSize: 12 }}
-                      confirmLabel={t('abuse.blocked.confirmUnblock', { ip: b.ip })}
-                      disabled={unblock.isPending}
-                      onConfirm={() => unblock.mutate(b.id, { onSuccess: () => toast(t('abuse.blocked.unblockedToast', { ip: b.ip })) })}
-                    >
-                      {t('abuse.blocked.unblock')}
-                    </ConfirmButton>
-                  )}
-                </li>
-              ))}
-            </ul>
+        {(page) =>
+          page.data.length ? (
+            <>
+              <ul
+                className="plain-list"
+                aria-label={t('abuse.blocked.list')}
+                aria-busy={q.isPlaceholderData}
+                style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}
+              >
+                {page.data.map((b) => (
+                  <li key={b.id} className="row wrap" style={{ padding: '10px 0', gap: '4px 12px' }}>
+                    <span className="mono t-strong">{b.ip}</span>
+                    <span className="t-sm muted" style={{ flex: 1, minWidth: 140 }} title={formatDateTime(b.blockedAt)}>
+                      {b.reason} · {timeAgo(b.blockedAt)}
+                      {b.blockedBy !== 'System' && ` · ${b.blockedBy}`}
+                    </span>
+                    {can('governance.manage') && (
+                      <ConfirmButton
+                        className="link"
+                        style={{ fontSize: 12 }}
+                        confirmLabel={t('abuse.blocked.confirmUnblock', { ip: b.ip })}
+                        disabled={unblock.isPending}
+                        onConfirm={() => unblock.mutate(b.id, { onSuccess: () => toast(t('abuse.blocked.unblockedToast', { ip: b.ip })) })}
+                      >
+                        {t('abuse.blocked.unblock')}
+                      </ConfirmButton>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {page.meta.lastPage > 1 && (
+                <Pagination meta={page.meta} onPage={(p) => setF({ ipsPage: String(p) })} noun={t('abuse.blocked.noun')} />
+              )}
+            </>
           ) : (
-            <Empty>{t('abuse.blocked.empty')}</Empty>
+            <Empty>{f.ipsQ ? t('abuse.blocked.noMatch') : t('abuse.blocked.empty')}</Empty>
           )
         }
       </QueryState>

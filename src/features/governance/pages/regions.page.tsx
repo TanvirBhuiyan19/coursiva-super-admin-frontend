@@ -1,10 +1,27 @@
-import { Badge, Bar, CountUp, Dot, Empty, ErrorState, KpiRow, Screen, Select, Skeleton, SkeletonRows, TRow } from '@/components/ui';
+import { useEffect, useState } from 'react';
+import {
+  Badge,
+  Bar,
+  CountUp,
+  Dot,
+  Empty,
+  ErrorState,
+  KpiRow,
+  Pagination,
+  Screen,
+  Select,
+  Skeleton,
+  SkeletonRows,
+  TRow,
+} from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import type { Region } from '@/lib/domain';
 import { num, toneDot } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
+import { useDebounced } from '@/lib/useDebounced';
+import { useUrlState } from '@/lib/useUrlState';
 import { toast } from '@/store/ui';
-import { useMoveTenantRegion, useRegions } from '../api';
+import { useMoveTenantRegion, useRegions, useRegionTenants } from '../api';
 import { REGION_TONE } from '../components/format';
 import { useT } from '../i18n';
 import type { RegionInfo, TenantResidency } from '../types';
@@ -53,6 +70,69 @@ function ResidencyRow({ tenant: tn, regions }: { tenant: TenantResidency; region
   );
 }
 
+type RegionFilter = Region | 'all';
+
+/** Every live school's data region, 25 a page (search by name, filter by region); page and filters in the URL. */
+function ResidencyTable({ regions }: { regions: RegionInfo[] }) {
+  const t = useT();
+  const [f, setF] = useUrlState({ regionQ: '', region: 'all', regionPage: '' });
+  const [search, setSearch] = useState(f.regionQ);
+  const debounced = useDebounced(search, 300);
+  useEffect(() => {
+    if (debounced !== f.regionQ) setF({ regionQ: debounced, regionPage: '' });
+  }, [debounced, f.regionQ, setF]);
+  const region = f.region === 'all' ? undefined : (f.region as Region);
+  const q = useRegionTenants({ page: Number(f.regionPage) || 1, search: f.regionQ || undefined, region });
+  return (
+    <div className="card table-scroll" style={{ padding: '6px 18px 4px' }}>
+      <div className="hstack wrap" style={{ gap: 8, padding: '10px 0' }}>
+        <input
+          className="input"
+          type="search"
+          style={{ width: 240 }}
+          placeholder={t('regions.searchPlaceholder')}
+          aria-label={t('regions.searchLabel')}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Select<RegionFilter>
+          value={f.region as RegionFilter}
+          options={[['all', t('regions.allRegions')] as const, ...regions.map((r) => [r.region, r.label] as const)]}
+          label={t('regions.filterLabel')}
+          style={{ width: 'auto' }}
+          onChange={(v) => setF({ region: v, regionPage: '' })}
+        />
+      </div>
+      {q.error ? (
+        <ErrorState error={q.error} onRetry={() => void q.refetch()} compact />
+      ) : (
+        <div role="table" aria-label={t('regions.table')} aria-busy={q.isFetching}>
+          <TRow cols={COLS} min={640} head style={{ fontSize: 10.5, fontWeight: 700 }}>
+            <div role="columnheader">{t('regions.tenant')}</div>
+            <div role="columnheader">{t('regions.plan')}</div>
+            <div role="columnheader">{t('regions.learnersCol')}</div>
+            <div role="columnheader">{t('regions.dataRegion')}</div>
+          </TRow>
+          {q.isPending ? (
+            <SkeletonRows rows={8} h={22} />
+          ) : q.data.data.length === 0 ? (
+            <Empty>{f.regionQ || region ? t('regions.noMatch') : t('regions.empty')}</Empty>
+          ) : (
+            <div style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+              {q.data.data.map((tn) => (
+                <ResidencyRow key={tn.tenantId} tenant={tn} regions={regions} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {q.data && q.data.meta.lastPage > 1 && (
+        <Pagination meta={q.data.meta} onPage={(p) => setF({ regionPage: String(p) })} noun={t('regions.noun')} />
+      )}
+    </div>
+  );
+}
+
 export default function RegionsPage() {
   const t = useT();
   const q = useRegions();
@@ -65,7 +145,7 @@ export default function RegionsPage() {
       </Screen>
     );
 
-  const total = d?.tenants.length ?? 0;
+  const total = d?.tenantsTotal ?? 0;
   const eu = d?.regions.find((r) => r.region === 'EU')?.tenants ?? 0;
 
   return (
@@ -124,23 +204,7 @@ export default function RegionsPage() {
             ))}
       </ul>
 
-      <div className="card table-scroll" style={{ padding: '6px 18px 4px' }}>
-        <div role="table" aria-label={t('regions.table')} aria-busy={q.isFetching}>
-          <TRow cols={COLS} min={640} head style={{ fontSize: 10.5, fontWeight: 700 }}>
-            <div role="columnheader">{t('regions.tenant')}</div>
-            <div role="columnheader">{t('regions.plan')}</div>
-            <div role="columnheader">{t('regions.learnersCol')}</div>
-            <div role="columnheader">{t('regions.dataRegion')}</div>
-          </TRow>
-          {!d ? (
-            <SkeletonRows rows={8} h={22} />
-          ) : d.tenants.length === 0 ? (
-            <Empty>{t('regions.empty')}</Empty>
-          ) : (
-            d.tenants.map((tn) => <ResidencyRow key={tn.tenantId} tenant={tn} regions={d.regions} />)
-          )}
-        </div>
-      </div>
+      {d && <ResidencyTable regions={d.regions} />}
 
       <div className="card note" style={{ padding: '16px 18px', fontSize: 12.5, lineHeight: 1.6 }}>
         {t('regions.note')}

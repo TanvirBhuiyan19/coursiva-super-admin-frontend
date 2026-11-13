@@ -53,6 +53,8 @@ export interface InvoiceListParams {
   status?: InvoiceStatus;
   /** Returns the page that contains this invoice id (deep links from global search). */
   focus?: string;
+  /** Only this tenant's invoices (the tenant drawer's "View all invoices"). */
+  tenant?: string;
 }
 
 /** GET /billing/dunning — past-due invoices and the retry policy. */
@@ -62,6 +64,7 @@ export interface DunningQueue {
   /** Days after the failed charge on which retries run, e.g. [1, 3, 7]. */
   retryDays: number[];
   autoSuspend: boolean;
+  /** One page, oldest failure first (the response's `meta` pages it). */
   items: Invoice[];
 }
 
@@ -89,7 +92,9 @@ export interface Overage {
 export interface OverageList {
   /** First day (ISO date) of the metering month. */
   period: string;
+  /** Unbilled amount across the whole month, not just this page. */
   unbilledTotal: number;
+  /** One page, largest first (the response's `meta` pages it). */
   items: Overage[];
 }
 

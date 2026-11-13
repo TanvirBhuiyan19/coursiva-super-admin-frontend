@@ -84,27 +84,28 @@ other roles' permissions are editable from the Staff screen.
 
 ## Index
 
-| Doc                                  | Endpoints                                                                                     |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| [auth.md](auth.md)                   | `/auth/*`                                                                                     |
-| [shell.md](shell.md)                 | `/status`, `/badges`, `/notifications`, `/search`                                             |
-| [overview.md](overview.md)           | `/overview`                                                                                   |
-| [tenants.md](tenants.md)             | `/tenants/*`                                                                                  |
-| [audit.md](audit.md)                 | `/audit`, `/audit/export`                                                                     |
-| [billing.md](billing.md)             | `/billing/*` — revenue, invoices, dunning, overages, pricing, promos                          |
-| [extensions.md](extensions.md)       | `/extensions/*`                                                                               |
-| [entitlements.md](entitlements.md)   | `/entitlements/*`                                                                             |
-| [media.md](media.md)                 | `/media/*` — live rooms, DRM, storage                                                         |
-| [support.md](support.md)             | `/support/*`                                                                                  |
-| [announcements.md](announcements.md) | `/announcements/*` (also the Flags & status banner)                                           |
-| [analytics.md](analytics.md)         | `/analytics/*`                                                                                |
-| [governance.md](governance.md)       | `/governance/*` — privacy, moderation, policies, residency, abuse                             |
-| [platform.md](platform.md)           | `/platform/*` — flags, incidents, deliverability, certificates, standards, API keys, webhooks |
-| [backup.md](backup.md)               | `/backup/*`                                                                                   |
-| [domains.md](domains.md)             | `/domains/*` — domain resale: settings, registrations, registrar tasks, orders                |
-| [settings.md](settings.md)           | `/settings/*`                                                                                 |
-| [staff.md](staff.md)                 | `/staff/*`                                                                                    |
-| [telemetry.md](telemetry.md)         | Web Vitals beacon (real-user monitoring)                                                      |
+| Doc                                  | Endpoints                                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| [auth.md](auth.md)                   | `/auth/*`                                                                                                     |
+| [shell.md](shell.md)                 | `/status`, `/badges`, `/notifications`, `/search`                                                             |
+| [overview.md](overview.md)           | `/overview`                                                                                                   |
+| [tenants.md](tenants.md)             | `/tenants/*`                                                                                                  |
+| [audit.md](audit.md)                 | `/audit`, `/audit/export`                                                                                     |
+| [billing.md](billing.md)             | `/billing/*` — revenue, invoices, dunning, overages, pricing, promos                                          |
+| [extensions.md](extensions.md)       | `/extensions/*`                                                                                               |
+| [entitlements.md](entitlements.md)   | `/entitlements/*`                                                                                             |
+| [media.md](media.md)                 | `/media/*` — live rooms, DRM, storage                                                                         |
+| [support.md](support.md)             | `/support/*`                                                                                                  |
+| [announcements.md](announcements.md) | `/announcements/*` (also the Flags & status banner)                                                           |
+| [partners.md](partners.md)           | `/partners/*` (Coursiva's own partner programme: partners, referrals, commissions, payouts, tax forms, terms) |
+| [analytics.md](analytics.md)         | `/analytics/*`                                                                                                |
+| [governance.md](governance.md)       | `/governance/*` — privacy, moderation, policies, residency, abuse                                             |
+| [platform.md](platform.md)           | `/platform/*` — flags, incidents, deliverability, certificates, standards, API keys, webhooks                 |
+| [backup.md](backup.md)               | `/backup/*`                                                                                                   |
+| [domains.md](domains.md)             | `/domains/*` — domain resale: settings, registrations, registrar tasks, orders                                |
+| [settings.md](settings.md)           | `/settings/*`                                                                                                 |
+| [staff.md](staff.md)                 | `/staff/*`                                                                                                    |
+| [telemetry.md](telemetry.md)         | Web Vitals beacon (real-user monitoring)                                                                      |
 
 ## Shared business rules
 

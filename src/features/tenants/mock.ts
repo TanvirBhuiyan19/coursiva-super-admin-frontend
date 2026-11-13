@@ -1,6 +1,6 @@
 // Mock implementation of /tenants (what the Laravel TenantController + policies will do).
 import { http, HttpResponse } from 'msw';
-import { flags, invoices, platformSettings, pricing, staff, tenants, type StaffRow, type TenantRow } from '@/mocks/collections';
+import { audit, flags, invoices, platformSettings, pricing, staff, tenants, type StaffRow, type TenantRow } from '@/mocks/collections';
 import { ago, id, slug } from '@/mocks/db';
 import {
   effectiveLimits,
@@ -271,8 +271,15 @@ export const handlers = [
     route('/tenants'),
     handle(({ request }) => {
       const viewer = authorize('tenants.view');
+      // `ids` (comma-separated, at most 100 read): only those tenants — pickers resolve saved selections off their page.
+      const rawIds = query(request).get('ids');
+      if (rawIds && (rawIds.length > 3400 || !/^[A-Za-z0-9_]+(,[A-Za-z0-9_]+)*$/.test(rawIds)))
+        throw invalid({ ids: 'The ids format is invalid.' });
+      const ids = rawIds ? rawIds.split(',').slice(0, 100) : null;
       return paginate(
-        filtered(request, viewer).map((t) => toTenant(t, viewer)),
+        filtered(request, viewer)
+          .filter((t) => !ids || ids.includes(t.id))
+          .map((t) => toTenant(t, viewer)),
         request,
       );
     }),
@@ -432,6 +439,23 @@ export const handlers = [
   http.get<Params>(
     route('/tenants/:id'),
     handle<Params>(({ params }) => ok(toDetail(findTenant(params.id), authorize('tenants.view')))),
+  ),
+
+  // The school's whole history, newest first (lifecycle + console audit entries); the detail's `timeline` is the newest 20.
+  http.get<Params>(
+    route('/tenants/:id/activity'),
+    handle<Params>(({ request, params }) => {
+      const viewer = authorize('tenants.view');
+      const t = findTenant(params.id);
+      const entries = [
+        ...toDetail(t, viewer).timeline,
+        ...audit
+          .all()
+          .filter((a) => a.tenantId === t.id)
+          .map((a) => ({ at: a.createdAt, text: a.action })),
+      ].sort((a, b) => b.at.localeCompare(a.at));
+      return paginate(entries, request);
+    }),
   ),
 
   http.patch<Params>(

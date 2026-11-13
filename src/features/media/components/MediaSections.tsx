@@ -1,11 +1,28 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { pathOf } from '@/app/screens';
-import { Badge, Bar, Card, ConfirmButton, Dot, Field, Select, Toggle, ToggleRow } from '@/components/ui';
+import {
+  Badge,
+  Bar,
+  Card,
+  ConfirmButton,
+  Dot,
+  Empty,
+  ErrorState,
+  Field,
+  Pagination,
+  Select,
+  SkeletonRows,
+  Toggle,
+  ToggleRow,
+} from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { CommitNumberInput } from '@/components/ui';
 import { money, num, timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
-import { useRotateDrmKeys, useUpdateDrm, useUpdateLiveRooms, useUpdateStorage } from '../api';
+import { useDebounced } from '@/lib/useDebounced';
+import { useUrlState } from '@/lib/useUrlState';
+import { useLiveRoomUsage, useRotateDrmKeys, useUpdateDrm, useUpdateLiveRooms, useUpdateStorage } from '../api';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { useT } from '../i18n';
 import {
@@ -134,40 +151,80 @@ export function LiveRoomsCard({ s }: { s: LiveRoomSettings }) {
       </p>
 
       <h3 style={{ ...SUB_HEAD, marginTop: 16, marginBottom: 4 }}>{t('liveRooms.usageHeading')}</h3>
-      <ul className="plain-list">
-        {s.usage.map((u) => {
-          const pctUsed = u.allowanceMinutes ? Math.min(100, Math.round((u.usedMinutes / u.allowanceMinutes) * 100)) : 0;
-          return (
-            <li key={u.tenantId} className="row wrap" style={{ padding: '10px 0', fontSize: 12.5 }}>
-              <span className="min0" style={{ fontWeight: 600, flex: 1, minWidth: 180 }}>
-                <Link className="row-link" style={{ display: 'inline' }} to={`/tenants/${u.tenantId}`}>
-                  {u.name}
-                </Link>{' '}
-                <span className="faint" style={{ fontWeight: 500 }}>
-                  · {tc(`enums.plan.${u.plan}`)}
-                </span>
-              </span>
-              <div style={{ width: 110 }}>
-                <Bar
-                  value={pctUsed}
-                  tone={u.status === 'over' ? 'bad' : undefined}
-                  label={t('liveRooms.usageLabel', { name: u.name, pct: pctUsed })}
-                />
-              </div>
-              <span style={{ width: 120, textAlign: 'right', fontWeight: 700 }}>
-                {u.status === 'byo' ? '—' : t('liveRooms.usageOf', { used: u.usedMinutes, allowance: u.allowanceMinutes })}
-              </span>
-              <span className={u.status === 'over' ? 'fg-bad' : 'muted'} style={{ width: 150, textAlign: 'right' }}>
-                {usageNote(t, u)}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+      <LiveRoomUsageList />
       <p className="faint t-xs" style={{ marginTop: 10, lineHeight: 1.5 }}>
         {t('liveRooms.footnote')}
       </p>
     </Card>
+  );
+}
+
+/** This month's minutes per school, A–Z, 10 a page — search and page in the URL (`usageQ`, `usagePage`). */
+function LiveRoomUsageList() {
+  const t = useT();
+  const tc = useCommonT();
+  const [f, setF] = useUrlState({ usageQ: '', usagePage: '1' });
+  const [search, setSearch] = useState(f.usageQ);
+  const debounced = useDebounced(search, 300);
+  useEffect(() => {
+    if (debounced !== f.usageQ) setF({ usageQ: debounced, usagePage: '1' });
+  }, [debounced, f.usageQ, setF]);
+  const q = useLiveRoomUsage(Number(f.usagePage) || 1, f.usageQ);
+  return (
+    <>
+      <input
+        className="input"
+        type="search"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        aria-label={t('liveRooms.usageSearch')}
+        placeholder={t('liveRooms.usageSearch')}
+        style={{ fontSize: 12.5, padding: '7px 10px', marginTop: 6, maxWidth: 280 }}
+      />
+      {q.isPending ? (
+        <SkeletonRows rows={4} h={22} />
+      ) : q.isError ? (
+        <ErrorState compact error={q.error} onRetry={() => void q.refetch()} />
+      ) : q.data.data.length === 0 ? (
+        <Empty>{f.usageQ ? t('liveRooms.usageNoMatch') : t('liveRooms.usageEmpty')}</Empty>
+      ) : (
+        <>
+          <ul className="plain-list" aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+            {q.data.data.map((u) => {
+              const pctUsed = u.allowanceMinutes ? Math.min(100, Math.round((u.usedMinutes / u.allowanceMinutes) * 100)) : 0;
+              return (
+                <li key={u.tenantId} className="row wrap" style={{ padding: '10px 0', fontSize: 12.5 }}>
+                  <span className="min0" style={{ fontWeight: 600, flex: 1, minWidth: 180 }}>
+                    <Link className="row-link" style={{ display: 'inline' }} to={`/tenants/${u.tenantId}`}>
+                      {u.name}
+                    </Link>{' '}
+                    <span className="faint" style={{ fontWeight: 500 }}>
+                      · {tc(`enums.plan.${u.plan}`)}
+                    </span>
+                  </span>
+                  <div style={{ width: 110 }}>
+                    <Bar
+                      value={pctUsed}
+                      tone={u.status === 'over' ? 'bad' : undefined}
+                      label={t('liveRooms.usageLabel', { name: u.name, pct: pctUsed })}
+                    />
+                  </div>
+                  <span style={{ width: 120, textAlign: 'right', fontWeight: 700 }}>
+                    {u.status === 'byo' ? '—' : t('liveRooms.usageOf', { used: u.usedMinutes, allowance: u.allowanceMinutes })}
+                  </span>
+                  <span className={u.status === 'over' ? 'fg-bad' : 'muted'} style={{ width: 150, textAlign: 'right' }}>
+                    {usageNote(t, u)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          {q.data.meta.lastPage > 1 && (
+            <Pagination meta={q.data.meta} onPage={(n) => setF({ usagePage: String(n) })} noun={t('liveRooms.usageNoun')} />
+          )}
+        </>
+      )}
+    </>
   );
 }
 
@@ -309,7 +366,6 @@ export function DrmCard({ s }: { s: DrmSettings }) {
             <MediaConnectionCard
               key={p.key}
               kind="drm"
-              badge
               connection={p}
               connectedToast={t('drm.providerConnected', { name: p.name })}
               disconnectedToast={t('drm.providerDisconnected', { name: p.name })}

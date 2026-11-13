@@ -43,6 +43,10 @@ export const { t, useT } = defineMessages('media', {
     overage:
       'Above the allowance: ${rate} / participant-minute, or tenants top up with the “Live room minutes · {minutes}” add-on ({price}) — both bill on their next invoice. Per-tenant overrides are set in the tenant drawer.',
     usageHeading: 'Minutes used this month',
+    usageSearch: 'Search schools',
+    usageNoun: 'schools',
+    usageEmpty: 'No schools can hold built-in rooms yet.',
+    usageNoMatch: 'No schools match this search.',
     usageLabel: '{name}: {pct}% of allowance used',
     usageOf: '{used} / {allowance}',
     byo: 'BYO provider',

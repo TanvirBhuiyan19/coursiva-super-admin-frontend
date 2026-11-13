@@ -3,7 +3,7 @@ import { shellKeys } from '@/features/shell/api';
 import { tenantKeys } from '@/features/tenants/api';
 import { api } from '@/lib/api/client';
 import { live } from '@/lib/queryClient';
-import type { Paginated, Resource } from '@/lib/api/types';
+import type { Paginated, PaginationMeta, Resource } from '@/lib/api/types';
 import type {
   ApiKey,
   Availability,
@@ -18,7 +18,11 @@ import type {
   CertificateSummary,
   CreatedApiKey,
   Deliverability,
+  DedicatedIpRequest,
   FeatureFlag,
+  ProvisionInput,
+  SendingIp,
+  SendingIpInput,
   FlagUpdate,
   PostIncidentInput,
   RegistryPolicy,
@@ -35,6 +39,8 @@ export const platformKeys = {
   flags: () => [...platformKeys.all, 'flags'] as const,
   system: () => [...platformKeys.all, 'system'] as const,
   deliverability: () => [...platformKeys.all, 'deliverability'] as const,
+  sendingIps: () => [...platformKeys.all, 'sending-ips'] as const,
+  dedicatedIps: (page: number) => [...platformKeys.all, 'dedicated-ips', page] as const,
   certificates: () => [...platformKeys.all, 'certificates'] as const,
   certificateList: (params: CertificateParams) => [...platformKeys.certificates(), 'list', params] as const,
   certificateSummary: () => [...platformKeys.certificates(), 'summary'] as const,
@@ -74,7 +80,16 @@ export const useCertificates = (params: CertificateParams) =>
   });
 export const useRegistryPolicies = () =>
   useQuery({ queryKey: platformKeys.policies(), queryFn: get<RegistryPolicy[]>('/platform/certificate-policies') });
-export const useStandards = () => useQuery({ queryKey: platformKeys.standards(), queryFn: get<Standards>('/platform/standards') });
+/** A resource whose list part is one page: `meta` pages it. */
+type Paged<T> = Resource<T> & { meta: PaginationMeta };
+export const FAILED_PER_PAGE = 25;
+/** Standards; `failedImports` is one page (25) of the open failed imports, newest first — `meta` pages it. */
+export const useStandards = (page = 1) =>
+  useQuery<Paged<Standards>>({
+    queryKey: [...platformKeys.standards(), page],
+    queryFn: ({ signal }) => api.get<Paged<Standards>>('/platform/standards', { query: { page, perPage: FAILED_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
+  });
 /** One page of platform API keys (25 a page) — the list pages instead of silently stopping at 100. */
 export const useApiKeys = (page = 1) =>
   useQuery<Paginated<ApiKey>>({
@@ -82,7 +97,13 @@ export const useApiKeys = (page = 1) =>
     queryFn: ({ signal }) => api.get<Paginated<ApiKey>>('/platform/api-keys', { query: { page, perPage: 25 }, signal }),
     placeholderData: keepPreviousData,
   });
-export const useWebhooks = () => useQuery({ queryKey: platformKeys.webhooks(), queryFn: get<Webhooks>('/platform/webhooks') });
+/** Endpoints, and one page (25) of the failed deliveries of the last 24 hours, newest first — `meta` pages them. */
+export const useWebhooks = (page = 1) =>
+  useQuery<Paged<Webhooks>>({
+    queryKey: [...platformKeys.webhooks(), page],
+    queryFn: ({ signal }) => api.get<Paged<Webhooks>>('/platform/webhooks', { query: { page, perPage: FAILED_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
+  });
 
 // ---------- Mutations ----------
 /**
@@ -170,6 +191,57 @@ export function useRecheckDns() {
       void qc.invalidateQueries({ queryKey: platformKeys.deliverability() });
       invalidateAudit(qc);
     },
+  });
+}
+
+// ---------- Sender reputation ----------
+export const useSendingIps = () => useQuery({ queryKey: platformKeys.sendingIps(), queryFn: get<SendingIp[]>('/platform/sending-ips') });
+export const useDedicatedIpRequests = (page = 1) =>
+  useQuery<Paginated<DedicatedIpRequest>>({
+    queryKey: platformKeys.dedicatedIps(page),
+    queryFn: ({ signal }) => api.get<Paginated<DedicatedIpRequest>>('/platform/dedicated-ips', { signal, query: { page, perPage: 20 } }),
+    placeholderData: keepPreviousData,
+  });
+
+const onReputation = (qc: QueryClient) => {
+  void qc.invalidateQueries({ queryKey: platformKeys.sendingIps() });
+  void qc.invalidateQueries({ queryKey: [...platformKeys.all, 'dedicated-ips'] });
+  void qc.invalidateQueries({ queryKey: platformKeys.deliverability() });
+  invalidateAudit(qc);
+};
+
+export function useAddSendingIp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: SendingIpInput) => api.post<Resource<SendingIp>>('/platform/sending-ips', v).then((r) => r.data),
+    onSuccess: () => onReputation(qc),
+    meta: { errorToast: false },
+  });
+}
+
+export function useRemoveSendingIp() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api.delete(`/platform/sending-ips/${id}`), onSuccess: () => onReputation(qc) });
+}
+
+/** Provision (sealed token, recent password), decline or release a school's dedicated IP. */
+export function useDedicatedIpAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      v:
+        | { id: string; action: 'provision'; input: ProvisionInput }
+        | { id: string; action: 'reject'; reason: string }
+        | { id: string; action: 'release' },
+    ) =>
+      api
+        .post<Resource<DedicatedIpRequest>>(
+          `/platform/dedicated-ips/${v.id}/${v.action}`,
+          v.action === 'provision' ? v.input : v.action === 'reject' ? { reason: v.reason } : undefined,
+        )
+        .then((r) => r.data),
+    onSuccess: () => onReputation(qc),
+    meta: { errorToast: false },
   });
 }
 

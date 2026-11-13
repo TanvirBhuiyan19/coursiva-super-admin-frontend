@@ -1,7 +1,8 @@
-import { Card, CountUp, Empty, ErrorState, QueryState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
+import { Card, CountUp, Empty, ErrorState, Pagination, QueryState, Screen, Skeleton, SkeletonRows } from '@/components/ui';
 import { SectionedPage, SectionPanel } from '@/components/ui/Sectioned';
 import { formatDate, formatDateTime, timeAgo } from '@/lib/format';
 import { useSection } from '@/lib/useSection';
+import { useUrlState } from '@/lib/useUrlState';
 import { useBackupActivity, useBackupSettings, useBackupSummary, useRestores } from '../api';
 import { BackupPolicy } from '../components/BackupPolicy';
 import { RestoreBanner } from '../components/RestoreBanner';
@@ -47,7 +48,7 @@ function Kpis({ s }: { s: BackupSummary | undefined }) {
       ]
     : null;
   return (
-    <div className="grid-kpi" style={{ gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))' }}>
+    <div className="grid-kpi" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))' }}>
       {items
         ? items.map(([label, value, sub, good]) => (
             <div key={label} className="card card--tight">
@@ -70,26 +71,31 @@ function Kpis({ s }: { s: BackupSummary | undefined }) {
   );
 }
 
+/** The backup log, newest first, one page at a time (`?activityPage=`). */
 function Activity() {
   const t = useT();
-  const q = useBackupActivity();
+  const [state, setState] = useUrlState({ activityPage: '1' });
+  const q = useBackupActivity(Math.max(1, Number(state.activityPage) || 1));
   return (
     <Card title={t('activity.title')}>
       <QueryState query={q} compact skeleton={<SkeletonRows rows={4} />}>
-        {(rows) =>
-          rows.length === 0 ? (
+        {(page) =>
+          page.data.length === 0 ? (
             <Empty>{t('activity.empty')}</Empty>
           ) : (
-            <ol className="plain-list">
-              {rows.map((a) => (
-                <li key={a.id} className="row" style={{ display: 'block', padding: '9px 0', fontSize: 12.5 }}>
-                  <time className="faint" style={{ fontSize: 11 }} dateTime={a.createdAt} title={formatDateTime(a.createdAt)}>
-                    {timeAgo(a.createdAt)}
-                  </time>
-                  <div style={{ marginTop: 2 }}>{a.text}</div>
-                </li>
-              ))}
-            </ol>
+            <>
+              <ol className="plain-list" aria-busy={q.isPlaceholderData} style={{ opacity: q.isPlaceholderData ? 0.6 : 1 }}>
+                {page.data.map((a) => (
+                  <li key={a.id} className="row" style={{ display: 'block', padding: '9px 0', fontSize: 12.5 }}>
+                    <time className="faint" style={{ fontSize: 11 }} dateTime={a.createdAt} title={formatDateTime(a.createdAt)}>
+                      {timeAgo(a.createdAt)}
+                    </time>
+                    <div style={{ marginTop: 2 }}>{a.text}</div>
+                  </li>
+                ))}
+              </ol>
+              <Pagination meta={page.meta} onPage={(p) => setState({ activityPage: String(p) })} noun={t('activity.noun')} />
+            </>
           )
         }
       </QueryState>
@@ -101,9 +107,9 @@ export default function BackupPage() {
   const t = useT();
   const summary = useBackupSummary();
   const settings = useBackupSettings();
+  // The newest restores: one staged, approved or running is always among them (only one may be at a time).
   const restores = useRestores();
-  const list = restores.data ?? [];
-  const active = list.find((r) => ['staged', 'approved', 'running'].includes(r.status));
+  const active = restores.data?.data.find((r) => ['staged', 'approved', 'running'].includes(r.status));
   const [section, setSection, sectionHref] = useSection(SECTIONS, 'points');
 
   return (
@@ -121,7 +127,7 @@ export default function BackupPage() {
         href={sectionHref}
       >
         <SectionPanel active={section === 'points'}>
-          <RestorePoints walDays={summary.data?.walWindowDays ?? 7} restores={list} />
+          <RestorePoints walDays={summary.data?.walWindowDays ?? 7} active={active} />
         </SectionPanel>
         <SectionPanel active={section === 'policy'}>
           {settings.error ? (

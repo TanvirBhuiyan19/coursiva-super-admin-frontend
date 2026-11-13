@@ -15,6 +15,8 @@ export interface TenantListParams {
   plan?: Plan;
   status?: TenantStatus;
   sort?: TenantSort;
+  /** Comma-separated ids (at most 100 read): only those tenants. */
+  ids?: string;
 }
 
 /** Known `suspension_reason` values; staff suspensions may carry any other string. */
@@ -114,7 +116,8 @@ export interface TenantDetail extends Tenant {
   extensions: { key: string; name: string; price: number; state: 'comped' | 'paying' | 'none' }[];
   flags: { key: string; name: string; enabled: boolean; overridden: boolean }[];
   invoices: { id: string; issuedAt: string; amount: number; status: 'Paid' | 'Past due' | 'Waived' | 'Void' | 'Open' }[];
-  timeline: { at: string; text: string }[];
+  /** The newest 20 entries; older ones via `GET /tenants/{id}/activity`. */
+  timeline: TenantActivity[];
   /** Trial and card state of the subscription; null when the tenant has no subscription yet. */
   trial: TenantTrial | null;
   /**
@@ -165,4 +168,10 @@ export interface Impersonation {
   /** URL of the tenant dashboard with a short-lived, read-only impersonation token. */
   url: string;
   expiresAt: string;
+}
+
+/** One entry of a tenant's activity (`GET /tenants/{id}/activity`, and the detail's `timeline`). */
+export interface TenantActivity {
+  at: string;
+  text: string;
 }

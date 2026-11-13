@@ -35,6 +35,8 @@ export const SCREENS = [
   S('revenue', 'billing.view'),
   S('plans', 'billing.view'),
   S('ext', 'billing.view', '/extensions'),
+  // Coursiva's own partner programme (docs/api/partners.md): partners, referrals, commissions, payouts, tax forms, terms.
+  S('partners', 'partners.view'),
   S('growth', 'analytics.view', '/analytics/growth'),
   S('usage', 'analytics.view', '/analytics/usage'),
   S('liveusage', 'analytics.view', '/analytics/live'),
@@ -147,6 +149,7 @@ export const NAV: NavGroup[] = [
     item('analytics', 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6', {
       subs: [sub('growth'), sub('usage'), sub('liveusage'), sub('health'), sub('ai'), sub('exp')],
     }),
+    item('partners', 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M22 11h-6', { screen: 'partners' }),
   ]),
   group('trust', [
     item('governance', 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4', {

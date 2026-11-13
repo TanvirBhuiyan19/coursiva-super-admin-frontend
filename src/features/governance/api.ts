@@ -15,6 +15,7 @@ import type {
   ModerationReport,
   ModerationSummary,
   PolicyAcceptance,
+  PolicyAcceptanceMeta,
   PolicyDocument,
   PolicyDraftInput,
   PolicyOverview,
@@ -25,6 +26,7 @@ import type {
   RetentionPeriod,
   RetentionSetting,
   SubProcessor,
+  TenantResidency,
   TenantStrikes,
 } from './types';
 
@@ -38,14 +40,37 @@ export const governanceKeys = {
   moderation: [...root, 'moderation'] as const,
   reports: (params: ReportListParams) => [...root, 'moderation', 'reports', params] as const,
   strikes: [...root, 'moderation', 'strikes'] as const,
+  strikesPage: (page: number) => [...governanceKeys.strikes, page] as const,
   policies: [...root, 'policies'] as const,
   acceptance: (documentId: string) => [...root, 'policies', 'acceptance', documentId] as const,
+  acceptancePage: (documentId: string, params: AcceptanceParams) => [...governanceKeys.acceptance(documentId), params] as const,
   regions: [...root, 'regions'] as const,
+  regionTenants: (params: RegionTenantParams) => [...governanceKeys.regions, 'tenants', params] as const,
   abuse: [...root, 'abuse'] as const,
   signals: [...root, 'abuse', 'signals'] as const,
+  signalsPage: (page: number) => [...governanceKeys.signals, page] as const,
   rateLimits: [...root, 'abuse', 'rate-limits'] as const,
   blockedIps: [...root, 'abuse', 'blocked-ips'] as const,
+  blockedIpsPage: (params: BlockedIpParams) => [...governanceKeys.blockedIps, params] as const,
 };
+
+/** Page size of the governance work lists (acceptance, residency, signals, blocked IPs, strikes). */
+export const GOVERNANCE_PER_PAGE = 25;
+
+export interface AcceptanceParams {
+  page: number;
+  search?: string;
+}
+export interface RegionTenantParams {
+  page: number;
+  search?: string;
+  region?: Region;
+}
+export interface BlockedIpParams {
+  page: number;
+  search?: string;
+}
+export type AcceptancePage = Paginated<PolicyAcceptance> & { meta: PaginationMeta & PolicyAcceptanceMeta };
 
 const audit = (qc: QueryClient) => void qc.invalidateQueries({ queryKey: ['audit'] });
 const get = <T>(path: string, signal: AbortSignal, query?: Record<string, string | number | undefined>) =>
@@ -123,8 +148,14 @@ export const useReports = (params: ReportListParams) =>
     placeholderData: keepPreviousData,
   });
 
-export const useStrikes = () =>
-  useQuery({ queryKey: governanceKeys.strikes, queryFn: ({ signal }) => get<TenantStrikes[]>('/governance/moderation/strikes', signal) });
+/** One page of schools with strikes, most first. */
+export const useStrikes = (page = 1) =>
+  useQuery<Paginated<TenantStrikes>>({
+    queryKey: governanceKeys.strikesPage(page),
+    queryFn: ({ signal }) =>
+      api.get<Paginated<TenantStrikes>>('/governance/moderation/strikes', { query: { page, perPage: GOVERNANCE_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
+  });
 
 export function useDecideReport() {
   const qc = useQueryClient();
@@ -142,11 +173,17 @@ export function useDecideReport() {
 export const usePolicies = () =>
   useQuery({ queryKey: governanceKeys.policies, queryFn: ({ signal }) => get<PolicyOverview>('/governance/policies', signal) });
 
-export const usePolicyAcceptance = (documentId: string | undefined) =>
-  useQuery({
-    queryKey: governanceKeys.acceptance(documentId ?? ''),
-    queryFn: ({ signal }) => get<PolicyAcceptance[]>(`/governance/policies/${documentId ?? ''}/acceptance`, signal),
+/** One page of the live document's acceptance (pending first); `meta.accepted`/`meta.pending` count every school. */
+export const usePolicyAcceptance = (documentId: string | undefined, params: AcceptanceParams) =>
+  useQuery<AcceptancePage>({
+    queryKey: governanceKeys.acceptancePage(documentId ?? '', params),
+    queryFn: ({ signal }) =>
+      api.get<AcceptancePage>(`/governance/policies/${documentId ?? ''}/acceptance`, {
+        query: { page: params.page, perPage: GOVERNANCE_PER_PAGE, search: params.search || undefined },
+        signal,
+      }),
     enabled: !!documentId,
+    placeholderData: keepPreviousData,
   });
 
 export function useDraftPolicy() {
@@ -180,8 +217,8 @@ export function useRemindTenant(documentId: string) {
     mutationFn: (tenantId: string) =>
       api.post<Resource<PolicyAcceptance>>(`/governance/policies/${documentId}/reminders`, { tenantId }).then((r) => r.data),
     onSuccess: (row) => {
-      qc.setQueryData<PolicyAcceptance[]>(governanceKeys.acceptance(documentId), (rows) =>
-        rows?.map((r) => (r.tenantId === row.tenantId ? row : r)),
+      qc.setQueriesData<AcceptancePage>({ queryKey: governanceKeys.acceptance(documentId) }, (old) =>
+        old ? { ...old, data: old.data.map((r) => (r.tenantId === row.tenantId ? row : r)) } : old,
       );
       audit(qc);
     },
@@ -191,6 +228,18 @@ export function useRemindTenant(documentId: string) {
 // ---------- Data residency ----------
 export const useRegions = () =>
   useQuery({ queryKey: governanceKeys.regions, queryFn: ({ signal }) => get<RegionSummary>('/governance/regions', signal) });
+
+/** One page of the schools' data regions, by name (search by name, filter by region). */
+export const useRegionTenants = (params: RegionTenantParams) =>
+  useQuery<Paginated<TenantResidency>>({
+    queryKey: governanceKeys.regionTenants(params),
+    queryFn: ({ signal }) =>
+      api.get<Paginated<TenantResidency>>('/governance/regions/tenants', {
+        query: { page: params.page, perPage: GOVERNANCE_PER_PAGE, search: params.search || undefined, region: params.region },
+        signal,
+      }),
+    placeholderData: keepPreviousData,
+  });
 
 /**
  * Moves a tenant's data region. The region is the tenant's own field, so this reuses
@@ -216,8 +265,14 @@ export function useMoveTenantRegion(tenantId: string) {
 }
 
 // ---------- Abuse & limits ----------
-export const useAbuseSignals = () =>
-  useQuery({ queryKey: governanceKeys.signals, queryFn: ({ signal }) => get<AbuseSignal[]>('/governance/abuse-signals', signal) });
+/** One page of the open abuse signals, by severity then newest. */
+export const useAbuseSignals = (page = 1) =>
+  useQuery<Paginated<AbuseSignal>>({
+    queryKey: governanceKeys.signalsPage(page),
+    queryFn: ({ signal }) =>
+      api.get<Paginated<AbuseSignal>>('/governance/abuse-signals', { query: { page, perPage: GOVERNANCE_PER_PAGE }, signal }),
+    placeholderData: keepPreviousData,
+  });
 
 export function useResolveSignal() {
   const qc = useQueryClient();
@@ -227,7 +282,9 @@ export function useResolveSignal() {
         ? api.post<Resource<AbuseActionResult>>(`/governance/abuse-signals/${id}/action`).then((r) => r.data)
         : api.post(`/governance/abuse-signals/${id}/dismiss`).then(() => null),
     onSuccess: (res, { id }) => {
-      qc.setQueryData<AbuseSignal[]>(governanceKeys.signals, (rows) => rows?.filter((s) => s.id !== id));
+      qc.setQueriesData<Paginated<AbuseSignal>>({ queryKey: governanceKeys.signals }, (old) =>
+        old ? { ...old, data: old.data.filter((s) => s.id !== id) } : old,
+      );
       void qc.invalidateQueries({ queryKey: governanceKeys.signals });
       // "Raise limit" changes the tenant's API limit override.
       if (res) invalidateTenantData(qc);
@@ -252,8 +309,17 @@ export function useSetRateLimits() {
   });
 }
 
-export const useBlockedIps = () =>
-  useQuery({ queryKey: governanceKeys.blockedIps, queryFn: ({ signal }) => get<BlockedIp[]>('/governance/blocked-ips', signal) });
+/** One page of blocked addresses, newest first (search matches the address or range). */
+export const useBlockedIps = (params: BlockedIpParams) =>
+  useQuery<Paginated<BlockedIp>>({
+    queryKey: governanceKeys.blockedIpsPage(params),
+    queryFn: ({ signal }) =>
+      api.get<Paginated<BlockedIp>>('/governance/blocked-ips', {
+        query: { page: params.page, perPage: GOVERNANCE_PER_PAGE, search: params.search || undefined },
+        signal,
+      }),
+    placeholderData: keepPreviousData,
+  });
 
 export function useBlockIp() {
   const qc = useQueryClient();
@@ -273,7 +339,9 @@ export function useUnblockIp() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/governance/blocked-ips/${id}`),
     onSuccess: (_r, id) => {
-      qc.setQueryData<BlockedIp[]>(governanceKeys.blockedIps, (rows) => rows?.filter((b) => b.id !== id));
+      qc.setQueriesData<Paginated<BlockedIp>>({ queryKey: governanceKeys.blockedIps }, (old) =>
+        old ? { ...old, data: old.data.filter((b) => b.id !== id) } : old,
+      );
       void qc.invalidateQueries({ queryKey: governanceKeys.blockedIps });
       audit(qc);
     },

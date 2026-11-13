@@ -176,6 +176,7 @@ function tenantContext(t: TicketRow): TenantContext {
     healthReason: reason,
     signals,
     pastTickets: past.slice(0, 5),
+    pastTicketCount: past.length,
   };
 }
 
@@ -252,7 +253,9 @@ export const handlers = [
       authorize('support.view');
       const q = query(request);
       const view = (q.get('view') ?? 'open') as TicketView;
-      let rows = tickets.all().filter(VIEWS[view] ?? VIEWS.open);
+      if (!(TICKET_VIEWS as readonly string[]).includes(view)) throw invalid({ view: 'The selected view is invalid.' });
+      const tenant = q.get('tenant');
+      let rows = tickets.all().filter((t) => VIEWS[view](t) && (!tenant || t.tenantId === tenant));
       if (q.search) {
         rows = rows.filter((t) =>
           [t.subject, t.requesterName, tenants.find(t.tenantId)?.name ?? '', `#${t.number}`, String(t.number)].some((s) =>

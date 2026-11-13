@@ -49,6 +49,9 @@ export const { t, useT } = defineMessages('analytics', {
       sub: 'Same score as the tenant drawer',
       empty: 'No tenants yet.',
       score: 'Score ',
+      viewAll: 'View all {count} tenants',
+      showTop: 'Show top 10',
+      noun: 'tenants',
     },
     onboarding: {
       title: 'Onboarding funnel · last 90 days',
@@ -239,6 +242,9 @@ export const { t, useT } = defineMessages('analytics', {
       throttledSub: 'Routed to the cheap model',
     },
     usageByTenant: 'Usage by tenant · this month',
+    viewAllTenants: 'View all {count} tenants',
+    showTop: 'Show top 10',
+    tenantsNoun: 'tenants',
   },
   experiments: {
     title: 'Experiments',

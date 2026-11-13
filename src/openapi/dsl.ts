@@ -24,13 +24,18 @@ export interface ParamDef {
 }
 
 export type ResponseDef =
-  | { kind: 'resource'; schema: Schema; status?: 200 | 201 | 202 }
+  | { kind: 'resource'; schema: Schema; status?: 200 | 201 | 202; paged?: boolean }
   | { kind: 'paginated'; schema: Schema; meta?: InlineSchema }
+  /** `{ data: T[], meta: { has_more, next_cursor } }`: a newest-first keyset window (pass `next_cursor` as `?before=`). */
+  | { kind: 'cursorPage'; schema: Schema }
   | { kind: 'noContent' }
   | { kind: 'file'; mime: string; filename: string };
 
 export const resource = (schema: Schema, status: 200 | 201 | 202 = 200): ResponseDef => ({ kind: 'resource', schema, status });
+/** A resource whose list part (e.g. a work queue's `items`) is one page: `{ data, meta }` with the standard pagination meta. */
+export const pagedResource = (schema: Schema): ResponseDef => ({ kind: 'resource', schema, status: 200, paged: true });
 export const paginated = (schema: Schema, meta?: InlineSchema): ResponseDef => ({ kind: 'paginated', schema, ...(meta ? { meta } : {}) });
+export const cursorPage = (schema: Schema): ResponseDef => ({ kind: 'cursorPage', schema });
 export const noContent = (): ResponseDef => ({ kind: 'noContent' });
 export const file = (mime: string, filename: string): ResponseDef => ({ kind: 'file', mime, filename });
 

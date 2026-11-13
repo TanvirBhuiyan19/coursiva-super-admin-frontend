@@ -180,7 +180,7 @@ async function request<T>(method: Method, path: string, opts: RequestOptions = {
 }
 
 /** Downloads a file endpoint (e.g. CSV export) and saves it via the browser. */
-async function download(path: string, query?: Query, fallbackName = 'export') {
+async function download(path: string, query?: Query, fallbackName = 'export', confirmed = false): Promise<string> {
   const sentAt = epoch;
   let res: Response;
   try {
@@ -199,6 +199,8 @@ async function download(path: string, query?: Query, fallbackName = 'export') {
     );
     // An expired session ends the client session here too, exactly like any other request.
     if (error.isUnauthenticated && sentAt === epoch) unauthenticatedListeners.forEach((fn) => fn());
+    // A re-authenticated export (the partner 1099 worksheet): confirm the password once, then try again.
+    if (error.isPasswordConfirmationRequired && !confirmed && (await confirmPassword())) return download(path, query, fallbackName, true);
     throw error;
   }
   const name = /filename="?([^";]+)"?/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName;

@@ -5,17 +5,19 @@ import { PLANS, type Plan } from '@/lib/domain';
 import { flags, overages, tenants, type TenantRow } from '@/mocks/collections';
 import { collection, ago, singleton } from '@/mocks/db';
 import { tenantHealth, tenantHealthScore, tenantMrr } from '@/mocks/derive';
-import { authorize, handle, invalid, notFound, ok, readBody, recordAudit, route } from '@/mocks/http';
+import { authorize, handle, invalid, notFound, ok, paginate, query, readBody, recordAudit, route } from '@/mocks/http';
 import {
   AI_FEATURES,
   ROUTING_POLICIES,
   type AiFeature,
   type AiSettingsInput,
+  type AiTenantUsage,
   type AiUsage,
   type Experiment,
   type Experiments,
   type Growth,
   type Health,
+  type HealthScore,
   type JobQueue,
   type OnboardingStage,
   type RoutingPolicy,
@@ -69,6 +71,43 @@ function healthScore(t: TenantRow) {
   return { score, driver: reasons.length ? reasons.join(' · ') : 'All signals healthy' };
 }
 
+/** How many rows the growth and AI screens carry inline; the full lists page through their own endpoints. */
+const TOP = 10;
+
+/**
+ * Orders rows by a list endpoint's `sort` (comma-separated, `-` = descending) like the backends' ListQuery: only
+ * whitelisted fields (422 `sort` otherwise), then `tiebreak` in the last field's direction.
+ */
+function ranked<T>(rows: T[], sort: string, fields: Record<string, (r: T) => number | string>, tiebreak: (r: T) => string) {
+  const keys = sort
+    .split(',')
+    .map((f) => f.trim())
+    .filter(Boolean)
+    .map((f) => ({ desc: f.startsWith('-'), get: fields[f.replace(/^-/, '')] }));
+  if (keys.length > 3 || keys.some((k) => !k.get)) throw invalid({ sort: `You can sort by: ${Object.keys(fields).join(', ')}.` });
+  const lastDesc = keys.at(-1)?.desc ?? false;
+  const cmp = (x: number | string, y: number | string) =>
+    typeof x === 'number' && typeof y === 'number' ? x - y : String(x) < String(y) ? -1 : String(x) > String(y) ? 1 : 0;
+  return [...rows].sort((a, b) => {
+    for (const k of keys) {
+      const c = cmp(k.get!(a), k.get!(b));
+      if (c) return k.desc ? -c : c;
+    }
+    const c = cmp(tiebreak(a), tiebreak(b));
+    return lastDesc ? -c : c;
+  });
+}
+
+const HEALTH_SORTS = { score: (h: HealthScore) => h.score, name: (h: HealthScore) => h.name };
+/** Every tenant's health score, ranked by `sort` (default best first). */
+const healthRanking = (sort = '-score,name') =>
+  ranked(
+    tenants.all().map((t) => ({ tenantId: t.id, name: t.name, ...healthScore(t) })),
+    sort,
+    HEALTH_SORTS,
+    (h) => h.tenantId,
+  );
+
 function growth(): Growth {
   const all = tenants.all();
   const paying = all.filter((t) => tenantMrr(t) > 0);
@@ -111,9 +150,7 @@ function growth(): Growth {
     kpis: { revenuePerTenant: paying.length ? Math.round(mrr / paying.length) : 0, payingTenants: paying.length, ...GROWTH_KPIS },
     funnel,
     cohorts: COHORT_CURVES.map((retention, i) => ({ month: monthStart(i - COHORT_CURVES.length), retention })),
-    healthScores: all
-      .map((t) => ({ tenantId: t.id, name: t.name, ...healthScore(t) }))
-      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)),
+    healthScores: healthRanking().slice(0, TOP),
     onboarding,
     stuck,
     totalTenants: all.length,
@@ -294,7 +331,13 @@ const featureSplit = (top: AiFeature) => {
   return [{ feature: top, share: 0.55 }, ...rest.map((feature, i) => ({ feature, share: [0.2, 0.15, 0.1][i] ?? 0 }))];
 };
 
-function aiUsage(): AiUsage {
+const AI_SORTS = { tokens_k: (r: AiTenantUsage) => r.tokensK, name: (r: AiTenantUsage) => r.name };
+
+/** Every tenant with AI usage this month, ranked by `sort` (default heaviest first). */
+const aiTenantRanking = (sort = '-tokens_k') => ranked(aiUsage(true).tenants, sort, AI_SORTS, (r) => r.tenantId);
+
+/** `all`: every tenant row (for the paginated list); otherwise only the TOP heaviest, as the backends return. */
+function aiUsage(all = false): AiUsage {
   const s = aiSettings.get();
   const rows = aiUsageRows
     .all()
@@ -342,7 +385,7 @@ function aiUsage(): AiUsage {
       modelCost: round2(list.reduce((sum, r) => sum + r.modelCost, 0)),
       capUsedPct: s.monthlyCap ? Math.round((spend / s.monthlyCap) * 100) : 0,
     },
-    tenants: list,
+    tenants: all ? list : ranked(list, '-tokens_k', AI_SORTS, (r) => r.tenantId).slice(0, TOP),
     byFeature,
   };
 }
@@ -491,6 +534,14 @@ export const handlers = [
   ),
 
   http.get(
+    route('/analytics/growth/health-scores'),
+    handle(({ request }) => {
+      authorize('analytics.view');
+      return paginate(healthRanking(query(request).sort), request);
+    }),
+  ),
+
+  http.get(
     route('/analytics/usage'),
     handle(() => {
       authorize('analytics.view');
@@ -526,6 +577,14 @@ export const handlers = [
     handle(() => {
       authorize('analytics.view');
       return ok(aiUsage());
+    }),
+  ),
+
+  http.get(
+    route('/analytics/ai/tenants'),
+    handle(({ request }) => {
+      authorize('analytics.view');
+      return paginate(aiTenantRanking(query(request).sort), request);
     }),
   ),
 

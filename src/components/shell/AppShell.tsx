@@ -97,7 +97,7 @@ export default function AppShell() {
           <RouteErrorBoundary resetKey={pathname}>
             <Suspense
               fallback={
-                <div className="screen" style={{ maxWidth: 1200 }}>
+                <div className="screen">
                   <SkeletonRows rows={8} h={22} />
                 </div>
               }

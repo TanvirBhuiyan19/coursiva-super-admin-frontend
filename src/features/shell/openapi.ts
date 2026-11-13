@@ -1,4 +1,4 @@
-import { arrayOf, defineSpec, noContent, ref, resource } from '@/openapi/dsl';
+import { arrayOf, cursorPage, defineSpec, noContent, ref, resource } from '@/openapi/dsl';
 
 export const spec = defineSpec({
   tag: 'Shell',
@@ -15,9 +15,15 @@ export const spec = defineSpec({
     {
       method: 'GET',
       path: '/notifications',
-      summary: 'Notifications, newest first',
+      summary: 'Notifications, newest first (30 a page)',
+      description:
+        'The bell reads the first page; `meta.next_cursor` (null when nothing is older) is passed back as `before` for the next older page. A malformed cursor → 422 `before` "The cursor is invalid."',
       auth: 'authenticated',
-      response: resource(arrayOf(ref('Notification'))),
+      query: {
+        before: { type: 'string', description: 'Cursor from the previous page’s `next_cursor`; blank = newest page. Max 120 characters.' },
+      },
+      response: cursorPage(ref('Notification')),
+      errors: [422],
     },
     {
       method: 'POST',

@@ -2,9 +2,9 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { api } from '@/lib/api/client';
 import { ApiError } from '@/lib/api/errors';
-import { audit, flags, platformStatus } from '@/mocks/collections';
+import { audit, flags, platformStatus, rolePermissions, tenants } from '@/mocks/collections';
 import { renderApp, signInAs } from '@/test/utils';
-import { aiSettings, experiments, jobQueues } from './mock';
+import { aiSettings, aiUsageRows, experiments, jobQueues } from './mock';
 
 describe('growth analytics', () => {
   it('shows tenant-derived revenue, funnel and onboarding figures', async () => {
@@ -19,6 +19,71 @@ describe('growth analytics', () => {
     const stuck = screen.getByRole('heading', { name: 'Stuck in onboarding' }).closest('section')!;
     expect(within(stuck).getByText('Ledger Finance Academy')).toBeInTheDocument();
     expect(within(stuck).getByText(/Stuck at “First sale”/)).toBeInTheDocument();
+  });
+});
+
+/** Adds `n` schools (cloned from the first seed) so the lists outgrow their top-10 cards. */
+function addSchools(n: number) {
+  const base = tenants.all()[0]!;
+  for (let i = 1; i <= n; i++)
+    tenants.insert({ ...base, id: `tn_extra${String(i).padStart(2, '0')}`, name: `Zz Extra School ${String(i).padStart(2, '0')}` });
+}
+
+describe('full lists behind the top-10 cards', () => {
+  it('pages through every health score from the growth screen, page in the URL', async () => {
+    addSchools(20);
+    const total = tenants.all().length;
+    signInAs('Owner');
+    const { user } = renderApp('/analytics/growth');
+    const card = (await screen.findByRole('heading', { name: 'Tenant health scores' })).closest('section')!;
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(10));
+    await user.click(within(card).getByRole('button', { name: `View all ${String(total)} tenants` }));
+    expect(await within(card).findByText(`1–25 of ${String(total)} tenants`)).toBeInTheDocument();
+    expect(within(card).getAllByRole('listitem')).toHaveLength(25);
+    await user.click(within(card).getByRole('button', { name: /Next/ }));
+    expect(await within(card).findByText(`26–${String(total)} of ${String(total)} tenants`)).toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: 'Show top 10' }));
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(10));
+  });
+
+  it('serves the health ranking paginated, best first, with whitelisted sorts only', async () => {
+    signInAs('Owner');
+    const page = await api.get<{ data: { score: number }[]; meta: { total: number; perPage: number } }>('/analytics/growth/health-scores', {
+      query: { perPage: 3 },
+    });
+    expect(page.data).toHaveLength(3);
+    expect(page.meta).toMatchObject({ total: tenants.all().length, perPage: 3 });
+    expect(page.data[0]!.score).toBeGreaterThanOrEqual(page.data[2]!.score);
+    await expect(api.get('/analytics/growth/health-scores', { query: { sort: 'mrr' } })).rejects.toSatisfy(
+      (e) => e instanceof ApiError && e.status === 422,
+    );
+  });
+
+  it('pages through every tenant with AI usage from the AI screen', async () => {
+    addSchools(12);
+    for (let i = 1; i <= 12; i++) aiUsageRows.insert({ id: `tn_extra${String(i).padStart(2, '0')}`, tokensK: i, topFeature: 'chat' });
+    const total = aiUsageRows.all().length;
+    signInAs('Owner');
+    const { user } = renderApp('/analytics/ai');
+    const t = await screen.findByRole('table', { name: 'AI usage by tenant' });
+    // The card carries the 10 heaviest (+ the header row); the lightest extra school is not among them.
+    expect(within(t).getAllByRole('row')).toHaveLength(11);
+    expect(within(t).queryByText('Zz Extra School 01')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: `View all ${String(total)} tenants` }));
+    expect(await screen.findByText(`1–${String(total)} of ${String(total)} tenants`)).toBeInTheDocument();
+    expect(screen.getByText('Zz Extra School 01')).toBeInTheDocument();
+    const byName = await api.get<{ data: { name: string }[]; meta: { total: number } }>('/analytics/ai/tenants', {
+      query: { perPage: 2, sort: 'name' },
+    });
+    expect(byName.meta.total).toBe(total);
+    expect(byName.data.map((r) => r.name)).toEqual([...byName.data.map((r) => r.name)].sort());
+  });
+
+  it('refuses the full lists without analytics.view', async () => {
+    rolePermissions.patch({ Support: rolePermissions.get().Support.filter((p) => p !== 'analytics.view') });
+    signInAs('Support');
+    for (const path of ['/analytics/growth/health-scores', '/analytics/ai/tenants'])
+      await expect(api.get(path)).rejects.toSatisfy((e) => e instanceof ApiError && e.status === 403);
   });
 });
 

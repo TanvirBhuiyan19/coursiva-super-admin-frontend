@@ -22,16 +22,17 @@ interface KpiProps extends KpiItem {
   changeScope?: string | null;
 }
 
-export function Kpi({ label, value, sub, delta, deltaColor, deltaSuffix, small, changeScope }: KpiProps) {
+/** A stat tile. Every tile shares one style on every screen; `small` is accepted for older callers and has no effect. */
+export function Kpi({ label, value, sub, delta, deltaColor, deltaSuffix, changeScope }: KpiProps) {
   const tc = useCommonT();
   const flash = useChangeFlash(
     changeScope !== undefined && (typeof value === 'string' || typeof value === 'number') ? value : null,
     changeScope ?? null,
   );
   return (
-    <div className={cx('card', small && 'card--tight', flash && 'fx-flash', flash)}>
+    <div className={cx('card', 'kpi', flash && 'fx-flash', flash)}>
       <div className="kpi-label">{label}</div>
-      <div className={cx('kpi-value', small && 'kpi-value--sm')}>
+      <div className="kpi-value">
         <CountUp value={value} />
       </div>
       {delta != null && (

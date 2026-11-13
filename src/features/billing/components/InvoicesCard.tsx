@@ -21,15 +21,22 @@ interface Props {
   focusId: string;
   page: number | null;
   onPage: (p: number) => void;
+  /** Tenant id from the tenant drawer's "View all invoices" (`/revenue?tenant=…`): only that school's invoices. */
+  tenantId?: string;
+  onClearTenant?: () => void;
   style?: React.CSSProperties;
 }
 
-export function InvoicesCard({ focusId, page, onPage, style }: Props) {
+export function InvoicesCard({ focusId, page, onPage, tenantId, onClearTenant, style }: Props) {
   const t = useT();
   const tc = useCommonT();
   const can = useCan();
   const canManage = can('billing.manage');
-  const params: InvoiceListParams = { perPage: PER_PAGE, ...(page ? { page } : focusId ? { focus: focusId } : {}) };
+  const params: InvoiceListParams = {
+    perPage: PER_PAGE,
+    ...(tenantId ? { tenant: tenantId } : {}),
+    ...(page ? { page } : focusId ? { focus: focusId } : {}),
+  };
   const list = useInvoices(params);
   const settle = useSettleInvoice();
   const focusRef = useRef<HTMLDivElement>(null);
@@ -56,7 +63,25 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
     );
 
   return (
-    <Card title={t('invoices.title')} className="table-scroll" style={style}>
+    <Card
+      title={t('invoices.title')}
+      className="table-scroll"
+      style={style}
+      right={
+        tenantId ? (
+          <span className="hstack wrap" style={{ gap: 8, marginLeft: 'auto' }}>
+            <span className="t-sm muted">
+              {rows[0] ? t('invoices.filteredTo', { tenant: rows[0].tenantName }) : t('invoices.filteredToSchool')}
+            </span>
+            {onClearTenant && (
+              <button type="button" className="btn btn--sm" onClick={onClearTenant}>
+                {t('invoices.showAll')}
+              </button>
+            )}
+          </span>
+        ) : undefined
+      }
+    >
       {list.error ? (
         <ErrorState compact error={list.error} onRetry={() => void list.refetch()} />
       ) : (
@@ -120,7 +145,7 @@ export function InvoicesCard({ focusId, page, onPage, style }: Props) {
               </div>
             );
           })}
-          {list.isSuccess && rows.length === 0 && <Empty>{t('invoices.empty')}</Empty>}
+          {list.isSuccess && rows.length === 0 && <Empty>{tenantId ? t('invoices.emptyTenant') : t('invoices.empty')}</Empty>}
         </div>
       )}
       {list.data && list.data.meta.lastPage > 1 && <Pagination meta={list.data.meta} noun={t('invoices.noun')} onPage={onPage} />}

@@ -92,7 +92,7 @@ function Movement({ r }: { r: RevenueSummary }) {
 
 export default function RevenuePage() {
   const t = useT();
-  const [f, setF] = useUrlState({ invoice: '', page: '' });
+  const [f, setF] = useUrlState({ invoice: '', page: '', tenant: '', dunningPage: '1', overagesPage: '1' });
   const revenue = useRevenue();
   const r = revenue.data;
 
@@ -111,6 +111,8 @@ export default function RevenuePage() {
           focusId={f.invoice}
           page={f.page ? Number(f.page) || 1 : null}
           onPage={(p) => setF({ page: String(p) })}
+          tenantId={f.tenant}
+          onClearTenant={() => setF({ tenant: '' })}
           style={{ flex: '1.3 1 420px', minWidth: 0 }}
         />
       </div>
@@ -157,8 +159,9 @@ export default function RevenuePage() {
         </Card>
       </div>
 
-      <DunningCard />
-      <OveragesCard />
+      {/* Each queue keeps its own page in the URL; the invoices page is carried along so paging one never resets another. */}
+      <DunningCard page={Number(f.dunningPage) || 1} onPage={(p) => setF({ dunningPage: String(p), page: f.page })} />
+      <OveragesCard page={Number(f.overagesPage) || 1} onPage={(p) => setF({ overagesPage: String(p), page: f.page })} />
     </Screen>
   );
 }

@@ -170,13 +170,17 @@ export default function OverviewPage() {
 
   return (
     <Screen max={1200} gap={20} label={t('title')}>
-      <div className="hstack wrap" style={{ gap: 10 }}>
-        {o && can('platform.view') && (
-          <Link className="t-sm muted" to={pathOf('entitlements')} style={{ fontSize: 12 }}>
-            {o.entitlementOverrides ? t('entitlementOverrides', { count: o.entitlementOverrides }) : t('plansMatchDefaults')}
-          </Link>
-        )}
+      {/* One toolbar: freshness on the left; the range the figures cover and the quick actions on the right. */}
+      <div className="hstack wrap" style={{ gap: 10, marginBottom: -4 }}>
+        {o ? <LiveStatus state={liveState(overview)} updatedAt={overview.dataUpdatedAt} /> : <span />}
         <div className="hstack wrap" style={{ gap: 10, marginLeft: 'auto' }}>
+          <ChipGroup
+            label={t('range.label')}
+            options={OVERVIEW_RANGES.map((r) => [r, t(`range.${r}`)] as const)}
+            value={range}
+            onChange={(r) => setF({ range: r })}
+            size="sm"
+          />
           {can('announcements.send') && (
             <Link className="btn btn--sm" to={pathOf('announce')}>
               {t('actions.announcement')}
@@ -193,17 +197,6 @@ export default function OverviewPage() {
             </Link>
           )}
         </div>
-      </div>
-
-      <div className="hstack wrap" style={{ justifyContent: 'space-between', gap: 10, marginBottom: -8 }}>
-        {o ? <LiveStatus state={liveState(overview)} updatedAt={overview.dataUpdatedAt} /> : <span />}
-        <ChipGroup
-          label={t('range.label')}
-          options={OVERVIEW_RANGES.map((r) => [r, t(`range.${r}`)] as const)}
-          value={range}
-          onChange={(r) => setF({ range: r })}
-          size="sm"
-        />
       </div>
 
       <div className="grid-kpi">
@@ -267,7 +260,18 @@ export default function OverviewPage() {
         )}
       </div>
 
-      <Card title={t('plans.title')}>
+      <Card
+        title={t('plans.title')}
+        right={
+          // Whether any school has limits that differ from its plan's defaults: it belongs with the plan breakdown.
+          o &&
+          can('platform.view') && (
+            <Link className="card-sub" to={pathOf('entitlements')}>
+              {o.entitlementOverrides ? t('entitlementOverrides', { count: o.entitlementOverrides }) : t('plansMatchDefaults')}
+            </Link>
+          )
+        }
+      >
         <div className="stack" style={{ gap: 12, marginTop: 6 }}>
           {o ? (
             o.planDistribution.map((p) => (

@@ -32,6 +32,9 @@ export const { t, useT } = defineMessages('shell', {
     unreadLabel: 'Notifications, {count} unread',
     markAllRead: 'Mark all read',
     empty: 'You’re all caught up.',
+    loadOlder: 'Load older',
+    loadingOlder: 'Loading older…',
+    olderFailed: 'Couldn’t load older notifications: {error}',
   },
   toasts: {
     label: 'Notifications',

@@ -1,5 +1,5 @@
 import { PLANS } from '@/lib/domain';
-import { arrayOf, defineSpec, noContent, paginated, ref, resource, type EndpointDef, type ParamDef } from '@/openapi/dsl';
+import { arrayOf, defineSpec, noContent, paginated, pagedResource, ref, resource, type EndpointDef, type ParamDef } from '@/openapi/dsl';
 
 const invoiceId: Record<string, ParamDef> = { id: { type: 'string', description: 'Invoice id, e.g. `in_20260818`.' } };
 const pastDue = { params: { id: 'in_20260818' } };
@@ -40,6 +40,7 @@ export const spec = defineSpec({
         per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
         status: { type: 'string', enum: ['Paid', 'Past due', 'Waived'] },
         focus: { type: 'string', description: 'Invoice id; when `page` is omitted, returns the page containing it.' },
+        tenant: { type: 'string', description: 'Tenant id: only that school’s invoices (the tenant drawer’s “View all invoices”).' },
       },
       response: paginated(ref('Invoice')),
       example: { query: { focus: 'in_20260728', per_page: 2 } },
@@ -48,8 +49,15 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/billing/dunning',
       summary: 'Past-due invoices and the retry policy',
+      description:
+        'Oldest failure first. `items` is one page (`page`, `per_page`, max 100, default 25); `meta` is the standard pagination meta.',
       auth: 'billing.view',
-      response: resource(ref('DunningQueue')),
+      query: {
+        page: { type: 'integer', description: 'Page number (1-based).' },
+        per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
+      },
+      response: pagedResource(ref('DunningQueue')),
+      example: { query: { per_page: 5 } },
     },
     invoiceAction(
       'retry',
@@ -81,8 +89,15 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/billing/overages',
       summary: 'Usage overages for the current metering period',
+      description:
+        'Largest first. `items` is one page (`page`, `per_page`, max 100, default 25); `unbilled_total` covers the whole month; `meta` is the standard pagination meta.',
       auth: 'billing.view',
-      response: resource(ref('OverageList')),
+      query: {
+        page: { type: 'integer', description: 'Page number (1-based).' },
+        per_page: { type: 'integer', description: 'Items per page (max 100, default 25).' },
+      },
+      response: pagedResource(ref('OverageList')),
+      example: { query: { per_page: 5 } },
     },
     {
       method: 'POST',

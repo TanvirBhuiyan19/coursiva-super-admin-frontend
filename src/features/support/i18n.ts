@@ -47,6 +47,9 @@ export const { t, useT } = defineMessages('support', {
     empty: 'Nothing in this view.',
     escalated: 'Escalated',
     noun: 'tickets',
+    tenantFilter: 'One school: {tenant}',
+    tenantFilterSchool: 'One school only',
+    allSchools: 'Show all schools',
   },
   conversation: {
     internalNoteBy: 'Internal note by {name}',
@@ -93,6 +96,7 @@ export const { t, useT } = defineMessages('support', {
     tagsLabel: 'Ticket tags',
     pastTickets: 'Past tickets',
     noPastTickets: 'No other tickets from {name}.',
+    viewAllTickets: { one: 'View all {count} ticket from this school', other: 'View all {count} tickets from this school' },
     csatLabel: 'CSAT {score} out of 5',
     csatStars: '{score} ★',
   },

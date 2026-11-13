@@ -1,4 +1,4 @@
-import { Card, ConfirmButton, ErrorState, SkeletonRows } from '@/components/ui';
+import { Card, ConfirmButton, ErrorState, Pagination, SkeletonRows } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
 import { formatDate, formatDateTime, money } from '@/lib/format';
 import { useT as useCommonT } from '@/lib/i18n/common';
@@ -18,15 +18,15 @@ function policyText(q: DunningQueue | undefined) {
   return tBilling(q.autoSuspend ? 'dunning.thenSuspension' : 'dunning.thenReview', { retries });
 }
 
-export function DunningCard() {
+export function DunningCard({ page, onPage }: { page: number; onPage: (page: number) => void }) {
   const t = useT();
   const tc = useCommonT();
   const can = useCan();
   const canManage = can('billing.manage');
-  const queue = useDunning();
+  const queue = useDunning(page);
   const settle = useSettleInvoice();
   const pause = usePauseDunning();
-  const q = queue.data;
+  const q = queue.data?.data;
   const cols = canManage ? COLS : COLS_READONLY;
 
   const retry = (v: Invoice) =>
@@ -66,12 +66,12 @@ export function DunningCard() {
         <SkeletonRows rows={2} h={24} />
       ) : queue.error ? (
         <ErrorState compact error={queue.error} onRetry={() => void queue.refetch()} />
-      ) : !queue.data.items.length ? (
+      ) : !queue.data.data.items.length ? (
         <div className="muted" style={{ padding: '14px 0', fontSize: 13 }}>
           {t('dunning.empty')}
         </div>
       ) : (
-        <div role="table" aria-label={t('dunning.title')}>
+        <div role="table" aria-label={t('dunning.title')} aria-busy={queue.isPlaceholderData}>
           <div role="row" className="trow trow--head" style={{ gridTemplateColumns: cols, minWidth: MIN }}>
             <div role="columnheader">{t('columns.tenant')}</div>
             <div role="columnheader">{t('columns.invoice')}</div>
@@ -83,7 +83,7 @@ export function DunningCard() {
               </div>
             )}
           </div>
-          {queue.data.items.map((v) => {
+          {queue.data.data.items.map((v) => {
             const busy = settle.isPending && settle.variables.id === v.id;
             // Paddle / Lemon Squeezy retry their invoices on their own schedule (the API answers 422).
             const external = !!v.provider;
@@ -98,7 +98,7 @@ export function DunningCard() {
                 <div role="cell" className="muted">
                   {tc(`enums.plan.${v.plan}`)} · {money(v.amount)}
                 </div>
-                <div role="cell">{t('dunning.attempt', { attempt: v.attempts, max: queue.data.maxAttempts })}</div>
+                <div role="cell">{t('dunning.attempt', { attempt: v.attempts, max: queue.data.data.maxAttempts })}</div>
                 <div role="cell" style={{ fontWeight: 600, color: v.dunningPaused ? 'var(--aFg)' : 'var(--tx3)' }}>
                   {v.dunningPaused ? t('dunning.paused') : v.nextRetryAt ? formatDateTime(v.nextRetryAt) : '—'}
                 </div>
@@ -137,6 +137,7 @@ export function DunningCard() {
           })}
         </div>
       )}
+      {queue.data && queue.data.meta.lastPage > 1 && <Pagination meta={queue.data.meta} onPage={onPage} noun={t('dunning.noun')} />}
     </Card>
   );
 }

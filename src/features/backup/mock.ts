@@ -2,7 +2,20 @@
 import { http } from 'msw';
 import { tenants, type StaffRow } from '@/mocks/collections';
 import { ago, collection, id, saveDb, singleton } from '@/mocks/db';
-import { authorize, handle, HttpError, invalid, notFound, ok, paginate, permissionsOf, readBody, recordAudit, route } from '@/mocks/http';
+import {
+  authorize,
+  handle,
+  HttpError,
+  invalid,
+  notFound,
+  ok,
+  paginate,
+  permissionsOf,
+  query,
+  readBody,
+  recordAudit,
+  route,
+} from '@/mocks/http';
 import {
   BACKUP_FREQUENCIES,
   EXPORT_FORMAT_LABELS,
@@ -419,8 +432,25 @@ export const handlers = [
     route('/backup/exports'),
     handle(({ request }) => {
       authorize('platform.view');
-      const rows = [...exportsTable.all()].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)).map(toExport);
+      // `tenant`: one school's exports (unknown id → empty page), newest first.
+      const tenant = query(request).get('tenant');
+      if (tenant && tenant.length > 32) throw invalid({ tenant: 'The tenant field must not be greater than 32 characters.' });
+      const rows = [...exportsTable.all()]
+        .filter((e) => !tenant || e.tenantId === tenant)
+        .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt) || b.id.localeCompare(a.id))
+        .map(toExport);
       return paginate(rows, request);
+    }),
+  ),
+
+  // One export by id (the "export is ready" email links to it).
+  http.get(
+    route('/backup/exports/:id'),
+    handle<{ id: string }>(({ params }) => {
+      authorize('platform.view');
+      const row = exportsTable.find(params.id);
+      if (!row) throw notFound('Export');
+      return ok(toExport(row));
     }),
   ),
 
