@@ -83,7 +83,8 @@ describe('session safety', () => {
   it('ignores an announcement of the identity it already has', async () => {
     const client = renderProviders(sam);
     fromOtherTab('st_sam');
-    await new Promise((r) => setTimeout(r, 20));
+    // Long enough for a late request (a screen prefetch still loading from an earlier session) to land and end it.
+    await new Promise((r) => setTimeout(r, 300));
     expect(client.getQueryData(PREVIOUS)).toEqual({ secret: 'previous staff data' });
   });
 });

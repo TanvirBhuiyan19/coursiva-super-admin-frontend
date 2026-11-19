@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
+import { afterEach } from 'vitest';
 import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router-dom';
 import Toasts from '@/components/shell/Toasts';
@@ -19,6 +20,15 @@ export function signInAs(role: Role = 'Owner') {
   return user;
 }
 
+// Routers rendered by the current test are disposed after it: a navigation still loading a page when the test ends
+// (lazy chunk, route loader prefetches) would otherwise send its requests during the next test. Registered here, not
+// in setup.ts, so importing the app routes never happens before a test file's vi.mock calls.
+const liveRouters = new Set<{ dispose: () => void }>();
+afterEach(() => {
+  liveRouters.forEach((r) => r.dispose());
+  liveRouters.clear();
+});
+
 function newClient() {
   // Each render is a fresh page load: no request from an earlier one can end its session.
   bumpSessionEpoch();
@@ -32,6 +42,7 @@ function newClient() {
 export function renderApp(path = '/') {
   const client = newClient();
   const router = createMemoryRouter(routes, { initialEntries: [path] });
+  liveRouters.add(router);
   const user = userEvent.setup();
   const utils = render(
     <QueryClientProvider client={client}>
@@ -48,6 +59,7 @@ export function renderWithProviders(ui: ReactElement, { path = '/', routePath = 
   const client = newClient();
   const routeList: RouteObject[] = [{ path: routePath, element: ui }];
   const router = createMemoryRouter(routeList, { initialEntries: [path] });
+  liveRouters.add(router);
   const user = userEvent.setup();
   const utils = render(
     <QueryClientProvider client={client}>

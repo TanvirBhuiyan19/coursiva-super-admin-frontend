@@ -39,6 +39,8 @@ let epoch = 0;
 export function bumpSessionEpoch() {
   epoch += 1;
 }
+/** The current session epoch: work started under one session compares it before acting, so it never runs under another. */
+export const sessionEpoch = () => epoch;
 
 // Step-up authentication: a sensitive change answers 423 password_confirmation_required when the password was
 // not entered recently. The shell registers a handler that asks for the password (one prompt for any number of
