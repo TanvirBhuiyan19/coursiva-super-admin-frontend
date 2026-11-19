@@ -5,7 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { extensionInclusions, extensionSettings, tenants } from '@/mocks/collections';
 import { extensionPlans, extensionPrice } from '@/mocks/derive';
 import { authorize, handle, invalid, notFound, ok, paginate, readBody, recordAudit, route } from '@/mocks/http';
-import { EXTENSIONS, type ExtensionDef } from '@/mocks/reference';
+import { EXTENSIONS, VIDEO_PROTECTION_FEATURES, VIDEO_PROTECTION_NOTE, type ExtensionDef } from '@/mocks/reference';
 import { PLAN_RANK, PLANS, type Plan } from '@/lib/domain';
 import {
   EXTENSION_TRIAL_DAYS,
@@ -47,6 +47,8 @@ function toExtension(e: ExtensionDef): Extension {
     name: e.name,
     category: e.category,
     blurb: e.blurb,
+    features: e.key === 'drm' ? [...VIDEO_PROTECTION_FEATURES] : [],
+    offerNote: e.key === 'drm' ? VIDEO_PROTECTION_NOTE : null,
     module: e.module,
     gatesModule: e.gatesModule,
     price,

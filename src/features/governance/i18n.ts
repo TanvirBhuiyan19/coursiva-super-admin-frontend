@@ -6,7 +6,14 @@ export const { t, useT } = defineMessages('governance', {
     severity: { High: 'High', Medium: 'Medium', Low: 'Low' },
     dsarType: { Access: 'Access', Deletion: 'Deletion', Portability: 'Portability' },
     policyState: { Live: 'Live', Draft: 'Draft', Superseded: 'Superseded' },
-    retentionPeriod: { '30 days': '30 days', '90 days': '90 days', '1 year': '1 year', '3 years': '3 years', '7 years': '7 years' },
+    retentionPeriod: {
+      '30 days': '30 days',
+      '90 days': '90 days',
+      '1 year': '1 year',
+      '3 years': '3 years',
+      '7 years': '7 years',
+      '10 years': '10 years',
+    },
   },
   due: {
     overdue: '{days}d overdue',
@@ -56,7 +63,21 @@ export const { t, useT } = defineMessages('governance', {
       title: 'Retention policy',
       intro: 'How long the platform keeps each data class after deletion.',
       selectLabel: '{label} retention',
-      saved: '{label} kept for {period} — purge jobs pick this up tonight',
+      saved: '{label} kept for {period} — applies from the next nightly run',
+      lastRun: 'Last run {when} · {count} records',
+      neverRun: 'Not run yet',
+      minimum: 'At least {period} by law',
+      confirmTitle: 'Shorten {label} to {period}?',
+      confirmBody: {
+        one: 'The next nightly run will purge or anonymise {count} record now past the new period. This can’t be undone.',
+        other: 'The next nightly run will purge or anonymise {count} records now past the new period. This can’t be undone.',
+      },
+      confirmNone: 'Nothing is past the new period today; records will be purged as they reach it.',
+      confirm: 'Shorten period',
+      cancel: 'Cancel',
+      checking: 'Counting affected records…',
+      countFailed:
+        'We couldn’t count the records past the new period. Shortening it may purge or anonymise records at the next nightly run, and that can’t be undone.',
     },
     kpi: {
       openDsars: 'Open DSARs',

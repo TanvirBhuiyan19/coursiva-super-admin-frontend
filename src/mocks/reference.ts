@@ -73,13 +73,13 @@ export const EXTENSIONS: ExtensionDef[] = [
   {
     key: 'drm',
     module: 'media',
-    name: 'Video DRM & watermarking',
+    name: 'Video protection',
     category: 'Security',
     price: 39,
     freeFrom: null,
     installs: 3,
     status: 'Live',
-    blurb: 'Widevine/FairPlay encryption, dynamic overlays and PDF stamping',
+    blurb: 'Keep paid video and PDFs from being shared: signed links, watermarks, PDF stamping, geo and device rules',
     gatesModule: false,
   },
   {
@@ -257,15 +257,50 @@ export const MODULES: ModuleDef[] = [
   ]),
 ];
 
+/** `gates` mirrors the backend catalogue: what the flag switches in the product (null: nothing reads it yet). */
 export const FEATURE_FLAGS = [
+  {
+    key: 'certificates',
+    name: 'Certificates',
+    description: 'Issue certificates on course completion',
+    enabled: true,
+    gates: 'Certificates issued on course completion',
+  },
+  {
+    key: 'advanced_reports',
+    name: 'Advanced reports',
+    description: 'Cohort completion report in Analytics',
+    enabled: true,
+    gates: 'The cohort completion report on the dashboard’s Analytics screen',
+  },
   {
     key: 'site_builder_v2',
     name: 'New site builder (beta)',
     description: 'Drag-and-drop storefront editor with 250+ blocks',
     enabled: true,
+    gates: null,
   },
-  { key: 'multi_currency', name: 'Multi-currency checkout', description: 'EUR, GBP and BRL pricing at checkout', enabled: false },
+  {
+    key: 'multi_currency',
+    name: 'Multi-currency checkout',
+    description: 'EUR, GBP and BRL pricing at checkout',
+    enabled: false,
+    gates: null,
+  },
 ] as const;
 
 /** Flags a tenant can override individually (shown in the tenant drawer). */
 export const TENANT_OVERRIDABLE_FLAGS = ['site_builder_v2', 'multi_currency'];
+
+/**
+ * What Video protection (`drm`) delivers in the mock platform: the five protections; the mock Mux connection has no DRM
+ * configuration ID, so "Studio-grade DRM" is not listed (backend ExtensionFeatures / availability.ExtensionFeatures).
+ */
+export const VIDEO_PROTECTION_FEATURES = [
+  'Signed, expiring stream and file links',
+  'Dynamic watermark',
+  'PDF stamping',
+  'Geo restrictions',
+  'Concurrent-stream and device limits',
+];
+export const VIDEO_PROTECTION_NOTE = 'DRM: not offered — add a Mux DRM configuration ID to include it.';

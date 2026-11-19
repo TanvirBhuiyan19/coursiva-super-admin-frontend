@@ -11,7 +11,7 @@ Every read needs `platform.view`. Writes need the permission listed per endpoint
 
 ### `GET /platform/flags`
 
-`{ data: FeatureFlag[] }` — `FeatureFlag`: `key, name, description, enabled, rollout, tenant_overrides` (number of tenants overriding the flag individually).
+`{ data: FeatureFlag[] }` — `FeatureFlag`: `key, name, description, enabled, rollout, tenant_overrides` (number of tenants overriding the flag individually), `gates` (what the flag switches in the product, or null when nothing reads it yet; console experiments refuse those with 422 `experiment_flag_no_effect`).
 `rollout`: `All tenants` · `Scale only` · `Growth and Scale` · `Beta list` · `10% of tenants`.
 
 ### `PATCH /platform/flags/{key}`

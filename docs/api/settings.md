@@ -185,7 +185,27 @@ Audit (Security): `Added "{name}" to the integration roadmap`.
 
 ### `GET /settings/tax`
 
-`{ data: { stripe_tax, tax_inclusive, invoice_prefix, next_invoice_number, min_next_invoice_number, next_invoice_preview, regions: [{ id, region, kind, rate }] } }`
+`{ data: { stripe_tax, tax_inclusive, invoice_prefix, next_invoice_number, min_next_invoice_number, next_invoice_preview, regions: [{ id, region, kind, rate, status, active_from, expires_at }], registrations_available, handled_by } }`
+
+SaaS tax on **Coursiva's invoices to schools** (school checkout tax is separate):
+
+- `stripe_tax`: Stripe Tax calculates tax on renewals and one-off invoices of schools that pay by card through Stripe, from each
+  school's billing profile (dashboard → Plan & billing → Billing profile), after the invoice is issued and before it is charged. A school
+  without an address is charged without tax (`tax_status: no_address`) and sees a banner; a renewal is never blocked. When paid, a Stripe
+  Tax transaction is recorded; a refund reverses the refunded part.
+- `tax_inclusive`: price-book prices include tax (the tax is carved out instead of added).
+- `regions` are the platform Stripe account's **tax registrations** (`GET /v1/tax/registrations`, cached 10 minutes): `region` = ISO
+  country, `kind` = Stripe's registration type, `rate` always null (Stripe computes it per invoice). `registrations_available` is false
+  when Stripe isn't connected or unreachable.
+- `handled_by`: `paddle` or `lemon_squeezy` when a merchant of record bills schools and collects tax itself; the toggles are shown
+  disabled ("handled by {provider}") and `regions` is empty.
+
+### `POST /settings/tax/regions`
+
+Permission `platform.manage` **and a password confirmed in the last 15 minutes** (423 `password_confirmation_required`). Body
+`{ country (ISO-2), type, active_from? (date, today or later) }` → `{ data: TaxSettings }`. Creates the registration on Stripe.
+409 under a merchant of record · 503 when Stripe isn't connected · 422 `country` with Stripe's refusal.
+Audit (Billing): `Added a {type} tax registration for {country} on Stripe Tax`.
 
 ### `PATCH /settings/tax`
 
@@ -196,7 +216,15 @@ Audit (Billing): `Updated tax & invoicing: Stripe Tax off, invoice numbering →
 
 ### `DELETE /settings/tax/regions/{id}`
 
-`204`. Checkout stops collecting tax there. Audit (Billing): `Removed tax registration for {region} — checkout stops collecting {kind}`.
+`204`. Permission `platform.manage` **and a recent password** (423). `id` is Stripe's registration id; the registration ends at Stripe now
+(`expires_at=now`), so new invoices there carry no tax. 404 unknown id.
+Audit (Billing): `Ended the {country} tax registration on Stripe Tax: new invoices there carry no tax`.
+
+### `default_timezone` — where it is read
+
+The time zone a **new** school starts with (`site.timezone`, set by the tenant seeder only when absent; existing schools are never
+changed): the sign-up's browser time zone when the marketing sign-up (or the console's create-tenant `timezone`) sent a valid IANA zone,
+else this setting. Readers of `site.timezone` include SMS quiet hours, analytics reports, assignment deadlines and social publishing.
 
 ### `idle_lock_minutes`
 

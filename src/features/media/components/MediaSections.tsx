@@ -16,9 +16,10 @@ import {
   Toggle,
   ToggleRow,
 } from '@/components/ui';
+import { useSession } from '@/features/auth/api';
 import { useCan } from '@/features/auth/useCan';
 import { CommitNumberInput } from '@/components/ui';
-import { money, num, timeAgo } from '@/lib/format';
+import { formatDateTime, money, num, timeAgo } from '@/lib/format';
 import { toast } from '@/store/ui';
 import { useDebounced } from '@/lib/useDebounced';
 import { useUrlState } from '@/lib/useUrlState';
@@ -26,8 +27,6 @@ import { useLiveRoomUsage, useRotateDrmKeys, useUpdateDrm, useUpdateLiveRooms, u
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { useT } from '../i18n';
 import {
-  DRM_AVAILABILITY,
-  DRM_SECURITY_LEVELS,
   RENDITION_LADDERS,
   WATERMARK_STYLES,
   type DrmSettings,
@@ -229,23 +228,35 @@ function LiveRoomUsageList() {
 }
 
 // ---------- DRM ----------
+const POSTURE_TONE = { protected: 'good', partial: 'warn', setup_required: 'bad' } as const;
+
 export function DrmCard({ s }: { s: DrmSettings }) {
   const t = useT();
   const can = useCan();
   const manage = can('platform.manage');
+  const owner = useSession().data?.role === 'Owner';
   const update = useUpdateDrm();
   const rotate = useRotateDrmKeys();
   const active = s.providers.filter((p) => p.connected).map((p) => p.name);
+  // The API answers previousKeyRetiresAt only while the old key is still retiring.
+  const retiring = s.previousKeyRetiresAt !== null;
   return (
     <Card
       title={t('drm.title')}
       right={
-        <Badge pill tone="good">
-          {t('drm.allProtected')}
+        <Badge pill tone={POSTURE_TONE[s.posture]}>
+          {t(`drm.posture.${s.posture}`)}
         </Badge>
       }
     >
       <p className="muted t-sm">{t('drm.intro')}</p>
+      {s.postureReasons.length > 0 && (
+        <ul className="callout callout--warn t-xs" style={{ margin: '8px 0', paddingInlineStart: 28 }}>
+          {s.postureReasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
       <Stats items={s.stats} />
       <div className="stack" style={{ marginTop: 4 }}>
         {s.protections.map((p) => (
@@ -279,19 +290,10 @@ export function DrmCard({ s }: { s: DrmSettings }) {
       <div style={{ ...AUTO_GRID(220), gap: 14 }}>
         <Field label={t('drm.securityLevel')}>
           {(fp) => (
-            <Select
-              {...fp}
-              style={CTRL}
-              value={s.securityLevel}
-              options={opts(DRM_SECURITY_LEVELS, (v) => t(`drm.securityLevels.${v}`))}
-              disabled={!manage}
-              onChange={(securityLevel) =>
-                update.mutate(
-                  { securityLevel },
-                  { onSuccess: () => toast(t('drm.securityLevelSet', { level: t(`drm.securityLevels.${securityLevel}`) })) },
-                )
-              }
-            />
+            <div id={fp.id} style={{ fontSize: 12.5 }}>
+              <div style={{ fontWeight: 600 }}>{s.drmConfigured ? t('drm.drmConfigured') : t('drm.drmNotConfigured')}</div>
+              <div className="faint t-xs">{t('drm.securityLevelNote')}</div>
+            </div>
           )}
         </Field>
         <Field label={t('drm.watermarkStyle')}>
@@ -334,18 +336,6 @@ export function DrmCard({ s }: { s: DrmSettings }) {
             )
           }
         </Field>
-        <Field label={t('drm.availableOn')}>
-          {(fp) => (
-            <Select
-              {...fp}
-              style={CTRL}
-              value={s.availableOn}
-              options={opts(DRM_AVAILABILITY, (v) => t(`drm.availability.${v}`))}
-              disabled={!manage}
-              onChange={(availableOn) => update.mutate({ availableOn }, { onSuccess: () => toast(t(`drm.availableOnSet.${availableOn}`)) })}
-            />
-          )}
-        </Field>
       </div>
 
       <div style={DIVIDER}>
@@ -378,17 +368,47 @@ export function DrmCard({ s }: { s: DrmSettings }) {
         <div style={{ flex: 1, minWidth: 220 }}>
           <h3 style={{ fontWeight: 600, fontSize: 13 }}>{t('drm.signingKeys')}</h3>
           <div className="faint t-xs" style={{ marginTop: 1 }}>
-            {t('drm.lastRotated', { ago: timeAgo(s.keysRotatedAt) })}
+            {s.keysRotatedAt ? t('drm.lastRotated', { ago: timeAgo(s.keysRotatedAt) }) : t('drm.neverRotated')}
           </div>
+          {retiring && s.previousKeyRetiresAt && (
+            <div className="t-xs" style={{ marginTop: 2 }}>
+              {t('drm.retiresAt', { time: formatDateTime(s.previousKeyRetiresAt) })}
+            </div>
+          )}
+          {s.previousKeyOverdue && (
+            <div className="callout callout--warn t-xs" role="status" style={{ marginTop: 6 }}>
+              {t('drm.overdue')}
+            </div>
+          )}
+          {active.length === 0 && (
+            // The buttons are disabled without a provider: say why instead of a silent grey button.
+            <div className="faint t-xs" style={{ marginTop: 2 }}>
+              {t('drm.rotateNeedsProvider')}
+            </div>
+          )}
         </div>
-        {manage && (
+        {manage && !retiring && (
           <ConfirmButton
             className="btn"
             confirmLabel={t('drm.confirmRotate')}
             pending={rotate.isPending}
-            onConfirm={() => rotate.mutate(undefined, { onSuccess: () => toast(t('drm.rotated')) })}
+            disabled={active.length === 0}
+            onConfirm={() => rotate.mutate(false, { onSuccess: () => toast(t('drm.rotated')) })}
           >
             {t('drm.rotate')}
+          </ConfirmButton>
+        )}
+        {manage && owner && (
+          <ConfirmButton
+            className="btn btn--danger"
+            confirmLabel={t('drm.confirmRevoke')}
+            pending={rotate.isPending}
+            disabled={active.length === 0}
+            onConfirm={() =>
+              rotate.mutate(true, { onSuccess: (d) => toast(d.previousKeyOverdue ? t('drm.revokeFailed') : t('drm.revoked')) })
+            }
+          >
+            {t('drm.revokeNow')}
           </ConfirmButton>
         )}
       </div>

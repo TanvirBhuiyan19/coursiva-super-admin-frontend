@@ -13,12 +13,15 @@ describe('growth analytics', () => {
     // 9 paying tenants, $4,491 paying MRR → $499 per tenant (same as /tenants/summary arpa).
     expect(await screen.findByText('$499/mo')).toBeInTheDocument();
     expect(screen.getByText('9 paying tenants')).toBeInTheDocument();
+    // No NPS survey exists: the KPI says so instead of showing a number.
+    const nps = screen.getByText('Average NPS').parentElement!;
+    expect(within(nps).getByText('Not tracked')).toBeInTheDocument();
     const funnel = screen.getByRole('table', { name: /Acquisition funnel/ });
-    expect(within(funnel).getByRole('row', { name: /Visitors 325/ })).toBeInTheDocument();
+    expect(within(funnel).getByRole('row', { name: /Visitors Not tracked/ })).toBeInTheDocument();
     expect(within(screen.getByRole('table', { name: /Cohort retention/ })).getAllByRole('row')).toHaveLength(7);
     const stuck = screen.getByRole('heading', { name: 'Stuck in onboarding' }).closest('section')!;
     expect(within(stuck).getByText('Ledger Finance Academy')).toBeInTheDocument();
-    expect(within(stuck).getByText(/Stuck at “First sale”/)).toBeInTheDocument();
+    expect(within(stuck).getByText(/Stuck at “Paid subscription” for \d+ days/)).toBeInTheDocument();
   });
 });
 
@@ -97,6 +100,14 @@ describe('usage & infrastructure', () => {
     expect(within(t).getAllByRole('row')).toHaveLength(6);
     const devpath = within(t).getByRole('row', { name: /DevPath Bootcamp/ });
     expect(within(devpath).getByText('AI credits overage · +$114')).toBeInTheDocument();
+  });
+
+  it('shows the five meters with their source and freshness', async () => {
+    signInAs('Owner');
+    renderApp('/analytics/usage');
+    const card = await screen.findByRole('region', { name: 'Video delivered' });
+    expect(within(card).getByText(/Minutes of video Mux delivered to learners this month/)).toBeInTheDocument();
+    expect(within(card).getByText(/^Updated /)).toBeInTheDocument();
   });
 });
 
@@ -209,10 +220,91 @@ describe('experiments', () => {
   it('stops an experiment', async () => {
     signInAs('Owner');
     const { user } = renderApp('/analytics/experiments');
-    const row = within(await screen.findByRole('table', { name: 'Experiments' })).getByRole('row', { name: /Multi-currency/ });
+    const row = within(await screen.findByRole('table', { name: 'Experiments' })).getByRole('row', { name: /Advanced reports/ });
     await user.click(within(row).getByRole('button', { name: 'Stop' }));
     await user.click(within(row).getByRole('button', { name: 'Confirm stop' }));
-    await waitFor(() => expect(experiments.find('ex_multi_currency')!.status).toBe('stopped'));
+    await waitFor(() => expect(experiments.find('ex_advanced_reports')!.status).toBe('stopped'));
+  });
+
+  it('starts an experiment on a free flag, refuses a busy or live one and opens its arms', async () => {
+    signInAs('Owner');
+    const { user } = renderApp('/analytics/experiments');
+    const table = await screen.findByRole('table', { name: 'Experiments' });
+
+    // advanced_reports is on for every school by default: staff turned it off for the running experiment that owns it,
+    // so the server refuses a second one as busy.
+    flags.update('advanced_reports', { enabled: false });
+    await user.click(screen.getByRole('button', { name: 'New experiment' }));
+    let dialog = await screen.findByRole('dialog', { name: 'New experiment' });
+    await user.type(within(dialog).getByLabelText('Name'), 'Busy flag');
+    await user.type(within(dialog).getByLabelText('Where schools see it'), 'Analytics');
+    await user.selectOptions(within(dialog).getByLabelText('Feature flag'), 'advanced_reports');
+    await user.click(within(dialog).getByRole('button', { name: 'Start experiment' }));
+    expect(await within(dialog).findByText('Another running experiment already uses this flag. Stop it first.')).toBeInTheDocument();
+
+    // certificates is on for every school: annotated, explained inline, and Start is disabled.
+    expect(within(dialog).getByRole('option', { name: /certificates \(already live\)/ })).toBeInTheDocument();
+    await user.selectOptions(within(dialog).getByLabelText('Feature flag'), 'certificates');
+    expect(within(dialog).getByText(/already on for every school/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Start experiment' })).toBeDisabled();
+    // Flags nothing reads are listed as disabled, with the reason.
+    expect(within(dialog).getByRole('option', { name: /multi_currency \(gates nothing yet\)/ })).toBeDisabled();
+    expect(within(dialog).getByRole('option', { name: /site_builder_v2 \(gates nothing yet\)/ })).toBeDisabled();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    // Stopping the advanced-reports experiment frees its (still off) flag for a new experiment.
+    const row = within(table).getByRole('row', { name: /Advanced reports/ });
+    await user.click(within(row).getByRole('button', { name: 'Stop' }));
+    await user.click(within(row).getByRole('button', { name: 'Confirm stop' }));
+    await waitFor(() => expect(experiments.find('ex_advanced_reports')!.status).toBe('stopped'));
+
+    await user.click(screen.getByRole('button', { name: 'New experiment' }));
+    dialog = await screen.findByRole('dialog', { name: 'New experiment' });
+    await user.type(within(dialog).getByLabelText('Name'), 'Reports again');
+    await user.type(within(dialog).getByLabelText('Where schools see it'), 'Analytics');
+    await user.selectOptions(within(dialog).getByLabelText('Feature flag'), 'advanced_reports');
+    await user.click(within(dialog).getByRole('button', { name: 'Start experiment' }));
+    await waitFor(() => expect(experiments.where((e) => e.name === 'Reports again')).toHaveLength(1));
+    expect(audit.where((a) => a.action.startsWith('Started experiment "Reports again" on advanced_reports'))).toHaveLength(1);
+
+    await user.click(await screen.findByRole('button', { name: 'Open Reports again' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Reports again' });
+    expect(await within(drawer).findByText('Control (flag off)')).toBeInTheDocument();
+  });
+
+  it('refuses an experiment on a flag that is already live or gates nothing (server rules)', async () => {
+    signInAs('Owner');
+    expect(flags.find('certificates')).toMatchObject({ enabled: true, rollout: 'All tenants' });
+    const body = { name: 'Live', surface: 'Courses', flagKey: 'certificates', metric: 'trial_converted', allocationPct: 10 };
+    await expect(api.post('/analytics/experiments', body)).rejects.toSatisfy(
+      (e) => e instanceof ApiError && e.status === 422 && e.code === 'experiment_flag_already_live',
+    );
+    flags.update('certificates', { rollout: 'Beta list' });
+    await expect(api.post('/analytics/experiments', body)).resolves.toBeTruthy();
+    // A flag nothing reads compares two identical groups, whatever its state.
+    await expect(api.post('/analytics/experiments', { ...body, flagKey: 'multi_currency' })).rejects.toSatisfy(
+      (e) => e instanceof ApiError && e.status === 422 && e.code === 'experiment_flag_no_effect',
+    );
+  });
+
+  it('deletes a finished experiment after confirming, never a running one', async () => {
+    signInAs('Owner');
+    const { user } = renderApp('/analytics/experiments');
+    const table = await screen.findByRole('table', { name: 'Experiments' });
+    const running = within(table).getByRole('row', { name: /New site builder/ });
+    expect(within(running).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    await expect(api.delete('/analytics/experiments/ex_site_builder')).rejects.toSatisfy((e) => e instanceof ApiError && e.status === 409);
+
+    const row = within(table).getByRole('row', { name: /Checkout trust badges/ });
+    await user.click(within(row).getByRole('button', { name: 'Delete' }));
+    expect(experiments.find('ex_trust_badges')).toBeDefined();
+    await user.click(within(row).getByRole('button', { name: 'Confirm delete' }));
+    expect(await screen.findByText('Checkout trust badges deleted with its results')).toBeInTheDocument();
+    expect(experiments.find('ex_trust_badges')).toBeUndefined();
+    expect(
+      audit.where((a) => a.action === 'Deleted experiment "Checkout trust badges" and its results' && a.category === 'Flags'),
+    ).toHaveLength(1);
+    await waitFor(() => expect(within(table).queryByRole('row', { name: /Checkout trust badges/ })).not.toBeInTheDocument());
   });
 
   it('hides promote and stop from read-only staff', async () => {
@@ -223,5 +315,7 @@ describe('experiments', () => {
     await expect(api.post('/analytics/experiments/ex_site_builder/promote')).rejects.toSatisfy(
       (e) => e instanceof ApiError && e.status === 403,
     );
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    await expect(api.delete('/analytics/experiments/ex_trust_badges')).rejects.toSatisfy((e) => e instanceof ApiError && e.status === 403);
   });
 });

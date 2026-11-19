@@ -41,7 +41,9 @@ owner_email, plan, status, students, mrr, health, health_reason, utilization, st
 
 ### `POST /tenants` — provision
 
-Permission `tenants.manage`. Body `{ name, owner_email, plan }` → `201 { data: Tenant }`.
+Permission `tenants.manage`. Body `{ name, owner_email, plan, timezone? }` → `201 { data: Tenant }`. `timezone` is an IANA
+zone for the school's `site.timezone`; the form starts it at the console's default timezone (Settings), and omitted it
+falls back to that default. 422 `timezone` when it is not a valid zone.
 Creates the workspace on `{slug}.{primary_domain}`, status `Trial` for the platform trial length, and emails the owner an invite.
 Console-created schools have no card yet (card-first applies to marketing sign-up only): their trial pauses at its end
 until the owner adds one (or staff extend it). With the platform trial length `0`: status `Active`, `trial_ends_at`

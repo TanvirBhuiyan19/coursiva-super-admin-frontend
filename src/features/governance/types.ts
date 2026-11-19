@@ -32,7 +32,7 @@ export interface ComplianceSummary {
   tenants: number;
 }
 
-export const RETENTION_PERIODS = ['30 days', '90 days', '1 year', '3 years', '7 years'] as const;
+export const RETENTION_PERIODS = ['30 days', '90 days', '1 year', '3 years', '7 years', '10 years'] as const;
 export type RetentionPeriod = (typeof RETENTION_PERIODS)[number];
 
 export interface RetentionSetting {
@@ -41,6 +41,18 @@ export interface RetentionSetting {
   label: string;
   period: RetentionPeriod;
   defaultPeriod: RetentionPeriod;
+  /** The shortest period the law allows (payment records: 3 years), or null. */
+  minPeriod: RetentionPeriod | null;
+  /** The rule's latest nightly run, and the records it changed in the day up to it. */
+  lastRunAt: string | null;
+  lastAffected: number;
+}
+
+/** GET /governance/retention/{key}/preview?period=: what that period would affect now. */
+export interface RetentionPreview {
+  key: string;
+  period: RetentionPeriod;
+  affected: number;
 }
 
 export interface SubProcessor {

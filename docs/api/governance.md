@@ -36,13 +36,40 @@ Audit (Security, tenant): `Erased personal data for {requester} ({tenant})` · `
 
 ### `GET /governance/retention` — _not paginated_
 
-`[{ key, label, period, default_period }]`. Keys: `deleted_students`, `cancelled_workspaces`, `payment_records`, `audit_logs`.
-Periods: `30 days` · `90 days` · `1 year` · `3 years` · `7 years`.
+`[{ key, label, period, default_period, min_period, last_run_at, last_affected }]`. Keys: `deleted_students`, `cancelled_workspaces`,
+`payment_records`, `audit_logs`. Periods: `30 days` · `90 days` · `1 year` · `3 years` · `7 years` · `10 years`.
+
+- `min_period`: the legal floor (`payment_records`: `3 years`), else null. The screen only offers periods at or above it.
+- `last_run_at` / `last_affected`: the rule's latest nightly run (`retention_runs`) and the records changed in the day up to it.
+
+What each rule does (both stacks):
+
+- `audit_logs`: the audit prune (platform and every school).
+- `cancelled_workspaces`: the default grace before a requested deletion runs (set when the deletion is requested).
+- `deleted_students`: a deleted student is removed at once; the **erasure ledger** (platform `erasure_ledger`: user id and the
+  SHA-256 of the email only) remembers it. The nightly `retention:run deleted-students` (Go `retention.deleted_students`, 03:10 UTC)
+  scrubs the residual copies once the period has passed (`ResidualLearnerData` / Go `governance.ResidualStatements`: audit text and
+  actor names → "a deleted student", mail events, form submissions and contacts, inbox conversations, video views, app devices and
+  pushes, report subscriptions). A tenant restore replays the ledger: students deleted since the backup are deleted again and scrubs
+  are repeated.
+- `payment_records`: the nightly `retention:run payment-records` (Go `retention.payment_records`, 03:20 UTC) anonymises orders older
+  than the period (buyer name, email, address, tax id, gift details cleared; amounts, numbers and dates kept), 5,000 per school and
+  run, skipping orders with an open dispute; and clears the billing-profile snapshot of Coursiva invoices older than the period.
+
+Every run is logged in `retention_runs` (rule, scope, school, rows, error); purges are irreversible.
 
 ### `PUT /governance/retention/{key}`
 
-Body `{ period }` → `{ data: RetentionSetting }`. 404 unknown key, 422 `period`.
-Audit (Security): `Retention for {label, lower-case} set to {period}`.
+Body `{ period }` → `{ data: RetentionSetting }`. 404 unknown key, 422 `period`, **422 `retention_below_legal_minimum`** for
+`payment_records` below 3 years (`{ key, min_period }` in the body). Applies from the next nightly run.
+Audit (Security): `Retention for {label, lower-case} set to {period} (applies from the next nightly run)`.
+
+### `GET /governance/retention/{key}/preview?period=`
+
+Permission `governance.manage`. `{ data: { key, period, affected } }`: the records that period would purge or anonymise **now** (the
+confirm dialog before a shorter period is saved). `deleted_students`: unscrubbed ledger rows past it; `audit_logs`: console entries;
+`payment_records`: invoices with a profile snapshot plus orders in every live school; `cancelled_workspaces`: 0 (the grace is fixed when a
+deletion is requested). 404 unknown key, 422 `period`, 422 `retention_below_legal_minimum`.
 
 ### `GET /governance/sub-processors` — _not paginated_
 

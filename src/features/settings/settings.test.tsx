@@ -353,11 +353,11 @@ describe('console settings — other sections', () => {
   it('removes tax regions after confirming and rejects numbering that goes backwards', async () => {
     signInAs('Owner');
     const { user } = renderApp('/settings?section=tax');
-    const regions = await screen.findByRole('list', { name: 'Registered tax regions' });
-    await user.click(within(regions).getByRole('button', { name: 'Remove Canada' }));
-    expect(settingsTables.regions.find('ca')).toBeDefined();
-    await user.click(within(regions).getByRole('button', { name: 'Confirm remove Canada' }));
-    await waitFor(() => expect(settingsTables.regions.find('ca')).toBeUndefined());
+    const regions = await screen.findByRole('list', { name: 'Stripe tax registrations' });
+    await user.click(within(regions).getByRole('button', { name: 'End GB' }));
+    expect(settingsTables.regions.find('taxreg_gb')).toBeDefined();
+    await user.click(within(regions).getByRole('button', { name: 'Confirm end GB' }));
+    await waitFor(() => expect(settingsTables.regions.find('taxreg_gb')).toBeUndefined());
 
     const numbering = await form('Invoice numbering');
     const next = within(numbering).getByLabelText('Next number');
@@ -366,6 +366,16 @@ describe('console settings — other sections', () => {
     await user.click(within(numbering).getByRole('button', { name: 'Save numbering' }));
     expect(await within(numbering).findByText(/must be at least 20261/)).toBeInTheDocument();
     expect(settingsTables.tax.get().nextInvoiceNumber).toBe(20261);
+  });
+
+  // W6 e2e: the preview padded the number (INV-001002) while both backends issue INV-1002.
+  it('previews the next invoice number the way invoices are numbered', async () => {
+    signInAs('Owner');
+    renderApp('/settings?section=tax');
+    const numbering = await form('Invoice numbering');
+    const prefix = settingsTables.tax.get().invoicePrefix.toUpperCase();
+    expect(within(numbering).getByText(`${prefix}20261`)).toBeInTheDocument();
+    expect(within(numbering).queryByText(`${prefix}020261`)).not.toBeInTheDocument();
   });
 });
 

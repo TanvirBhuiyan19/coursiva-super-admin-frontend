@@ -36,6 +36,7 @@ import {
   type SettingsMetaWire,
   type SettingsSection,
   type TaxRegion,
+  type TaxRegistrationInput,
   type TaxSettings,
   type TaxSettingsUpdate,
 } from './types';
@@ -381,18 +382,27 @@ function integrations(): IntegrationSettings {
 
 // ---------- Tax & invoicing ----------
 const LAST_ISSUED_INVOICE = 20260;
-const tax = singleton<Omit<TaxSettings, 'regions' | 'nextInvoicePreview' | 'minNextInvoiceNumber'>>('settingsTax', () => ({
+const tax = singleton<
+  Omit<TaxSettings, 'regions' | 'nextInvoicePreview' | 'minNextInvoiceNumber' | 'registrationsAvailable' | 'handledBy'>
+>('settingsTax', () => ({
   stripeTax: true,
   taxInclusive: false,
   invoicePrefix: 'CV-',
   nextInvoiceNumber: 20261,
 }));
+// Stripe Tax registrations on the platform's Stripe account (the backends read and write them at Stripe).
 const regions = collection<TaxRegion>('settingsTaxRegions', () => [
-  { id: 'eu', region: 'European Union', kind: 'VAT · OSS', rate: '20–27%' },
-  { id: 'uk', region: 'United Kingdom', kind: 'VAT', rate: '20%' },
-  { id: 'au', region: 'Australia', kind: 'GST', rate: '10%' },
-  { id: 'ca', region: 'Canada', kind: 'GST/HST', rate: '5–15%' },
-  { id: 'us', region: 'United States', kind: 'Sales tax · per state', rate: 'auto' },
+  {
+    id: 'taxreg_ie_oss',
+    region: 'IE',
+    kind: 'oss_union',
+    rate: null,
+    status: 'active',
+    activeFrom: '2025-01-01T00:00:00Z',
+    expiresAt: null,
+  },
+  { id: 'taxreg_gb', region: 'GB', kind: 'standard', rate: null, status: 'active', activeFrom: '2025-01-01T00:00:00Z', expiresAt: null },
+  { id: 'taxreg_au', region: 'AU', kind: 'standard', rate: null, status: 'active', activeFrom: '2025-03-01T00:00:00Z', expiresAt: null },
 ]);
 
 function taxSettings(): TaxSettings {
@@ -400,9 +410,17 @@ function taxSettings(): TaxSettings {
   return {
     ...t,
     minNextInvoiceNumber: LAST_ISSUED_INVOICE + 1,
-    nextInvoicePreview: t.invoicePrefix + String(t.nextInvoiceNumber).padStart(6, '0'),
-    regions: regions.all(),
+    nextInvoicePreview: t.invoicePrefix + String(t.nextInvoiceNumber),
+    regions: handledBy() ? [] : regions.all(),
+    registrationsAvailable: !handledBy(),
+    handledBy: handledBy(),
   };
+}
+
+/** A merchant of record (Paddle, Lemon Squeezy) collects tax itself. */
+function handledBy(): string | null {
+  const p = current().billingProvider;
+  return p === 'paddle' || p === 'lemon_squeezy' ? p : null;
 }
 
 type SectionParams = { section: string };
@@ -582,14 +600,40 @@ export const handlers = [
     }),
   ),
 
+  http.post(
+    route('/settings/tax/regions'),
+    handle(async ({ request }) => {
+      authorize('platform.manage');
+      requireRecentPassword();
+      const body = await readBody<TaxRegistrationInput>(request);
+      const errors: Record<string, string> = {};
+      if (!/^[A-Za-z]{2}$/.test(body.country ?? '')) errors.country = 'Choose a country.';
+      if (!/^[a-z_]{2,40}$/.test(body.type ?? '')) errors.type = 'Choose the registration type.';
+      if (Object.keys(errors).length) throw invalid(errors);
+      const country = body.country.toUpperCase();
+      regions.insert({
+        id: `taxreg_${country.toLowerCase()}_${Date.now().toString(36)}`,
+        region: country,
+        kind: body.type,
+        rate: null,
+        status: 'active',
+        activeFrom: body.activeFrom ? new Date(body.activeFrom).toISOString() : new Date().toISOString(),
+        expiresAt: null,
+      });
+      recordAudit(`Added a ${body.type} tax registration for ${country} on Stripe Tax`, 'Billing');
+      return ok(taxSettings());
+    }),
+  ),
+
   http.delete(
     route('/settings/tax/regions/:id'),
     handle<IdParams>(({ params }) => {
       authorize('platform.manage');
+      requireRecentPassword();
       const region = regions.find(params.id);
-      if (!region) throw notFound('Tax region');
+      if (!region) throw notFound('Tax registration');
       regions.remove(region.id);
-      recordAudit(`Removed tax registration for ${region.region} — checkout stops collecting ${region.kind}`, 'Billing');
+      recordAudit(`Ended the ${region.region} tax registration on Stripe Tax: new invoices there carry no tax`, 'Billing');
       return noContent();
     }),
   ),

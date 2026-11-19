@@ -15,6 +15,7 @@ import type {
   SettingsMeta,
   SettingsMetaWire,
   SettingsSection,
+  TaxRegistrationInput,
   TaxSettings,
   TaxSettingsUpdate,
 } from './types';
@@ -202,6 +203,18 @@ export function useRemoveTaxRegion() {
     mutationFn: (id: string) => api.delete(`/settings/tax/regions/${id}`),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: settingsKeys.tax() });
+      invalidateAudit(qc);
+    },
+  });
+}
+
+/** Adds a Stripe tax registration (step-up: the client asks for the password on 423). */
+export function useAddTaxRegistration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TaxRegistrationInput) => api.post<Resource<TaxSettings>>('/settings/tax/regions', input).then((r) => r.data),
+    onSuccess: (data) => {
+      qc.setQueryData(settingsKeys.tax(), data);
       invalidateAudit(qc);
     },
   });

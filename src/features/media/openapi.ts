@@ -69,12 +69,13 @@ export const spec = defineSpec({
       method: 'PATCH',
       path: '/media/drm',
       summary: 'Update DRM protections and playback policy',
-      description: 'Locked protections (stream encryption) cannot be turned off (422).',
+      description:
+        'The locked `signed_links` protection cannot be turned off (422). A sent `watermark_style: forensic` (retired) is saved as `email`. `device_leases` is the ceiling of the schools’ device limit.',
       auth: 'platform.manage',
       body: ref('DrmUpdate'),
       response: resource(ref('DrmSettings')),
       audit: {
-        text: '{protection} enabled/disabled platform-wide · DRM security level set to {level} · Watermark style set to {style} · Concurrent device leases set to {n} · DRM made available on {plans}',
+        text: '{protection} enabled/disabled platform-wide · Watermark style set to {style} · Concurrent stream ceiling set to {n}',
         category: 'Security',
       },
       example: { body: { protections: [{ key: 'geo_restrictions', enabled: false }], watermark_style: 'email_ip', device_leases: 4 } },
@@ -82,10 +83,17 @@ export const spec = defineSpec({
     {
       method: 'POST',
       path: '/media/drm/rotate-keys',
-      summary: 'Rotate DRM license signing keys',
+      summary: 'Rotate the Mux playback signing key',
+      description:
+        'Needs a password confirmed in the last 15 minutes (423). A new Mux signing key; the old one retires 4 h 15 min later (`previous_key_retires_at`). `immediate` (Owners only, else 403) revokes the old key at once; when Mux refuses that delete the rotation stands and `previous_key_overdue` is true (retried every 10 minutes). 409 without Mux or while a key retires.',
       auth: 'platform.manage',
+      body: { type: 'object', properties: { immediate: { type: 'boolean' } } },
       response: resource(ref('DrmSettings')),
-      audit: { text: 'Rotated DRM license signing keys', category: 'Security' },
+      errors: [409, 423],
+      audit: {
+        text: 'Rotated the Mux signing key (new …{suffix}; old …{suffix} retires at {time} UTC | revoked immediately)',
+        category: 'Security',
+      },
       example: {},
     },
     {
@@ -113,10 +121,12 @@ export const spec = defineSpec({
       method: 'DELETE',
       path: '/media/drm/providers/{key}',
       summary: 'Disconnect a DRM provider (deletes stored credentials)',
+      description:
+        'Mux with a rotation’s previous key still stored: that key is deleted at Mux first; when Mux refuses, 409 `signing_key_retiring` and Mux stays connected.',
       auth: 'platform.manage',
       path_params: providerKey,
       response: resource(ref('Connection')),
-      errors: [404, 423],
+      errors: [404, 409, 423],
       audit: { text: 'Disconnected DRM provider {name}', category: 'Security' },
       example: { params: { key: 'mux' } },
     },

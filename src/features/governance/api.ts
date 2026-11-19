@@ -24,6 +24,7 @@ import type {
   ReportListMeta,
   ReportListParams,
   RetentionPeriod,
+  RetentionPreview,
   RetentionSetting,
   SubProcessor,
   TenantResidency,
@@ -104,6 +105,12 @@ export function useFulfilDsar() {
 
 export const useRetention = () =>
   useQuery({ queryKey: governanceKeys.retention, queryFn: ({ signal }) => get<RetentionSetting[]>('/governance/retention', signal) });
+
+/** What a shorter period would affect (fetched before the confirm dialog). */
+export const previewRetention = (key: string, period: RetentionPeriod) =>
+  api
+    .get<Resource<RetentionPreview>>(`/governance/retention/${encodeURIComponent(key)}/preview`, { query: { period } })
+    .then((r) => r.data);
 
 export function useSetRetention() {
   const qc = useQueryClient();

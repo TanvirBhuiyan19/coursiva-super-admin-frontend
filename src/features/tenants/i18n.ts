@@ -101,6 +101,9 @@ export const { t, useT } = defineMessages('tenants', {
     rootPlaceholder: 'platform-domain',
     autoSsl: 'auto-SSL',
     plan: 'Plan',
+    timezone: 'Time zone',
+    timezonePlaceholder: 'Europe/London',
+    timezoneHint: 'IANA zone for the school’s dates and schedules. Starts at the console’s default timezone.',
     trialNote:
       'Starts on the platform free trial (Settings → Sign-up; none when it’s 0 days). The owner sets their password from the invite email.',
     create: 'Create tenant',
@@ -109,6 +112,7 @@ export const { t, useT } = defineMessages('tenants', {
       nameMin: 'Enter the school name (2+ characters).',
       nameMax: 'Keep it under 80 characters.',
       email: 'Enter a valid email address.',
+      timezone: 'Choose a time zone such as Europe/London.',
     },
   },
   drawer: {

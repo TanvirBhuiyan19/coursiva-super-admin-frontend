@@ -54,23 +54,27 @@ describe('video & storage', () => {
     expect(amplify.limits.find((l) => l.key === 'live_room_minutes')).toMatchObject({ value: 2500, planDefault: 2500 });
   });
 
-  it('validates credentials server-side, then connects a DRM provider', async () => {
+  it('lists Mux as the only DRM provider and shows the honest posture', async () => {
     signInAs('Owner');
-    const { user } = renderApp('/platform/media?section=drm');
-    const card = await screen.findByRole('region', { name: 'EZDRM' });
-    await user.type(within(card).getByLabelText('EZDRM Username'), 'coursiva');
-    await user.click(within(card).getByRole('button', { name: 'Connect & verify' }));
-    expect(await within(card).findByText('Enter the Password.')).toBeInTheDocument();
-    expect(within(card).getByText('Enter the FairPlay cert URL.')).toBeInTheDocument();
-    expect(mediaStore.get().credentials.some((c) => c.connection === 'ezdrm')).toBe(false);
+    renderApp('/platform/media?section=drm');
+    expect(await screen.findByRole('region', { name: 'Mux' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'EZDRM' })).not.toBeInTheDocument();
+    // The seeded Mux connection has no DRM configuration: streams are signed, not encrypted.
+    expect(screen.getByText('Partly protected')).toBeInTheDocument();
+    expect(screen.getByText(/Add a DRM configuration ID/)).toBeInTheDocument();
+    expect(screen.queryByText('Security level')).not.toBeInTheDocument();
+    const { data } = await api.get<Resource<DrmSettings>>('/media/drm');
+    expect(data.protections.map((p) => p.key)).toEqual(['signed_links', 'watermark', 'geo_restrictions']);
+    await expect(api.patch('/media/drm', { watermarkStyle: 'forensic' })).resolves.toMatchObject({ data: { watermarkStyle: 'email' } });
+  });
 
-    await user.type(within(card).getByLabelText('EZDRM Password'), 'hunter2-long');
-    await user.type(within(card).getByLabelText('EZDRM FairPlay cert URL'), 'https://drm.example/fp.cer');
-    await user.click(within(card).getByRole('button', { name: 'Connect & verify' }));
-    await waitFor(() => expect(mediaStore.get().credentials.find((c) => c.connection === 'ezdrm')?.values.password).toBe('hunter2-long'));
-    expect(hasAudit('Connected DRM provider EZDRM', 'Security')).toBe(true);
-    expect(await within(card).findByText('Connected')).toBeInTheDocument();
-    expect(within(card).getByLabelText('EZDRM Password')).toHaveValue('');
+  // W6 e2e: on the real stack (Mux not connected) "Rotate key" was a silent disabled button.
+  it('explains why the signing key can’t be rotated without Mux', async () => {
+    mediaStore.patch({ credentials: mediaStore.get().credentials.filter((c) => c.connection !== 'mux') });
+    signInAs('Owner');
+    renderApp('/platform/media?section=drm');
+    expect(await screen.findByText('Connect Mux with a signing key to rotate it.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rotate key' })).toBeDisabled();
   });
 
   it('connects the Public assets bucket with its provider and ACL switches', async () => {
@@ -164,26 +168,46 @@ describe('video & storage', () => {
     expect(hasAudit('Updated credentials for DRM provider Mux', 'Security')).toBe(true);
   });
 
-  it('rotates license keys only after confirming', async () => {
+  it('rotates the signing key only after confirming, then shows when the old key retires', async () => {
     signInAs('Owner');
     const { user } = renderApp('/platform/media?section=drm');
     const before = mediaStore.get().keysRotatedAt;
-    await user.click(await screen.findByRole('button', { name: 'Rotate keys' }));
+    await user.click(await screen.findByRole('button', { name: 'Rotate key' }));
     expect(mediaStore.get().keysRotatedAt).toBe(before);
     await user.click(screen.getByRole('button', { name: 'Confirm rotation' }));
     await waitFor(() => expect(mediaStore.get().keysRotatedAt).not.toBe(before));
-    expect(hasAudit('Rotated DRM license signing keys', 'Security')).toBe(true);
-    expect(await screen.findByText(/Last rotated just now/)).toBeInTheDocument();
+    expect(audit.all().some((a) => a.action.startsWith('Rotated the Mux signing key') && a.category === 'Security')).toBe(true);
+    expect(await screen.findByText(/Links signed with the old key stop working when it retires at/)).toBeInTheDocument();
+    // While the old key retires, rotating again needs `immediate` (Owners only).
+    await expect(api.post('/media/drm/rotate-keys')).rejects.toMatchObject({ status: 409 });
+    await user.click(screen.getByRole('button', { name: 'Revoke old key now' }));
+    await user.click(screen.getByRole('button', { name: 'Break playing videos?' }));
+    await waitFor(() => expect(mediaStore.get().previousKeyRetiresAt).toBeNull());
   });
 
-  it('toggles a DRM protection but never the locked encryption', async () => {
+  it('warns while an old signing key Mux refused to delete is still live', async () => {
+    signInAs('Owner');
+    mediaStore.patch({ previousKeyOverdue: true });
+    renderApp('/platform/media?section=drm');
+    expect(await screen.findByText(/Mux hasn’t deleted the old signing key yet/)).toBeInTheDocument();
+    mediaStore.patch({ previousKeyOverdue: false });
+  });
+
+  it('keeps immediate revocation to Owners', async () => {
+    signInAs('Admin');
+    await expect(api.post('/media/drm/rotate-keys', { immediate: true })).rejects.toMatchObject({ status: 403 });
+  });
+
+  it('toggles a DRM protection but never the locked signed links', async () => {
     signInAs('Owner');
     const { user } = renderApp('/platform/media?section=drm');
     await user.click(await screen.findByRole('switch', { name: 'Dynamic viewer watermark' }));
     await waitFor(() => expect(mediaStore.get().drmOff).toEqual(['watermark']));
     expect(hasAudit('Dynamic viewer watermark disabled platform-wide', 'Security')).toBe(true);
-    expect(screen.queryByRole('switch', { name: 'AES-128 stream encryption' })).not.toBeInTheDocument();
-    await expect(api.patch('/media/drm', { protections: [{ key: 'encryption', enabled: false }] })).rejects.toMatchObject({ status: 422 });
+    expect(screen.queryByRole('switch', { name: 'Signed, expiring stream links' })).not.toBeInTheDocument();
+    await expect(api.patch('/media/drm', { protections: [{ key: 'signed_links', enabled: false }] })).rejects.toMatchObject({
+      status: 422,
+    });
   });
 
   it('is read-only without platform.manage', async () => {
@@ -193,7 +217,7 @@ describe('video & storage', () => {
     const { user } = renderApp('/platform/media?section=drm');
     const mux = await screen.findByRole('region', { name: 'Mux' });
     expect(within(mux).queryByRole('button', { name: 'Disconnect' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate keys' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rotate key' })).not.toBeInTheDocument();
     await user.click(sectionLink('Live classes'));
     expect(await screen.findByRole('switch', { name: 'Fall back to built-in rooms on provider failure' })).toBeDisabled();
     expect(screen.queryByRole('textbox', { name: 'Growth built-in room minutes per month' })).not.toBeInTheDocument();

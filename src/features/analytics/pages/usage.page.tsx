@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Badge, Bar, Card, CountUp, Empty, ErrorState, Screen, SkeletonRows, TRow } from '@/components/ui';
 import { useCan } from '@/features/auth/useCan';
-import { money, monthName, num } from '@/lib/format';
+import { money, monthName, num, timeAgo } from '@/lib/format';
 import { useUsage } from '../api';
 import { KpiSkeletons } from '../components/charts';
 import { compactCount, formatGb } from '../format';
@@ -10,15 +10,15 @@ import type { Usage, UsageMeter } from '../types';
 
 const meterLabel = (m: UsageMeter) => tPlain(`usage.meter.${m}`);
 /** Storage is a point-in-time total; the other meters reset each billing month. */
-const MONTHLY: Record<UsageMeter, boolean> = { storage: false, bandwidth: true, transcode: true, api_requests: true };
+const MONTHLY: Record<UsageMeter, boolean> = { storage: false, bandwidth: true, transcode: true, api_requests: true, video_delivery: true };
 
 function formatMeter(meter: UsageMeter, n: number) {
   if (meter === 'storage' || meter === 'bandwidth') return formatGb(n);
-  if (meter === 'transcode') return tPlain('usage.minutes', { value: compactCount(n) });
+  if (meter === 'transcode' || meter === 'video_delivery') return tPlain('usage.minutes', { value: compactCount(n) });
   return compactCount(n);
 }
 
-const COLS = 'minmax(190px,1.6fr) 80px 90px 90px 80px minmax(150px,1fr)';
+const COLS = 'minmax(190px,1.6fr) 80px 90px 90px 80px 90px minmax(150px,1fr)';
 const NUM = { textAlign: 'right' } as const;
 
 function Capacity({ u }: { u: Usage }) {
@@ -54,6 +54,10 @@ function Capacity({ u }: { u: Usage }) {
               {t('usage.used', { pct: c.usedPct })}
             </div>
           )}
+          <p className="faint" style={{ fontSize: 11, lineHeight: 1.45, margin: '8px 0 0' }}>
+            {t(`usage.source.${c.meter}`)}{' '}
+            <span className="nowrap">{c.updatedAt ? t('usage.updated', { when: timeAgo(c.updatedAt) }) : t('usage.notMeasured')}</span>
+          </p>
         </section>
       ))}
     </div>
@@ -77,7 +81,7 @@ export default function UsagePage() {
 
   return (
     <Screen max={1150} label={t('usage.title')}>
-      {u ? <Capacity u={u} /> : <KpiSkeletons n={4} />}
+      {u ? <Capacity u={u} /> : <KpiSkeletons n={5} />}
 
       <Card title={month ? t('usage.topConsumersIn', { month }) : t('usage.topConsumers')} className="table-scroll">
         {!u ? (
@@ -86,7 +90,7 @@ export default function UsagePage() {
           <Empty>{t('usage.empty')}</Empty>
         ) : (
           <div role="table" aria-label={t('usage.topConsumers')}>
-            <TRow cols={COLS} min={760} head style={{ gap: 14 }}>
+            <TRow cols={COLS} min={860} head style={{ gap: 14 }}>
               <div role="columnheader">{t('usage.cols.tenant')}</div>
               <div role="columnheader" style={NUM}>
                 {t('usage.cols.storage')}
@@ -101,11 +105,14 @@ export default function UsagePage() {
                 {t('usage.cols.api')}
               </div>
               <div role="columnheader" style={NUM}>
+                {t('usage.cols.delivered')}
+              </div>
+              <div role="columnheader" style={NUM}>
                 {t('usage.cols.share')}
               </div>
             </TRow>
             {u.topConsumers.map((r) => (
-              <TRow key={r.tenantId} cols={COLS} min={760} style={{ gap: 14, padding: '11px 0' }}>
+              <TRow key={r.tenantId} cols={COLS} min={860} style={{ gap: 14, padding: '11px 0' }}>
                 <div role="cell" className="min0" style={{ fontWeight: 600 }}>
                   {can('tenants.view') ? (
                     <Link to={`/tenants/${r.tenantId}`} style={{ color: 'inherit' }}>
@@ -131,6 +138,9 @@ export default function UsagePage() {
                 </div>
                 <div role="cell" className="mono t-sm" style={NUM}>
                   {compactCount(r.apiRequests)}
+                </div>
+                <div role="cell" className="mono t-sm" style={NUM}>
+                  {t('usage.minutes', { value: compactCount(r.videoDeliveryMinutes) })}
                 </div>
                 <div role="cell" className="hstack" style={{ justifyContent: 'flex-end' }}>
                   <Bar value={r.sharePct} size="md" style={{ flex: 'none', width: 110 }} />

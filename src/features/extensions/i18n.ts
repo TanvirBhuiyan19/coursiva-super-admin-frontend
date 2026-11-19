@@ -57,6 +57,7 @@ export const { t, useT } = defineMessages('extensions', {
   },
   catalogue: {
     table: 'Extension catalogue',
+    featuresLabel: 'What {name} includes',
     cols: {
       extension: 'Extension',
       category: 'Category',

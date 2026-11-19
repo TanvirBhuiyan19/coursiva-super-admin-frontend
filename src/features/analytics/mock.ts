@@ -2,10 +2,23 @@
 // table with the rules in `mocks/derive.ts`; platform telemetry lives in feature tables below.
 import { http } from 'msw';
 import { PLANS, type Plan } from '@/lib/domain';
-import { flags, overages, tenants, type TenantRow } from '@/mocks/collections';
+import { flags, overages, tenants, type FlagRow, type TenantRow } from '@/mocks/collections';
 import { collection, ago, singleton } from '@/mocks/db';
 import { tenantHealth, tenantHealthScore, tenantMrr } from '@/mocks/derive';
-import { authorize, handle, invalid, notFound, ok, paginate, query, readBody, recordAudit, route } from '@/mocks/http';
+import {
+  authorize,
+  handle,
+  HttpError,
+  invalid,
+  noContent,
+  notFound,
+  ok,
+  paginate,
+  query,
+  readBody,
+  recordAudit,
+  route,
+} from '@/mocks/http';
 import {
   AI_FEATURES,
   ROUTING_POLICIES,
@@ -13,7 +26,11 @@ import {
   type AiSettingsInput,
   type AiTenantUsage,
   type AiUsage,
+  EXPERIMENT_METRICS,
   type Experiment,
+  type ExperimentDetail,
+  type ExperimentInput,
+  type ExperimentMetric,
   type Experiments,
   type Growth,
   type Health,
@@ -45,8 +62,8 @@ const GROWTH_KPIS = {
   trialConversionDeltaPts: 4,
   netRevenueRetentionPct: 112,
   netRevenueRetentionDeltaPts: 3,
-  nps: 54,
-  npsDelta: 6,
+  nps: null,
+  npsDelta: null,
   logoChurnPct: 2.1,
   logoChurnDeltaPts: -0.4,
 };
@@ -54,14 +71,16 @@ const GROWTH_KPIS = {
 /** Retention curves for the last six signup cohorts, oldest first. */
 const COHORT_CURVES = [[100, 68, 54, 47, 43, 41], [100, 71, 58, 50, 46], [100, 74, 60, 53], [100, 76, 63], [100, 79], [100]];
 
-/** Onboarding stage shape: 100 = every tenant, 38 = only paying tenants (interpolated between). */
-const ONBOARDING_SHAPE: [OnboardingStage, number][] = [
-  ['provisioned', 100],
-  ['branding', 88],
-  ['first_course', 71],
-  ['first_sale', 50],
-  ['paid', 38],
-];
+/**
+ * A mock school's onboarding facts (Laravel tenant_metrics.branded_at / published_courses / first_sale_at). The mock
+ * rows carry no brand, course or order records, so a school with students stands in for one that published a course
+ * and sold; branding is set once it has students or pays.
+ */
+function reached(t: TenantRow): Record<Exclude<OnboardingStage, 'provisioned'>, boolean> {
+  const pays = tenantMrr(t) > 0;
+  return { branding: t.students > 0 || pays, first_course: t.students > 0, first_sale: t.students > 0, paid: pays };
+}
+const STAGES = ['branding', 'first_course', 'first_sale', 'paid'] as const;
 
 /** Growth's health list: the shared tenant health score, with its falling signals as the driver text. */
 function healthScore(t: TenantRow) {
@@ -113,38 +132,36 @@ function growth(): Growth {
   const paying = all.filter((t) => tenantMrr(t) > 0);
   const mrr = paying.reduce((s, t) => s + tenantMrr(t), 0);
 
-  // Acquisition funnel: anchored on real conversions and live trials, scaled up the funnel with benchmark rates.
+  // Acquisition funnel of the last 90 days' signups (Laravel AnalyticsController::funnel): real counts only; visitors
+  // are not tracked (null). Rates are shares of signups.
   const since = Date.now() - 90 * DAY;
-  const converted = Math.max(1, all.filter((t) => new Date(t.createdAt).getTime() >= since).length);
-  const trials = converted + all.filter((t) => t.status === 'Trial').length + 2;
-  const activated = Math.round(trials / 0.53);
-  const signups = Math.round(activated / 0.62);
-  const visitors = Math.round(signups / 0.04);
-  const counts = [visitors, signups, activated, trials, converted];
-  const funnel = (['visitors', 'signups', 'activated', 'trials', 'converted'] as const).map((stage, i) => {
-    const prev = i > 0 ? counts[i - 1]! : 0;
-    return { stage, count: counts[i]!, ratePct: i > 0 && prev ? round1((counts[i]! / prev) * 100) : null };
-  });
+  const cohort = all.filter((t) => new Date(t.createdAt).getTime() >= since);
+  const signups = cohort.length;
+  const share = (n: number) => (signups ? round1((n / signups) * 100) : null);
+  const activated = cohort.filter((t) => reached(t).first_course).length;
+  const trials = cohort.filter((t) => t.trialEndsAt != null).length;
+  const converted = cohort.filter((t) => tenantMrr(t) > 0).length;
+  const funnel: Growth['funnel'] = [
+    { stage: 'visitors', count: null, ratePct: null },
+    { stage: 'signups', count: signups, ratePct: null },
+    { stage: 'activated', count: activated, ratePct: share(activated) },
+    { stage: 'trials', count: trials, ratePct: share(trials) },
+    { stage: 'converted', count: converted, ratePct: share(converted) },
+  ];
 
-  // Onboarding: the last stage equals paying tenants; earlier stages interpolate up to every tenant.
-  const floor = all.length ? paying.length / all.length : 0;
-  const onboarding = ONBOARDING_SHAPE.map(([stage, shape]) => {
-    const share = floor + ((1 - floor) * (shape - 38)) / 62;
-    return { stage, tenants: Math.max(paying.length, Math.round(all.length * share)) };
-  });
-  const candidates = [...all].sort(
-    (x, y) => (x.status === 'Trial' ? -1 : y.status === 'Trial' ? 1 : 0) || x.students - y.students || x.name.localeCompare(y.name),
-  );
-  const stuck: Growth['stuck'] = [];
-  let next = 0;
-  onboarding.forEach((sg, i) => {
-    if (i === 0) return;
-    const gap = onboarding[i - 1]!.tenants - sg.tenants;
-    for (let k = 0; k < gap && next < candidates.length; k++) {
-      const t = candidates[next++]!;
-      stuck.push({ tenantId: t.id, name: t.name, stage: sg.stage, days: Math.min(daysSince(t.createdAt), 11 + (t.name.length % 14)) });
-    }
-  });
+  // Onboarding of the same cohort; stuck = any school not yet paying, idle 10+ days at its first unreached stage.
+  const onboarding: Growth['onboarding'] = [
+    { stage: 'provisioned', tenants: cohort.length },
+    ...STAGES.map((stage) => ({ stage, tenants: cohort.filter((t) => reached(t)[stage]).length })),
+  ];
+  const stuck: Growth['stuck'] = [...all]
+    .sort((x, y) => (x.status === 'Trial' ? -1 : y.status === 'Trial' ? 1 : 0) || x.students - y.students || x.name.localeCompare(y.name))
+    .flatMap((t) => {
+      const stage = STAGES.find((s) => !reached(t)[s]);
+      const days = daysSince(t.createdAt);
+      return stage && days >= 10 ? [{ tenantId: t.id, name: t.name, stage, days }] : [];
+    })
+    .slice(0, 5);
 
   return {
     kpis: { revenuePerTenant: paying.length ? Math.round(mrr / paying.length) : 0, payingTenants: paying.length, ...GROWTH_KPIS },
@@ -168,6 +185,8 @@ interface TenantUsageRow {
   bandwidthGb: number;
   videoMinutes: number;
   apiRequests: number;
+  /** Mux minutes delivered to learners this month. */
+  videoDeliveryMinutes: number;
 }
 const U = (id: string, storageTb: number, bandwidthTb: number, videoK: number, apiM: number): TenantUsageRow => ({
   id,
@@ -175,6 +194,8 @@ const U = (id: string, storageTb: number, bandwidthTb: number, videoK: number, a
   bandwidthGb: bandwidthTb * 1000,
   videoMinutes: videoK * 1000,
   apiRequests: apiM * 1_000_000,
+  // Learners watch roughly six times what schools upload in a month.
+  videoDeliveryMinutes: videoK * 6000,
 });
 /** Metered usage this month per tenant (tenants without a row have used nothing yet). */
 export const tenantUsage = collection<TenantUsageRow>('analyticsTenantUsage', () => [
@@ -191,16 +212,31 @@ export const tenantUsage = collection<TenantUsageRow>('analyticsTenantUsage', ()
 ]);
 
 /** Provisioned platform capacity per meter (same units as `Usage.capacity`). */
-export const platformCapacity = singleton<Record<'storageGb' | 'bandwidthGb' | 'videoMinutes' | 'apiRequests', number>>(
-  'analyticsCapacity',
-  () => ({ storageGb: 100_000, bandwidthGb: 250_000, videoMinutes: 2_200_000, apiRequests: 150_000_000 }),
-);
+export const platformCapacity = singleton<
+  Record<'storageGb' | 'bandwidthGb' | 'videoMinutes' | 'apiRequests' | 'videoDeliveryMinutes', number>
+>('analyticsCapacity', () => ({
+  storageGb: 100_000,
+  bandwidthGb: 250_000,
+  videoMinutes: 2_200_000,
+  apiRequests: 150_000_000,
+  videoDeliveryMinutes: 15_000_000,
+}));
+
+/** When each meter was last measured (storage and API hourly; bandwidth and video delivery daily, as the backends do). */
+const METER_UPDATED: Record<UsageMeter, () => string> = {
+  storage: () => ago({ m: 25 }),
+  bandwidth: () => ago({ h: 9 }),
+  transcode: () => ago({ m: 40 }),
+  api_requests: () => ago({ m: 55 }),
+  video_delivery: () => ago({ h: 9 }),
+};
 
 const METER_FIELD: Record<UsageMeter, keyof Omit<TenantUsageRow, 'id'>> = {
   storage: 'storageGb',
   bandwidth: 'bandwidthGb',
   transcode: 'videoMinutes',
   api_requests: 'apiRequests',
+  video_delivery: 'videoDeliveryMinutes',
 };
 
 function usage(): Usage {
@@ -213,7 +249,7 @@ function usage(): Usage {
   >;
   const capacity = meters.map(([meter, f]) => {
     const usedPct = cap[f] ? Math.round((totals[f] / cap[f]) * 100) : 0;
-    return { meter, used: round1(totals[f]), capacity: cap[f], usedPct, nearLimit: usedPct >= 80 };
+    return { meter, used: round1(totals[f]), capacity: cap[f], usedPct, nearLimit: usedPct >= 80, updatedAt: METER_UPDATED[meter]() };
   });
   const unbilled = overages.where((o) => !o.billedAt);
   const topConsumers = rows
@@ -227,6 +263,7 @@ function usage(): Usage {
         bandwidthGb: u.bandwidthGb,
         videoMinutes: u.videoMinutes,
         apiRequests: u.apiRequests,
+        videoDeliveryMinutes: u.videoDeliveryMinutes,
         sharePct: Math.round(share * 100),
         // Laravel sends the meter's display name here (AnalyticsController::METER_LABELS).
         overage: ov ? { meter: METER_LABELS[ov.meter], amount: ov.amount } : null,
@@ -383,7 +420,9 @@ function aiUsage(all = false): AiUsage {
       tenants: list.length,
       throttled: list.filter((r) => r.throttled).length,
       modelCost: round2(list.reduce((sum, r) => sum + r.modelCost, 0)),
-      capUsedPct: s.monthlyCap ? Math.round((spend / s.monthlyCap) * 100) : 0,
+      // The cap is enforced on the real model cost: at 100% every school routes to the fastest model.
+      capUsedPct: s.monthlyCap ? Math.round((list.reduce((sum, r) => sum + r.modelCost, 0) / s.monthlyCap) * 100) : 0,
+      capReached: s.monthlyCap > 0 && list.reduce((sum, r) => sum + r.modelCost, 0) >= s.monthlyCap,
     },
     tenants: all ? list : ranked(list, '-tokens_k', AI_SORTS, (r) => r.tenantId).slice(0, TOP),
     byFeature,
@@ -408,6 +447,12 @@ interface ExperimentRow {
   confidence: number;
   status: Experiment['status'];
   endedAt: string | null;
+  metric?: ExperimentMetric;
+  allocationPct?: number;
+  hypothesis?: string | null;
+  /** The flag's state before the experiment (Stop restores it). */
+  previousFlag?: { enabled: boolean; rollout: string } | null;
+  startedAt?: string;
 }
 export const experiments = collection<ExperimentRow>('analyticsExperiments', () => [
   {
@@ -435,10 +480,10 @@ export const experiments = collection<ExperimentRow>('analyticsExperiments', () 
     endedAt: null,
   },
   {
-    id: 'ex_multi_currency',
-    name: 'Multi-currency checkout',
-    surface: 'Checkout',
-    flagKey: 'multi_currency',
+    id: 'ex_advanced_reports',
+    name: 'Advanced reports',
+    surface: 'Analytics',
+    flagKey: 'advanced_reports',
     exposed: 2260,
     controlPct: 3.9,
     variantPct: 3.1,
@@ -472,9 +517,31 @@ export const experiments = collection<ExperimentRow>('analyticsExperiments', () 
   },
 ]);
 
+const MIN_TENANTS = 30;
+const METRIC_LABEL: Record<ExperimentMetric, string> = {
+  trial_converted: 'Trial converted to paid',
+  activated_14d: 'Published a course within 14 days',
+  active_30d: 'Active within 30 days',
+  addon_purchased: 'Bought an add-on',
+};
+/** Exposed schools per arm (the mock splits `exposed` by the allocation). */
+const armCounts = (r: ExperimentRow) => {
+  const variantN = Math.round((r.exposed * (r.allocationPct ?? 50)) / 100);
+  return { controlN: r.exposed - variantN, variantN };
+};
+
 function toExperiment(r: ExperimentRow): Experiment {
   const liftPct = r.controlPct ? round1(((r.variantPct - r.controlPct) / r.controlPct) * 100) : 0;
-  const verdict = r.confidence >= 0.9 && liftPct > 0 ? 'Winning' : r.confidence >= 0.9 && liftPct < 0 ? 'Losing' : 'Inconclusive';
+  const { controlN, variantN } = armCounts(r);
+  const collecting = r.exposed > 0 && (controlN < MIN_TENANTS || variantN < MIN_TENANTS);
+  const verdict: Experiment['verdict'] = collecting
+    ? 'Collecting data'
+    : r.confidence >= 0.9 && liftPct > 0
+      ? 'Winning'
+      : r.confidence >= 0.9 && liftPct < 0
+        ? 'Losing'
+        : 'Inconclusive';
+  const metric = r.metric ?? 'trial_converted';
   return {
     id: r.id,
     name: r.name,
@@ -485,11 +552,28 @@ function toExperiment(r: ExperimentRow): Experiment {
     variantPct: r.variantPct,
     liftPct,
     confidencePct: Math.round(r.confidence * 100),
-    significant: r.confidence >= 0.95,
+    significant: !collecting && r.confidence >= 0.95,
     verdict,
     status: r.status,
     endedAt: r.endedAt,
+    metric,
+    metricLabel: METRIC_LABEL[metric],
+    allocationPct: r.allocationPct ?? 50,
+    hypothesis: r.hypothesis ?? null,
+    controlN,
+    variantN,
+    startedAt: r.startedAt ?? ago({ d: 21 }),
   };
+}
+
+function toDetail(r: ExperimentRow): ExperimentDetail {
+  const e = toExperiment(r);
+  const conv = (n: number, pct: number) => Math.round((n * pct) / 100);
+  const arms = [
+    { arm: 'control' as const, exposed: e.controlN, converted: conv(e.controlN, e.controlPct) },
+    { arm: 'variant' as const, exposed: e.variantN, converted: conv(e.variantN, e.variantPct) },
+  ].map((a) => ({ ...a, ratePct: a.exposed ? round2((a.converted / a.exposed) * 100) : 0 }));
+  return { ...e, arms, previousFlag: r.previousFlag ?? null, minTenants: MIN_TENANTS };
 }
 
 function experimentsBody(): Experiments {
@@ -655,6 +739,110 @@ export const handlers = [
     }),
   ),
 
+  http.get(
+    route('/analytics/experiments/:id'),
+    handle<{ id: string }>(({ params }) => {
+      authorize('analytics.view');
+      const row = experiments.find(params.id);
+      if (!row) throw notFound('Experiment');
+      return ok(toDetail(row));
+    }),
+  ),
+
+  http.post(
+    route('/analytics/experiments'),
+    handle(async ({ request }) => {
+      authorize('platform.manage');
+      const body = await readBody<ExperimentInput>(request);
+      const errors: Record<string, string> = {};
+      if (!body.name?.trim()) errors.name = 'The name field is required.';
+      else if (body.name.length > 120) errors.name = 'The name field must not be greater than 120 characters.';
+      if (!body.surface?.trim()) errors.surface = 'The surface field is required.';
+      const flag = body.flagKey ? flags.find(body.flagKey) : undefined;
+      if (!flag) errors.flagKey = 'Choose a feature flag.';
+      if (!(EXPERIMENT_METRICS as readonly string[]).includes(body.metric)) errors.metric = 'Choose a metric.';
+      if (!Number.isInteger(body.allocationPct) || body.allocationPct < 1 || body.allocationPct > 50)
+        errors.allocationPct = 'Send between 1% and 50% of schools to the variant.';
+      if ((body.hypothesis ?? '').length > 300) errors.hypothesis = 'The hypothesis field must not be greater than 300 characters.';
+      if (Object.keys(errors).length) throw invalid(errors);
+      if (!flag!.gates) {
+        throw new HttpError(
+          422,
+          'Nothing in the product reads this flag yet, so both groups would get the same experience. Choose a flag that gates a feature.',
+          undefined,
+          'experiment_flag_no_effect',
+        );
+      }
+      if (experiments.where((e) => e.status === 'running' && e.flagKey === body.flagKey).length) {
+        throw new HttpError(422, 'Another running experiment already uses this flag. Stop it first.', undefined, 'experiment_flag_busy');
+      }
+      // A flag that already reaches schools would be switched off for the control group (Beta list = overridden only).
+      if (flag!.enabled && flag!.rollout !== 'Beta list') {
+        throw new HttpError(
+          422,
+          flag!.rollout === 'All tenants'
+            ? 'This feature is already on for every school; an experiment would switch it off for the control group.'
+            : `This feature is already on for some schools (${flag!.rollout}); an experiment would switch it off for those in the control group. Turn the flag off first.`,
+          undefined,
+          'experiment_flag_already_live',
+        );
+      }
+      const row: ExperimentRow = {
+        id: `exa_${Date.now().toString(36)}`,
+        name: body.name.trim(),
+        surface: body.surface.trim(),
+        flagKey: flag!.id,
+        exposed: 0,
+        controlPct: 0,
+        variantPct: 0,
+        confidence: 0,
+        status: 'running',
+        endedAt: null,
+        metric: body.metric,
+        allocationPct: body.allocationPct,
+        hypothesis: body.hypothesis?.trim() || null,
+        previousFlag: { enabled: flag!.enabled, rollout: flag!.rollout },
+        startedAt: new Date().toISOString(),
+      };
+      experiments.insert(row);
+      recordAudit(`Started experiment "${row.name}" on ${row.flagKey} (${row.allocationPct}% of schools in the variant)`, 'Flags');
+      return ok(toDetail(row), 201);
+    }),
+  ),
+
+  http.patch(
+    route('/analytics/experiments/:id'),
+    handle<{ id: string }>(async ({ params, request }) => {
+      authorize('platform.manage');
+      const row = experiments.find(params.id);
+      if (!row) throw notFound('Experiment');
+      const body = await readBody<{ name?: string; hypothesis?: string | null }>(request);
+      if (body.name !== undefined && !body.name.trim()) throw invalid({ name: 'The name field is required.' });
+      if ((body.hypothesis ?? '').length > 300)
+        throw invalid({ hypothesis: 'The hypothesis field must not be greater than 300 characters.' });
+      experiments.update(row.id, {
+        ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+        ...(body.hypothesis !== undefined ? { hypothesis: body.hypothesis?.trim() || null } : {}),
+      });
+      const fresh = experiments.find(row.id)!;
+      recordAudit(`Edited experiment "${fresh.name}"`, 'Flags');
+      return ok(toDetail(fresh));
+    }),
+  ),
+
+  http.delete(
+    route('/analytics/experiments/:id'),
+    handle<{ id: string }>(({ params }) => {
+      authorize('platform.manage');
+      const row = experiments.find(params.id);
+      if (!row) throw notFound('Experiment');
+      if (row.status === 'running') throw new HttpError(409, 'Stop this experiment before deleting it.', undefined, 'conflict');
+      experiments.remove(row.id);
+      recordAudit(`Deleted experiment "${row.name}" and its results`, 'Flags');
+      return noContent();
+    }),
+  ),
+
   http.post(
     route('/analytics/experiments/:id/promote'),
     handle<{ id: string }>(({ params }) => {
@@ -673,6 +861,9 @@ export const handlers = [
       authorize('platform.manage');
       const row = runningExperiment(params.id);
       experiments.update(row.id, { status: 'stopped', endedAt: new Date().toISOString() });
+      // The flag goes back to the state saved when the experiment started.
+      if (row.flagKey && row.previousFlag && flags.find(row.flagKey))
+        flags.update(row.flagKey, { enabled: row.previousFlag.enabled, rollout: row.previousFlag.rollout as FlagRow['rollout'] });
       recordAudit(`Stopped experiment "${row.name}" — traffic returned to control`, 'Flags');
       return ok(experimentsBody());
     }),

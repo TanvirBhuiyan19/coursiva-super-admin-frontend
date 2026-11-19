@@ -648,9 +648,18 @@ export interface FlagRow {
   description: string;
   enabled: boolean;
   rollout: 'All tenants' | 'Scale only' | 'Growth and Scale' | 'Beta list' | '10% of tenants';
+  /** What the flag switches (null: nothing reads it; experiments refuse it). */
+  gates: string | null;
 }
 export const flags = collection<FlagRow>('flags', () =>
-  FEATURE_FLAGS.map((f) => ({ id: f.key, name: f.name, description: f.description, enabled: f.enabled, rollout: 'All tenants' as const })),
+  FEATURE_FLAGS.map((f) => ({
+    id: f.key,
+    name: f.name,
+    description: f.description,
+    enabled: f.enabled,
+    rollout: 'All tenants' as const,
+    gates: f.gates,
+  })),
 );
 
 export interface PlatformStatus {

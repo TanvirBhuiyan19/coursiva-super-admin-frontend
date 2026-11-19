@@ -32,6 +32,7 @@ import {
 import { EXTENSIONS, FEATURE_FLAGS, TENANT_OVERRIDABLE_FLAGS } from '@/mocks/reference';
 import { LIMIT_KEYS, LIMIT_WIRE_KEYS, PLANS, REGIONS, type LimitKey, type TenantStatus } from '@/lib/domain';
 import type { BulkTenantAction, ProvisionTenantInput, Tenant, TenantDetail, TenantSegment, TenantUpdate } from './types';
+import { isTimezone } from '@/features/settings/validation';
 
 const DAY = 86_400_000;
 
@@ -349,6 +350,9 @@ export const handlers = [
         errors.name = 'A tenant with this name already exists.';
       if (!isEmail(email)) errors.ownerEmail = 'The owner email must be a valid email address.';
       if (!plan) errors.plan = 'The selected plan is invalid.';
+      // Laravel TenantRules: `timezone` is optional and must be an IANA zone.
+      if (body.timezone != null && (typeof body.timezone !== 'string' || !isTimezone(body.timezone)))
+        errors.timezone = 'The timezone field must be a valid timezone.';
       if (!plan || Object.keys(errors).length) throw invalid(errors);
       // Laravel TenantRules::slugFrom: hyphenated, at most 40 characters.
       const base = slug(name).slice(0, 40).replace(/-+$/g, '') || 'school';

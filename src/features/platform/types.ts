@@ -12,6 +12,8 @@ export interface FeatureFlag {
   rollout: FlagRollout;
   /** Tenants that override this flag individually (from the tenant drawer). */
   tenantOverrides: number;
+  /** What the flag switches in the product; null when nothing reads it yet (console experiments refuse it). */
+  gates: string | null;
 }
 
 export type FlagUpdate = Partial<{ enabled: boolean; rollout: FlagRollout }>;

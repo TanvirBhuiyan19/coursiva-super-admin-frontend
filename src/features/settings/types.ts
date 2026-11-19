@@ -204,11 +204,26 @@ export interface IntegrationSettings {
   requests: IntegrationRequest[];
 }
 
+/** A tax registration on the platform's Stripe account (Stripe Tax registrations). */
 export interface TaxRegion {
+  /** Stripe's registration id (`taxreg_…`). */
   id: string;
+  /** ISO country code, e.g. `GB`. */
   region: string;
+  /** Stripe's registration type, e.g. `standard`, `oss_union`. */
   kind: string;
-  rate: string;
+  /** Stripe Tax computes the rate per invoice: always null. */
+  rate: string | null;
+  status: string;
+  activeFrom: string | null;
+  expiresAt: string | null;
+}
+
+/** POST /settings/tax/regions. `activeFrom` is an ISO date (default: now). */
+export interface TaxRegistrationInput {
+  country: string;
+  type: string;
+  activeFrom?: string;
 }
 
 export interface TaxSettings {
@@ -218,9 +233,25 @@ export interface TaxSettings {
   nextInvoiceNumber: number;
   /** Lowest allowed next number (last issued + 1) — numbering is sequential and gap-free. */
   minNextInvoiceNumber: number;
-  /** e.g. "CV-020261". */
+  /** e.g. "CV-20261" (prefix + the plain number). */
   nextInvoicePreview: string;
+  /** Stripe's registrations (empty when Stripe isn't connected or a merchant of record collects tax). */
   regions: TaxRegion[];
+  /** Stripe answered (false: not connected or unreachable). */
+  registrationsAvailable: boolean;
+  /** `paddle` or `lemon_squeezy` when a merchant of record collects tax itself (the toggles don't apply), else null. */
+  handledBy: string | null;
 }
 
 export type TaxSettingsUpdate = Partial<Pick<TaxSettings, 'stripeTax' | 'taxInclusive' | 'invoicePrefix' | 'nextInvoiceNumber'>>;
+
+/** Stripe registration types the console offers (Stripe validates them per country). */
+export const TAX_REGISTRATION_TYPES = [
+  'standard',
+  'simplified',
+  'oss_union',
+  'oss_non_union',
+  'ioss',
+  'state_sales_tax',
+  'province_standard',
+] as const;

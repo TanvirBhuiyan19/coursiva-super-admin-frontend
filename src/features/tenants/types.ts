@@ -135,6 +135,8 @@ export interface ProvisionTenantInput {
   name: string;
   ownerEmail: string;
   plan: PlanKey;
+  /** IANA time zone for the school (`site.timezone`); omitted → the console's default timezone. */
+  timezone?: string;
 }
 
 export type TenantUpdate = Partial<{ plan: Plan; region: Region; notes: string | null }>;

@@ -36,7 +36,12 @@ function Kpis({ k }: { k: Growth['kpis'] }) {
         value={`${k.netRevenueRetentionPct}%`}
         {...d(k.netRevenueRetentionDeltaPts, 'pts')}
       />
-      <Kpi label={t('growth.kpis.averageNps')} value={num(k.nps)} {...d(k.npsDelta, '')} />
+      {/* Not tracked until a school-NPS survey exists: never a made-up number. */}
+      <Kpi
+        label={t('growth.kpis.averageNps')}
+        value={k.nps == null ? t('growth.funnel.notTracked') : num(k.nps)}
+        {...(k.npsDelta == null ? {} : d(k.npsDelta, ''))}
+      />
       <Kpi label={t('growth.kpis.logoChurn')} value={`${k.logoChurnPct}%`} {...d(k.logoChurnDeltaPts, 'pts', false)} />
     </div>
   );
@@ -44,7 +49,9 @@ function Kpis({ k }: { k: Growth['kpis'] }) {
 
 function AcquisitionFunnel({ funnel }: { funnel: Growth['funnel'] }) {
   const t = useT();
-  const max = Math.max(...funnel.map((f) => f.count), 1);
+  const max = Math.max(...funnel.map((f) => f.count ?? 0), 1);
+  // A stage with no data source is shown as "Not tracked", never as a number.
+  const count = (n: number | null) => (n == null ? t('growth.funnel.notTracked') : num(n));
   return (
     <figure style={{ margin: 0 }}>
       <div className="stack" style={{ gap: 10, marginTop: 8 }} aria-hidden="true">
@@ -52,8 +59,8 @@ function AcquisitionFunnel({ funnel }: { funnel: Growth['funnel'] }) {
           <FunnelBar
             key={f.stage}
             label={funnelLabel(f.stage)}
-            right={num(f.count)}
-            width={logWidth(f.count, max)}
+            right={count(f.count)}
+            width={f.count == null ? 0 : logWidth(f.count, max)}
             h={18}
             foot={f.ratePct != null ? t(`growth.funnel.rate.${f.stage}`, { rate: f.ratePct }) : undefined}
           />
@@ -76,7 +83,7 @@ function AcquisitionFunnel({ funnel }: { funnel: Growth['funnel'] }) {
             {funnel.map((f) => (
               <tr key={f.stage}>
                 <th scope="row">{funnelLabel(f.stage)}</th>
-                <td>{num(f.count)}</td>
+                <td>{count(f.count)}</td>
                 <td>{f.ratePct != null ? `${f.ratePct}%` : '—'}</td>
               </tr>
             ))}
@@ -147,7 +154,8 @@ function CohortTable({ cohorts }: { cohorts: Growth['cohorts'] }) {
 
 function Onboarding({ g }: { g: Growth }) {
   const t = useT();
-  const total = Math.max(1, g.totalTenants);
+  // Bars relative to the cohort (the provisioned stage).
+  const total = Math.max(1, g.onboarding[0]?.tenants ?? 0);
   return (
     <figure style={{ margin: 0 }}>
       <div className="stack" style={{ gap: 10, marginTop: 8 }} aria-hidden="true">

@@ -1,8 +1,11 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { api } from '@/lib/api/client';
 import { audit, dsars, staff, tenants } from '@/mocks/collections';
 import { PLAN_LIMITS } from '@/mocks/reference';
+import { route } from '@/mocks/http';
+import { server } from '@/mocks/server';
 import { renderApp, signInAs } from '@/test/utils';
 import { IP_ERROR } from './ip';
 import { acceptances, blockedIps, policies, rateLimits, reminders, reports, retention, signals } from './mock';
@@ -86,7 +89,34 @@ describe('compliance & privacy', () => {
     expect(router.state.location.search).toBe('?section=retention');
     await user.selectOptions(await screen.findByRole('combobox', { name: 'Audit & security logs retention' }), '3 years');
     await waitFor(() => expect(retention.get().periods.audit_logs).toBe('3 years'));
-    expect(audited('Retention for audit & security logs set to 3 years', 'Security')).toBe(true);
+    expect(audited('Retention for audit & security logs set to 3 years (applies from the next nightly run)', 'Security')).toBe(true);
+  });
+
+  it('confirms a shorter period with the count it would purge, and keeps payment records above the legal floor', async () => {
+    signInAs('Owner');
+    const { user } = renderApp('/governance/compliance?section=retention');
+    const select = await screen.findByRole('combobox', { name: 'Deleted student records retention' });
+    await user.selectOptions(select, '30 days');
+    const dialog = await screen.findByRole('dialog', { name: /Shorten Deleted student records/ });
+    expect(await within(dialog).findByText(/will purge or anonymise \d+ records? now past the new period/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Shorten period' }));
+    await waitFor(() => expect(retention.get().periods.deleted_students).toBe('30 days'));
+    const payments = screen.getByRole('combobox', { name: 'Payment & invoice records retention' });
+    expect(within(payments).queryByRole('option', { name: '1 year' })).not.toBeInTheDocument();
+    expect(within(payments).getByRole('option', { name: '10 years' })).toBeInTheDocument();
+  });
+
+  // W6 e2e: a failed count read "Nothing is past the new period today" — an irreversible purge confirmed on a guess.
+  it('says so when it can’t count the affected records instead of claiming nothing is affected', async () => {
+    server.use(
+      http.get(route('/governance/retention/:key/preview'), () => HttpResponse.json({ message: 'Server Error' }, { status: 500 })),
+    );
+    signInAs('Owner');
+    const { user } = renderApp('/governance/compliance?section=retention');
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Deleted student records retention' }), '30 days');
+    const dialog = await screen.findByRole('dialog', { name: 'Shorten Deleted student records to 30 days?' });
+    expect(await within(dialog).findByText(/We couldn’t count the records past the new period/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Nothing is past the new period/)).not.toBeInTheDocument();
   });
 
   it('is read-only without governance.manage', async () => {

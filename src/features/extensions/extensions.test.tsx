@@ -23,6 +23,26 @@ describe('extension catalogue', () => {
     expect(await screen.findByText('Extension MRR')).toBeInTheDocument();
   });
 
+  it('shows staff what Video protection includes, and that DRM is not offered without a Mux DRM configuration', async () => {
+    signInAs('Owner');
+    renderApp('/extensions');
+    const vp = await row(/Video protection/);
+    const list = within(vp).getByRole('list', { name: 'What Video protection includes' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([
+      'Signed, expiring stream and file links',
+      'Dynamic watermark',
+      'PDF stamping',
+      'Geo restrictions',
+      'Concurrent-stream and device limits',
+    ]);
+    expect(within(vp).queryByText(/Studio-grade DRM/)).not.toBeInTheDocument();
+    expect(within(vp).getByRole('note')).toHaveTextContent('DRM: not offered — add a Mux DRM configuration ID to include it.');
+  });
+
   it('saves a price change on blur and audits it', async () => {
     signInAs('Owner');
     const { user } = renderApp('/extensions');
