@@ -8,6 +8,7 @@ import type { ComponentType } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import { sessionQuery } from '@/features/auth/api';
 import { permissionHint } from '@/features/auth/permissionHint';
+import { sessionEpoch } from '@/lib/api/client';
 import { lazyWithPreload, type Preloadable } from '@/lib/lazy';
 import { getActiveQueryClient } from '@/lib/queryClient';
 import { screenById, type ScreenId } from './screens';
@@ -49,9 +50,19 @@ export function preloadScreen(id: ScreenId) {
   if (!qc || !prefetcher) return;
   const permission = screenById[id].permission;
   const allowed = (perms: readonly string[]) => !permission || perms.includes(permission);
+  // The prefetch module may still be downloading when the session changes (sign-out, someone else signing in): its
+  // requests would then go out under the new session — a 401 ending it, or the previous person's screen warming for
+  // the next. Data is warmed only for the session that asked for it.
+  const startedAt = sessionEpoch();
   const run = () =>
     void prefetcher().then(
-      (m) => m.prefetch(qc),
+      (m) => {
+        if (sessionEpoch() !== startedAt || getActiveQueryClient() !== qc) {
+          warmed.delete(id);
+          return;
+        }
+        m.prefetch(qc);
+      },
       () => warmed.delete(id),
     );
 
