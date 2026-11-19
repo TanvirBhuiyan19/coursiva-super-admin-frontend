@@ -112,7 +112,9 @@ export const useUpdateStorage = () =>
 export function useRotateDrmKeys() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<Resource<DrmSettings>>('/media/drm/rotate-keys').then((r) => r.data),
+    // `immediate` (Owners only) revokes the old key at once; a 423 step-up is handled by lib/api/client.ts.
+    mutationFn: (immediate: boolean = false) =>
+      api.post<Resource<DrmSettings>>('/media/drm/rotate-keys', immediate ? { immediate: true } : undefined).then((r) => r.data),
     onSuccess: (s) => {
       qc.setQueryData(mediaKeys.drm(), s);
       void qc.invalidateQueries({ queryKey: ['audit'] });

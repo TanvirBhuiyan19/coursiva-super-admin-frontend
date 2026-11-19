@@ -16,7 +16,7 @@ describe('feature availability', () => {
     signInAs('Owner');
     renderApp('/platform/availability');
     const video = await screen.findByRole('region', { name: 'Video & live' });
-    expect(within(video).getByText('7 of 7 on')).toBeInTheDocument();
+    expect(within(video).getByText('8 of 8 on')).toBeInTheDocument();
     // Daily isn't connected in the seed: switched on, but not available.
     const rooms = row('Built-in live rooms');
     expect(within(rooms).getByText('Not connected')).toBeInTheDocument();
@@ -27,8 +27,9 @@ describe('feature availability', () => {
     expect(within(row('Zoom')).getByText('Available')).toBeInTheDocument();
     expect(within(row('SCORM & xAPI')).getByText('2 paying schools')).toBeInTheDocument();
     expect(within(row('Slack')).getByText('Usage not counted')).toBeInTheDocument();
-    // DRM needs any one of its providers: Mux is connected.
-    expect(within(row('Video DRM')).getByText('Available')).toBeInTheDocument();
+    // The drm extension needs Mux (connected); actual DRM also needs Mux's DRM configuration ID, which the seed lacks.
+    expect(within(row('Video protection')).getByText('Available')).toBeInTheDocument();
+    expect(within(row('DRM encryption')).getByText('Not connected')).toBeInTheDocument();
     expect(within(row('AI (Claude)')).getByRole('link', { name: 'Connect Anthropic' })).toHaveAttribute(
       'href',
       '/platform/connections?section=ai',

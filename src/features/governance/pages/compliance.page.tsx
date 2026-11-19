@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Badge,
   Card,
@@ -5,6 +6,7 @@ import {
   Empty,
   ErrorState,
   KpiRow,
+  Modal,
   Pagination,
   QueryState,
   Screen,
@@ -20,11 +22,11 @@ import type { Tone } from '@/lib/domain';
 import { daysUntil, formatDate, formatDateTime, timeAgo, toneFg } from '@/lib/format';
 import { useSection } from '@/lib/useSection';
 import { toast } from '@/store/ui';
-import { useComplianceSummary, useDsars, useFulfilDsar, useRetention, useSetRetention } from '../api';
+import { previewRetention, useComplianceSummary, useDsars, useFulfilDsar, useRetention, useSetRetention } from '../api';
 import { dueLabel } from '../components/format';
 import { SubProcessorsCard } from '../components/SubProcessorsCard';
 import { useT } from '../i18n';
-import { RETENTION_PERIODS, type Dsar, type DsarType } from '../types';
+import { RETENTION_PERIODS, type Dsar, type DsarType, type RetentionPeriod, type RetentionSetting } from '../types';
 
 const SECTIONS = ['dsars', 'retention', 'processors'] as const;
 
@@ -134,11 +136,37 @@ function DsarTable() {
   );
 }
 
+/** `affected`: null while counting, 'error' when the count failed (never shown as "nothing affected"). */
+type PendingRetention = { key: string; label: string; period: RetentionPeriod; affected: number | null | 'error' };
+
 function RetentionCard() {
   const t = useT();
   const can = useCan();
   const q = useRetention();
   const save = useSetRetention();
+  const [pending, setPending] = useState<PendingRetention | null>(null);
+  const commit = (key: string, label: string, period: RetentionPeriod) =>
+    save.mutate(
+      { key, period },
+      {
+        onSuccess: () => {
+          setPending(null);
+          toast(t('compliance.retention.saved', { label, period: t(`enums.retentionPeriod.${period}`) }));
+        },
+      },
+    );
+  const choose = (r: RetentionSetting, period: RetentionPeriod) => {
+    // A shorter period purges records sooner: show how many before saving it.
+    if (RETENTION_PERIODS.indexOf(period) >= RETENTION_PERIODS.indexOf(r.period)) {
+      commit(r.key, r.label, period);
+      return;
+    }
+    setPending({ key: r.key, label: r.label, period, affected: null });
+    previewRetention(r.key, period).then(
+      (p) => setPending((cur) => (cur && cur.key === r.key && cur.period === period ? { ...cur, affected: p.affected } : cur)),
+      () => setPending((cur) => (cur && cur.key === r.key && cur.period === period ? { ...cur, affected: 'error' } : cur)),
+    );
+  };
   return (
     <Card title={t('compliance.retention.title')}>
       <p className="t-sm muted" style={{ margin: '0 0 12px' }}>
@@ -147,32 +175,65 @@ function RetentionCard() {
       <QueryState query={q} skeleton={<SkeletonRows rows={4} h={22} />} compact>
         {(rows) => (
           <ul className="stack plain-list">
-            {rows.map((r) => (
-              <li key={r.key} className="row">
-                <span className="t-strong" style={{ flex: 1 }}>
-                  {r.label}
-                </span>
-                <Select
-                  value={r.period}
-                  options={RETENTION_PERIODS.map((p) => [p, t(`enums.retentionPeriod.${p}`)] as const)}
-                  label={t('compliance.retention.selectLabel', { label: r.label })}
-                  disabled={!can('governance.manage')}
-                  style={{ width: 'auto', padding: '6px 9px', fontSize: 12.5, fontWeight: 600, borderRadius: 7 }}
-                  onChange={(period) =>
-                    save.mutate(
-                      { key: r.key, period },
-                      {
-                        onSuccess: () =>
-                          toast(t('compliance.retention.saved', { label: r.label, period: t(`enums.retentionPeriod.${period}`) })),
-                      },
-                    )
-                  }
-                />
-              </li>
-            ))}
+            {rows.map((r) => {
+              const floor = r.minPeriod ? RETENTION_PERIODS.indexOf(r.minPeriod) : 0;
+              return (
+                <li key={r.key} className="row" style={{ alignItems: 'flex-start' }}>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span className="t-strong">{r.label}</span>
+                    <span className="faint" style={{ display: 'block', fontSize: 11.5 }}>
+                      {r.lastRunAt
+                        ? t('compliance.retention.lastRun', { when: timeAgo(r.lastRunAt), count: r.lastAffected })
+                        : t('compliance.retention.neverRun')}
+                      {r.minPeriod && ` · ${t('compliance.retention.minimum', { period: t(`enums.retentionPeriod.${r.minPeriod}`) })}`}
+                    </span>
+                  </span>
+                  <Select
+                    value={r.period}
+                    options={RETENTION_PERIODS.slice(floor).map((p) => [p, t(`enums.retentionPeriod.${p}`)] as const)}
+                    label={t('compliance.retention.selectLabel', { label: r.label })}
+                    disabled={!can('governance.manage') || save.isPending}
+                    style={{ width: 'auto', padding: '6px 9px', fontSize: 12.5, fontWeight: 600, borderRadius: 7 }}
+                    onChange={(period) => choose(r, period)}
+                  />
+                </li>
+              );
+            })}
           </ul>
         )}
       </QueryState>
+      {pending && (
+        <Modal
+          onClose={() => setPending(null)}
+          label={t('compliance.retention.confirmTitle', { label: pending.label, period: t(`enums.retentionPeriod.${pending.period}`) })}
+        >
+          <h2 className="modal-title">
+            {t('compliance.retention.confirmTitle', { label: pending.label, period: t(`enums.retentionPeriod.${pending.period}`) })}
+          </h2>
+          <p className="t-sm" style={{ margin: '6px 0 16px' }}>
+            {pending.affected === null
+              ? t('compliance.retention.checking')
+              : pending.affected === 'error'
+                ? t('compliance.retention.countFailed')
+                : pending.affected === 0
+                  ? t('compliance.retention.confirmNone')
+                  : t('compliance.retention.confirmBody', { count: pending.affected })}
+          </p>
+          <div className="hstack" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" className="btn" onClick={() => setPending(null)}>
+              {t('compliance.retention.cancel')}
+            </button>
+            <button
+              type="button"
+              className="btn btn--danger"
+              disabled={pending.affected === null || save.isPending}
+              onClick={() => commit(pending.key, pending.label, pending.period)}
+            >
+              {t('compliance.retention.confirm')}
+            </button>
+          </div>
+        </Modal>
+      )}
     </Card>
   );
 }

@@ -12,6 +12,7 @@ import {
   ok,
   paginate,
   query,
+  HttpError,
   readBody,
   recordAudit,
   requireRecentPassword,
@@ -40,6 +41,7 @@ import {
   type RegionSummary,
   type TenantResidency,
   type RetentionPeriod,
+  type RetentionPreview,
   type RetentionSetting,
   type Severity,
   type SubProcessor,
@@ -68,12 +70,30 @@ export const subProcessors = collection<SubProcessor>('governanceSubProcessors',
   { id: 'sp_zoom', name: 'Zoom', purpose: 'Live class hosting', location: 'US' },
 ]);
 
-const RETENTION_CLASSES: { key: string; label: string; defaultPeriod: RetentionPeriod }[] = [
-  { key: 'deleted_students', label: 'Deleted student records', defaultPeriod: '90 days' },
-  { key: 'cancelled_workspaces', label: 'Cancelled tenant workspaces', defaultPeriod: '1 year' },
-  { key: 'payment_records', label: 'Payment & invoice records', defaultPeriod: '7 years' },
-  { key: 'audit_logs', label: 'Audit & security logs', defaultPeriod: '1 year' },
+const RETENTION_CLASSES: { key: string; label: string; defaultPeriod: RetentionPeriod; minPeriod: RetentionPeriod | null }[] = [
+  { key: 'deleted_students', label: 'Deleted student records', defaultPeriod: '90 days', minPeriod: null },
+  { key: 'cancelled_workspaces', label: 'Cancelled tenant workspaces', defaultPeriod: '1 year', minPeriod: null },
+  { key: 'payment_records', label: 'Payment & invoice records', defaultPeriod: '7 years', minPeriod: '3 years' },
+  { key: 'audit_logs', label: 'Audit & security logs', defaultPeriod: '1 year', minPeriod: null },
 ];
+/** The last nightly run per rule (the backends log every run in retention_runs). */
+const RETENTION_RUNS: Record<string, { lastRunAt: string | null; lastAffected: number }> = {
+  deleted_students: { lastRunAt: ago({ h: 9 }), lastAffected: 14 },
+  cancelled_workspaces: { lastRunAt: ago({ h: 9 }), lastAffected: 0 },
+  payment_records: { lastRunAt: ago({ h: 9 }), lastAffected: 230 },
+  audit_logs: { lastRunAt: ago({ h: 9 }), lastAffected: 1840 },
+};
+/** Records each period would leave behind today (the preview counts before shortening). */
+const RETENTION_PAST = (key: string, period: RetentionPeriod) => {
+  const days = { '30 days': 30, '90 days': 90, '1 year': 365, '3 years': 1095, '7 years': 2555, '10 years': 3650 }[period];
+  const base = { deleted_students: 120, cancelled_workspaces: 0, payment_records: 9000, audit_logs: 50000 }[key] ?? 0;
+  return Math.round(base * Math.max(0, 1 - days / 3650));
+};
+const retentionRow = (c: (typeof RETENTION_CLASSES)[number], period: RetentionPeriod): RetentionSetting => ({
+  ...c,
+  period,
+  ...(RETENTION_RUNS[c.key] ?? { lastRunAt: null, lastAffected: 0 }),
+});
 /** Data-class key → retention period. Absent = the class default. */
 export const retention = singleton<{ periods: Record<string, RetentionPeriod> }>('governanceRetention', () => ({ periods: {} }));
 
@@ -533,7 +553,7 @@ export const handlers = [
     handle(() => {
       authorize('governance.view');
       const periods = retention.get().periods;
-      return ok(RETENTION_CLASSES.map<RetentionSetting>((c) => ({ ...c, period: periods[c.key] ?? c.defaultPeriod })));
+      return ok(RETENTION_CLASSES.map<RetentionSetting>((c) => retentionRow(c, periods[c.key] ?? c.defaultPeriod)));
     }),
   ),
 
@@ -547,9 +567,27 @@ export const handlers = [
       );
       const { period } = await readBody<{ period: RetentionPeriod }>(request);
       if (!RETENTION_PERIODS.includes(period)) throw invalid({ period: 'Choose one of the listed retention periods.' });
+      if (cls.minPeriod && RETENTION_PERIODS.indexOf(period) < RETENTION_PERIODS.indexOf(cls.minPeriod))
+        throw new HttpError(422, `Payment records must be kept for at least ${cls.minPeriod}.`, undefined, 'retention_below_legal_minimum');
       retention.set({ periods: { ...retention.get().periods, [cls.key]: period } });
-      recordAudit(`Retention for ${cls.label.toLowerCase()} set to ${period}`, 'Security');
-      return ok<RetentionSetting>({ ...cls, period });
+      recordAudit(`Retention for ${cls.label.toLowerCase()} set to ${period} (applies from the next nightly run)`, 'Security');
+      return ok<RetentionSetting>(retentionRow(cls, period));
+    }),
+  ),
+
+  http.get<{ key: string }>(
+    route('/governance/retention/:key/preview'),
+    handle<{ key: string }>(({ request, params }) => {
+      authorize('governance.manage');
+      const cls = findOr404(
+        RETENTION_CLASSES.find((c) => c.key === params.key),
+        'Data class',
+      );
+      const period = new URL(request.url).searchParams.get('period') as RetentionPeriod | null;
+      if (!period || !RETENTION_PERIODS.includes(period)) throw invalid({ period: 'Choose one of the listed retention periods.' });
+      if (cls.minPeriod && RETENTION_PERIODS.indexOf(period) < RETENTION_PERIODS.indexOf(cls.minPeriod))
+        throw new HttpError(422, `Payment records must be kept for at least ${cls.minPeriod}.`, undefined, 'retention_below_legal_minimum');
+      return ok<RetentionPreview>({ key: cls.key, period, affected: RETENTION_PAST(cls.key, period) });
     }),
   ),
 

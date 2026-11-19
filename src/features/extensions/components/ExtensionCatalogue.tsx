@@ -99,6 +99,22 @@ function CatalogueRow({ row }: { row: Extension }) {
         <div className="faint" style={{ fontSize: 11, lineHeight: 1.4 }}>
           {row.blurb}
         </div>
+        {row.features.length > 0 && (
+          <ul
+            className="faint"
+            aria-label={t('catalogue.featuresLabel', { name: row.name })}
+            style={{ fontSize: 11, lineHeight: 1.4, margin: '4px 0 0', paddingLeft: 16 }}
+          >
+            {row.features.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
+        )}
+        {row.offerNote && (
+          <div className="fg-warn" role="note" style={{ fontSize: 11, lineHeight: 1.4, marginTop: 4 }}>
+            {row.offerNote}
+          </div>
+        )}
       </div>
       <div role="cell" className="muted">
         {row.category}

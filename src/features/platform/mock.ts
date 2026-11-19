@@ -405,6 +405,7 @@ function toFlag(f: FlagRow): FeatureFlag {
     enabled: f.enabled,
     rollout: f.rollout,
     tenantOverrides: tenants.where((t) => t.flagOverrides[f.id] != null).length,
+    gates: f.gates,
   };
 }
 
@@ -1284,10 +1285,19 @@ export const CAPABILITIES: CapabilityDef[] = [
   cap(
     'video',
     'drm',
-    'Video DRM',
-    'Hardware DRM and its extension disappear; videos play without licence checks.',
-    ['DRM settings in the media library', 'Video DRM extension in the store'],
-    { extensions: ['drm'], requires: ['ezdrm', 'keyos', 'mux'], requiresAny: true },
+    'Video protection',
+    'Schools lose the Video protection extension: watermarks, PDF stamping, geo rules, device limits and DRM where offered.',
+    ['Video protection extension in the store', 'Geo rules and device limits'],
+    { extensions: ['drm'], requires: ['mux'] },
+  ),
+  // Actual DRM only: Mux with a DRM configuration ID (`mux_drm`). Watermarks and PDF stamping never depend on it.
+  cap(
+    'video',
+    'drm_encryption',
+    'DRM encryption',
+    'Schools can’t turn on video DRM or encrypt existing videos; streams stay signed but unencrypted.',
+    ['Video DRM switch in Media → Protection', 'DRM encryption of new uploads', 'Encrypt existing videos', 'DRM playback'],
+    { requires: ['mux', 'mux_drm'] },
   ),
   // AI
   cap(
@@ -1475,8 +1485,14 @@ export const availabilityStore = singleton<{ off: string[] }>('platformAvailabil
 });
 
 const connectionName = (key: string) =>
-  CONNECTIONS.find((c) => c.key === key)?.name ?? MEDIA_CONNECTIONS.find((c) => c.key === key)?.name ?? key;
-const isConnected = (key: string) => !!stored(key) || mediaStore.get().credentials.some((c) => c.connection === key);
+  key === 'mux_drm'
+    ? 'Mux DRM configuration ID'
+    : (CONNECTIONS.find((c) => c.key === key)?.name ?? MEDIA_CONNECTIONS.find((c) => c.key === key)?.name ?? key);
+// `mux_drm` is no connection: met while the Mux connection carries a DRM configuration ID.
+const isConnected = (key: string) =>
+  key === 'mux_drm'
+    ? mediaStore.get().credentials.some((c) => c.connection === 'mux' && !!c.values.drm_configuration_id)
+    : !!stored(key) || mediaStore.get().credentials.some((c) => c.connection === key);
 const switchedOn = (key: string) => !availabilityStore.get().off.includes(key);
 
 /** Whether a school uses a capability (cheap counts only; null when it can't be told, as the backend returns). */

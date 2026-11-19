@@ -335,6 +335,214 @@ paths:
       security:
         - sanctumSession: []
       x-permission: analytics.view
+    post:
+      operationId: postAnalyticsExperiments
+      tags:
+        - Analytics
+      summary: Start an experiment over schools on a feature flag
+      description: 'The flag must be in the catalogue, not owned by another running experiment (422 `experiment_flag_busy`) and reach no school yet: on for all tenants or a partial rollout is 422 `experiment_flag_already_live` (the control group would lose a live feature; off or Beta list only is fine). A flag that gates nothing (`gates` null in `GET /platform/flags`) is 422 `experiment_flag_no_effect`. Its current state is saved and restored on stop. Schools land in an arm by `crc32("exp:{id}:{tenant}") % 100 < allocation_pct`; overridden schools are excluded.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExperimentInput"
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ExperimentDetail"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Started experiment "{name}" on {flag_key} ({allocation_pct}% of schools in the variant)
+        category: Flags
+  /analytics/experiments/{id}:
+    get:
+      operationId: getAnalyticsExperimentsById
+      tags:
+        - Analytics
+      summary: One experiment with its arms
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Experiment id, e.g. `ex_site_builder`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ExperimentDetail"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `analytics.view`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: analytics.view
+    patch:
+      operationId: patchAnalyticsExperimentsById
+      tags:
+        - Analytics
+      summary: Edit an experiment’s name or hypothesis
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Experiment id, e.g. `ex_site_builder`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                hypothesis:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ExperimentDetail"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Edited experiment "{name}"
+        category: Flags
+    delete:
+      operationId: deleteAnalyticsExperimentsById
+      tags:
+        - Analytics
+      summary: Delete a stopped or shipped experiment with its results
+      description: Removes the experiment and its assignments. A running experiment answers 409 (stop it first, so its flag is restored).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Experiment id, e.g. `ex_site_builder`.
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No content.
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Deleted experiment "{name}" and its results
+        category: Flags
   /analytics/experiments/{id}/promote:
     post:
       operationId: postAnalyticsExperimentsByIdPromote
@@ -396,7 +604,7 @@ paths:
       operationId: postAnalyticsExperimentsByIdStop
       tags:
         - Analytics
-      summary: Stop a running experiment (traffic returns to control)
+      summary: Stop a running experiment (its flag goes back to the state saved at creation)
       parameters:
         - name: id
           in: path
@@ -453,6 +661,7 @@ paths:
       tags:
         - Analytics
       summary: Growth funnel, cohorts, health scores and onboarding
+      description: 'Every figure is real: funnel and onboarding count the last 90 days’ signups; a figure with no source is null ("Not tracked"): funnel `visitors` and the `nps` / `nps_delta` KPIs.'
       responses:
         "200":
           description: OK
@@ -5373,6 +5582,7 @@ paths:
       tags:
         - Governance
       summary: Set the retention period for a data class
+      description: "Payment records can’t go below 3 years: 422 `retention_below_legal_minimum`. Applies from the next nightly run."
       parameters:
         - name: key
           in: path
@@ -5397,6 +5607,7 @@ paths:
                     - 1 year
                     - 3 years
                     - 7 years
+                    - 10 years
       responses:
         "200":
           description: OK
@@ -5438,8 +5649,75 @@ paths:
         - sanctumSession: []
       x-permission: governance.manage
       x-audit:
-        text: Retention for {data class} set to {period}
+        text: Retention for {data class} set to {period} (applies from the next nightly run)
         category: Security
+  /governance/retention/{key}/preview:
+    get:
+      operationId: getGovernanceRetentionByKeyPreview
+      tags:
+        - Governance
+      summary: Records a retention period would purge or anonymise now
+      description: Shown in the confirm dialog before a shorter period is saved. 422 `retention_below_legal_minimum` like the update.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: Data-class key, e.g. `deleted_students`.
+          schema:
+            type: string
+        - name: period
+          in: query
+          required: true
+          description: The period to preview.
+          schema:
+            type: string
+            enum:
+              - 30 days
+              - 90 days
+              - 1 year
+              - 3 years
+              - 7 years
+              - 10 years
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/RetentionPreview"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `governance.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+      security:
+        - sanctumSession: []
+      x-permission: governance.manage
   /governance/sub-processors:
     get:
       operationId: getGovernanceSubProcessors
@@ -5566,7 +5844,7 @@ paths:
       tags:
         - Media
       summary: Update DRM protections and playback policy
-      description: Locked protections (stream encryption) cannot be turned off (422).
+      description: "The locked `signed_links` protection cannot be turned off (422). A sent `watermark_style: forensic` (retired) is saved as `email`. `device_leases` is the ceiling of the schools’ device limit."
       requestBody:
         required: true
         content:
@@ -5608,7 +5886,7 @@ paths:
         - sanctumSession: []
       x-permission: platform.manage
       x-audit:
-        text: "{protection} enabled/disabled platform-wide · DRM security level set to {level} · Watermark style set to {style} · Concurrent device leases set to {n} · DRM made available on {plans}"
+        text: "{protection} enabled/disabled platform-wide · Watermark style set to {style} · Concurrent stream ceiling set to {n}"
         category: Security
   /media/drm/providers/{key}:
     put:
@@ -5688,6 +5966,7 @@ paths:
       tags:
         - Media
       summary: Disconnect a DRM provider (deletes stored credentials)
+      description: "Mux with a rotation’s previous key still stored: that key is deleted at Mux first; when Mux refuses, 409 `signing_key_retiring` and Mux stays connected."
       parameters:
         - name: key
           in: path
@@ -5730,6 +6009,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "423":
           description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
           content:
@@ -5747,7 +6032,17 @@ paths:
       operationId: postMediaDrmRotateKeys
       tags:
         - Media
-      summary: Rotate DRM license signing keys
+      summary: Rotate the Mux playback signing key
+      description: Needs a password confirmed in the last 15 minutes (423). A new Mux signing key; the old one retires 4 h 15 min later (`previous_key_retires_at`). `immediate` (Owners only, else 403) revokes the old key at once; when Mux refuses that delete the rotation stands and `previous_key_overdue` is true (retried every 10 minutes). 409 without Mux or while a key retires.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                immediate:
+                  type: boolean
       responses:
         "200":
           description: OK
@@ -5773,11 +6068,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: platform.manage
       x-audit:
-        text: Rotated DRM license signing keys
+        text: Rotated the Mux signing key (new …{suffix}; old …{suffix} retires at {time} UTC | revoked immediately)
         category: Security
   /media/live-rooms:
     get:
@@ -10314,18 +10627,80 @@ paths:
       x-audit:
         text: "Updated tax & invoicing: {changes}"
         category: Billing
+  /settings/tax/regions:
+    post:
+      operationId: postSettingsTaxRegions
+      tags:
+        - Settings
+      summary: Add a Stripe tax registration
+      description: Created on the platform’s Stripe account (Stripe Tax). Needs a password confirmed in the last 15 minutes (423).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaxRegistrationInput"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                properties:
+                  data:
+                    $ref: "#/components/schemas/TaxSettings"
+                additionalProperties: false
+        "401":
+          description: Not signed in or session expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Missing permission `platform.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Conflict with the current state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      security:
+        - sanctumSession: []
+      x-permission: platform.manage
+      x-audit:
+        text: Added a {type} tax registration for {country} on Stripe Tax
+        category: Billing
   /settings/tax/regions/{id}:
     delete:
       operationId: deleteSettingsTaxRegionsById
       tags:
         - Settings
-      summary: Remove a tax registration
-      description: Checkout stops collecting tax for the region.
+      summary: End a Stripe tax registration now
+      description: "Ends the registration at Stripe (`expires_at=now`): new invoices there carry no tax. Needs a password confirmed in the last 15 minutes (423)."
       parameters:
         - name: id
           in: path
           required: true
-          description: Tax region id, e.g. `uk`.
+          description: Stripe registration id, e.g. `taxreg_gb`.
           schema:
             type: string
       responses:
@@ -10349,11 +10724,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "423":
+          description: "Confirm the password first: `code` is `password_confirmation_required` (POST /auth/confirm-password, then retry)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
       security:
         - sanctumSession: []
       x-permission: platform.manage
       x-audit:
-        text: Removed tax registration for {region} — checkout stops collecting {kind}
+        text: "Ended the {country} tax registration on Stripe Tax: new invoices there carry no tax"
         category: Billing
   /staff:
     get:
@@ -13452,6 +13833,10 @@ components:
               description: What the model calls really cost this month (USD), summed from each charge — beside `spend`, the credit cost.
             cap_used_pct:
               type: number
+              description: Model cost ÷ the monthly cap, in %.
+            cap_reached:
+              type: boolean
+              description: "The month's model cost reached the cap: every school is on the fastest model until the 1st."
           required:
             - spend
             - tokens_k
@@ -13459,6 +13844,7 @@ components:
             - throttled
             - model_cost
             - cap_used_pct
+            - cap_reached
           additionalProperties: false
         tenants:
           type: array
@@ -14865,12 +15251,12 @@ components:
         - label
         - url
       additionalProperties: false
-    DrmAvailability:
+    DrmPosture:
       type: string
       enum:
-        - all
-        - growth
-        - scale
+        - protected
+        - partial
+        - setup_required
     DrmProtection:
       type: object
       properties:
@@ -14895,17 +15281,9 @@ components:
     DrmProtectionKey:
       type: string
       enum:
-        - encryption
-        - hardware_drm
+        - signed_links
         - watermark
-        - block_capture
         - geo_restrictions
-    DrmSecurityLevel:
-      type: string
-      enum:
-        - widevine_l3_fairplay
-        - widevine_l1
-        - clearkey
     DrmSettings:
       type: object
       properties:
@@ -14913,33 +15291,57 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Stat"
+        posture:
+          $ref: "#/components/schemas/DrmPosture"
+        posture_reasons:
+          type: array
+          items:
+            type: string
+          description: Why the posture isn't `protected` (empty when it is).
         protections:
           type: array
           items:
             $ref: "#/components/schemas/DrmProtection"
-        security_level:
-          $ref: "#/components/schemas/DrmSecurityLevel"
+        drm_configured:
+          type: boolean
+          description: The Mux connection has a DRM configuration ID (its security level is set in Mux → Settings → DRM).
         watermark_style:
           $ref: "#/components/schemas/WatermarkStyle"
         device_leases:
           type: number
-        available_on:
-          $ref: "#/components/schemas/DrmAvailability"
+          description: The ceiling of a school's concurrent-stream limit (1–20).
         providers:
           type: array
           items:
             $ref: "#/components/schemas/Connection"
+          description: Mux only (EZDRM and KeyOS are hidden).
+        key_generation:
+          type: number
+          description: Signing keys created so far (1 = never rotated).
         keys_rotated_at:
-          type: string
+          type:
+            - string
+            - "null"
+        previous_key_retires_at:
+          type:
+            - string
+            - "null"
+          description: When the previous signing key stops working, while one is retiring.
+        previous_key_overdue:
+          type: boolean
+          description: "A previous key past its retire time is still live at Mux: an immediate revoke or a retirement Mux refused. The job retries every 10 minutes; links signed with it keep working until it is gone. Absent in older answers."
       required:
         - stats
+        - posture
+        - posture_reasons
         - protections
-        - security_level
+        - drm_configured
         - watermark_style
         - device_leases
-        - available_on
         - providers
+        - key_generation
         - keys_rotated_at
+        - previous_key_retires_at
       additionalProperties: false
     DrmUpdate:
       type: object
@@ -14957,14 +15359,10 @@ components:
               - key
               - enabled
             additionalProperties: false
-        security_level:
-          $ref: "#/components/schemas/DrmSecurityLevel"
         watermark_style:
           $ref: "#/components/schemas/WatermarkStyle"
         device_leases:
           type: number
-        available_on:
-          $ref: "#/components/schemas/DrmAvailability"
       additionalProperties: false
     Dsar:
       type: object
@@ -15198,6 +15596,24 @@ components:
           type:
             - string
             - "null"
+        metric:
+          $ref: "#/components/schemas/ExperimentMetric"
+        metric_label:
+          type: string
+        allocation_pct:
+          type: number
+          description: "% of schools sent to the variant (1–50)."
+        hypothesis:
+          type:
+            - string
+            - "null"
+        control_n:
+          type: number
+          description: Exposed schools per arm.
+        variant_n:
+          type: number
+        started_at:
+          type: string
       required:
         - id
         - name
@@ -15212,7 +15628,163 @@ components:
         - verdict
         - status
         - ended_at
+        - metric
+        - metric_label
+        - allocation_pct
+        - hypothesis
+        - control_n
+        - variant_n
+        - started_at
       additionalProperties: false
+    ExperimentDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        surface:
+          type: string
+        flag_key:
+          type:
+            - string
+            - "null"
+          description: Feature flag the experiment runs on (see Flags & status).
+        exposed:
+          type: number
+        control_pct:
+          type: number
+        variant_pct:
+          type: number
+        lift_pct:
+          type: number
+          description: Relative lift of variant over control, in % (one decimal).
+        confidence_pct:
+          type: number
+          description: 0–100.
+        significant:
+          type: boolean
+        verdict:
+          $ref: "#/components/schemas/ExperimentVerdict"
+        status:
+          $ref: "#/components/schemas/ExperimentStatus"
+        ended_at:
+          type:
+            - string
+            - "null"
+        metric:
+          $ref: "#/components/schemas/ExperimentMetric"
+        metric_label:
+          type: string
+        allocation_pct:
+          type: number
+          description: "% of schools sent to the variant (1–50)."
+        hypothesis:
+          type:
+            - string
+            - "null"
+        control_n:
+          type: number
+          description: Exposed schools per arm.
+        variant_n:
+          type: number
+        started_at:
+          type: string
+        arms:
+          type: array
+          items:
+            type: object
+            properties:
+              arm:
+                type: string
+                enum:
+                  - control
+                  - variant
+              exposed:
+                type: number
+              converted:
+                type: number
+              rate_pct:
+                type: number
+            required:
+              - arm
+              - exposed
+              - converted
+              - rate_pct
+            additionalProperties: false
+        previous_flag:
+          anyOf:
+            - type: object
+              properties:
+                enabled:
+                  type: boolean
+                rollout:
+                  type: string
+              required:
+                - enabled
+                - rollout
+              additionalProperties: false
+            - type: "null"
+        min_tenants:
+          type: number
+          description: Schools needed in each arm before a verdict is shown.
+      required:
+        - allocation_pct
+        - arms
+        - confidence_pct
+        - control_n
+        - control_pct
+        - ended_at
+        - exposed
+        - flag_key
+        - hypothesis
+        - id
+        - lift_pct
+        - metric
+        - metric_label
+        - min_tenants
+        - name
+        - previous_flag
+        - significant
+        - started_at
+        - status
+        - surface
+        - variant_n
+        - variant_pct
+        - verdict
+      additionalProperties: false
+      description: "GET /analytics/experiments/{id}: the row plus its arms."
+    ExperimentInput:
+      type: object
+      properties:
+        name:
+          type: string
+        surface:
+          type: string
+        flag_key:
+          type: string
+        metric:
+          $ref: "#/components/schemas/ExperimentMetric"
+        allocation_pct:
+          type: number
+        hypothesis:
+          type:
+            - string
+            - "null"
+      required:
+        - name
+        - surface
+        - flag_key
+        - metric
+        - allocation_pct
+      additionalProperties: false
+    ExperimentMetric:
+      type: string
+      enum:
+        - trial_converted
+        - activated_14d
+        - active_30d
+        - addon_purchased
     Experiments:
       type: object
       properties:
@@ -15255,6 +15827,7 @@ components:
         - Winning
         - Losing
         - Inconclusive
+        - Collecting data
     ExportDownload:
       type: object
       properties:
@@ -15302,6 +15875,16 @@ components:
           type: string
         blurb:
           type: string
+        features:
+          type: array
+          items:
+            type: string
+          description: What schools get today, derived from the platform's capabilities (never more than it delivers).
+        offer_note:
+          type:
+            - string
+            - "null"
+          description: "For staff: what is held back and how to offer it (e.g. DRM without a Mux DRM configuration ID); null: nothing."
         module:
           type: string
           description: Tenant module the extension belongs to.
@@ -15338,6 +15921,8 @@ components:
         - name
         - category
         - blurb
+        - features
+        - offer_note
         - module
         - gates_module
         - price
@@ -15493,6 +16078,11 @@ components:
         tenant_overrides:
           type: number
           description: Tenants that override this flag individually (from the tenant drawer).
+        gates:
+          type:
+            - string
+            - "null"
+          description: What the flag switches in the product; null when nothing reads it yet (console experiments refuse it).
       required:
         - key
         - name
@@ -15500,6 +16090,7 @@ components:
         - enabled
         - rollout
         - tenant_overrides
+        - gates
       additionalProperties: false
     FlagRollout:
       type: string
@@ -15553,9 +16144,14 @@ components:
             net_revenue_retention_delta_pts:
               type: number
             nps:
-              type: number
+              type:
+                - number
+                - "null"
+              description: Not tracked (null) until a school-NPS survey exists.
             nps_delta:
-              type: number
+              type:
+                - number
+                - "null"
             logo_churn_pct:
               type: number
             logo_churn_delta_pts:
@@ -15581,7 +16177,9 @@ components:
               stage:
                 $ref: "#/components/schemas/FunnelStage"
               count:
-                type: number
+                type:
+                  - number
+                  - "null"
               rate_pct:
                 type:
                   - number
@@ -15591,7 +16189,7 @@ components:
               - count
               - rate_pct
             additionalProperties: false
-          description: Acquisition funnel, last 90 days, in stage order. `ratePct` = share of the previous stage (null for the first).
+          description: Acquisition funnel of the schools that signed up in the last 90 days, in stage order, every stage a real count. `count` null = not tracked (coursiva.com records no visits, so `visitors` is null). `ratePct` = share of signups (null for visitors and signups).
         cohorts:
           type: array
           items:
@@ -15626,7 +16224,7 @@ components:
               - stage
               - tenants
             additionalProperties: false
-          description: Onboarding funnel, last 90 days, in stage order.
+          description: Onboarding of the last 90 days' signups, in stage order (`provisioned` = all of them), from the hourly measurement.
         stuck:
           type: array
           items:
@@ -15646,7 +16244,7 @@ components:
               - stage
               - days
             additionalProperties: false
-          description: Tenants idle at an onboarding stage for 10+ days.
+          description: Up to five schools not yet paying, idle at their first unreached stage for 10+ days.
         total_tenants:
           type: number
       required:
@@ -18304,6 +18902,9 @@ components:
           type: string
         plan:
           $ref: "#/components/schemas/PlanKey"
+        timezone:
+          type: string
+          description: IANA time zone for the school (`site.timezone`); omitted → the console's default timezone.
       required:
         - name
         - owner_email
@@ -18986,6 +19587,22 @@ components:
         - 1 year
         - 3 years
         - 7 years
+        - 10 years
+    RetentionPreview:
+      type: object
+      properties:
+        key:
+          type: string
+        period:
+          $ref: "#/components/schemas/RetentionPeriod"
+        affected:
+          type: number
+      required:
+        - key
+        - period
+        - affected
+      additionalProperties: false
+      description: "GET /governance/retention/{key}/preview?period=: what that period would affect now."
     RetentionSetting:
       type: object
       properties:
@@ -18998,11 +19615,26 @@ components:
           $ref: "#/components/schemas/RetentionPeriod"
         default_period:
           $ref: "#/components/schemas/RetentionPeriod"
+        min_period:
+          anyOf:
+            - $ref: "#/components/schemas/RetentionPeriod"
+            - type: "null"
+          description: "The shortest period the law allows (payment records: 3 years), or null."
+        last_run_at:
+          type:
+            - string
+            - "null"
+          description: The rule's latest nightly run, and the records it changed in the day up to it.
+        last_affected:
+          type: number
       required:
         - key
         - label
         - period
         - default_period
+        - min_period
+        - last_run_at
+        - last_affected
       additionalProperties: false
     RetryResult:
       type: object
@@ -20017,18 +20649,52 @@ components:
       properties:
         id:
           type: string
+          description: Stripe's registration id (`taxreg_…`).
         region:
           type: string
+          description: ISO country code, e.g. `GB`.
         kind:
           type: string
+          description: Stripe's registration type, e.g. `standard`, `oss_union`.
         rate:
+          type:
+            - string
+            - "null"
+          description: "Stripe Tax computes the rate per invoice: always null."
+        status:
           type: string
+        active_from:
+          type:
+            - string
+            - "null"
+        expires_at:
+          type:
+            - string
+            - "null"
       required:
         - id
         - region
         - kind
         - rate
+        - status
+        - active_from
+        - expires_at
       additionalProperties: false
+      description: A tax registration on the platform's Stripe account (Stripe Tax registrations).
+    TaxRegistrationInput:
+      type: object
+      properties:
+        country:
+          type: string
+        type:
+          type: string
+        active_from:
+          type: string
+      required:
+        - country
+        - type
+      additionalProperties: false
+      description: "POST /settings/tax/regions. `activeFrom` is an ISO date (default: now)."
     TaxSettings:
       type: object
       properties:
@@ -20045,11 +20711,20 @@ components:
           description: Lowest allowed next number (last issued + 1) — numbering is sequential and gap-free.
         next_invoice_preview:
           type: string
-          description: e.g. "CV-020261".
+          description: e.g. "CV-20261" (prefix + the plain number).
         regions:
           type: array
           items:
             $ref: "#/components/schemas/TaxRegion"
+          description: Stripe's registrations (empty when Stripe isn't connected or a merchant of record collects tax).
+        registrations_available:
+          type: boolean
+          description: "Stripe answered (false: not connected or unreachable)."
+        handled_by:
+          type:
+            - string
+            - "null"
+          description: "`paddle` or `lemon_squeezy` when a merchant of record collects tax itself (the toggles don't apply), else null."
       required:
         - stripe_tax
         - tax_inclusive
@@ -20058,6 +20733,8 @@ components:
         - min_next_invoice_number
         - next_invoice_preview
         - regions
+        - registrations_available
+        - handled_by
       additionalProperties: false
     TaxSettingsUpdate:
       type: object
@@ -21019,14 +21696,19 @@ components:
                 type: number
               near_limit:
                 type: boolean
+              updated_at:
+                type:
+                  - string
+                  - "null"
             required:
               - meter
               - used
               - capacity
               - used_pct
               - near_limit
+              - updated_at
             additionalProperties: false
-          description: "Platform capacity. Units: `storage` and `bandwidth` in GB, `transcode` in minutes, `api_requests` in requests. `used` is the sum over all tenants. `nearLimit` when used ≥ 80% of capacity."
+          description: "Platform capacity. Units: `storage` and `bandwidth` in GB, `transcode` and `video_delivery` in minutes, `api_requests` in requests. `used` is the sum over all tenants. `nearLimit` when used ≥ 80% of capacity. `updatedAt` is the newest measurement of the meter (storage hourly, API requests hourly, bandwidth and video delivery daily), null when none yet."
         top_consumers:
           type: array
           items:
@@ -21044,6 +21726,9 @@ components:
                 type: number
               api_requests:
                 type: number
+              video_delivery_minutes:
+                type: number
+                description: Mux video minutes delivered to learners this month.
               share_pct:
                 type: number
               overage:
@@ -21067,6 +21752,7 @@ components:
               - bandwidth_gb
               - video_minutes
               - api_requests
+              - video_delivery_minutes
               - share_pct
               - overage
             additionalProperties: false
@@ -21083,6 +21769,7 @@ components:
         - bandwidth
         - transcode
         - api_requests
+        - video_delivery
     User:
       type: object
       properties:
@@ -21136,7 +21823,6 @@ components:
       enum:
         - email
         - email_ip
-        - forensic
     WebhookDelivery:
       type: object
       properties:

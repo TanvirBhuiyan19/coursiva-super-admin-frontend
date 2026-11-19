@@ -73,23 +73,28 @@ Audit: `Set {plan} built-in room allowance to {n} min/mo` · `Turned off built-i
 
 ### `GET /media/drm`
 
-`{ data: { stats: [{ label, value }], protections: [{ key, label, description, enabled, locked }], security_level, watermark_style, device_leases, available_on, providers: Connection[], keys_rotated_at } }`
+`{ data: { stats: [{ label, value }], posture, posture_reasons[], protections: [{ key, label, description, enabled, locked }], drm_configured, watermark_style, device_leases, providers: Connection[], key_generation, keys_rotated_at, previous_key_retires_at, previous_key_overdue } }`
 
-| Field               | Values                                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------ |
-| `protections[].key` | `encryption` (locked, always on) · `hardware_drm` · `watermark` · `block_capture` · `geo_restrictions` |
-| `security_level`    | `widevine_l3_fairplay` · `widevine_l1` · `clearkey`                                                    |
-| `watermark_style`   | `email` · `email_ip` · `forensic`                                                                      |
-| `available_on`      | `all` · `growth` · `scale`                                                                             |
-| `providers[].key`   | `mux` · `ezdrm` · `keyos`                                                                              |
+| Field                     | Values                                                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `posture`                 | `protected` · `partial` · `setup_required` (with `posture_reasons[]`: what is missing). The card's badge.                                                 |
+| `protections[].key`       | `signed_links` (locked, always on) · `watermark` (the schools' watermark kill switch) · `geo_restrictions` (schools may use country rules; on by default) |
+| `drm_configured`          | The Mux connection has a DRM configuration ID. The security level is shown read-only: "Configured in Mux → DRM".                                          |
+| `watermark_style`         | `email` · `email_ip` (a sent `forensic`, retired, is saved as `email`)                                                                                    |
+| `device_leases`           | The ceiling of the schools' concurrent-stream limit, 1–20 (default 3)                                                                                     |
+| `providers[].key`         | `mux` only (EZDRM and KeyOS are hidden; their stored connections stay)                                                                                    |
+| `previous_key_retires_at` | When the previous signing key stops working, while one retires; else null                                                                                 |
+| `previous_key_overdue`    | A previous key past its retire time is still live at Mux (a revoke or retirement Mux refused; retried every 10 minutes)                                   |
+
+`hardware_drm`, `block_capture`, `security_level` and `available_on` were removed: nothing read them (W6 decision
+V/C-2). Video DRM availability is the platform Availability switch `drm` (requires the Mux connection).
 
 ### `PATCH /media/drm`
 
-Body any of `{ protections: [{ key, enabled }], security_level, watermark_style, device_leases, available_on }` → `{ data: DrmSettings }`.
-422: unknown enum values; `device_leases` whole number 1–20; turning off a locked protection — "AES-128 stream encryption can’t be turned off."
+Body any of `{ protections: [{ key, enabled }], watermark_style, device_leases }` → `{ data: DrmSettings }`.
+422: unknown protection or style; `device_leases` whole number 1–20; turning off the locked protection — "Signed, expiring stream links can’t be turned off."
 
-Audit (Security): `{protection} enabled|disabled platform-wide` · `DRM security level set to {label}` · `Watermark style set to {label}` ·
-`Concurrent device leases set to {n}` · `DRM made available on {label}`.
+Audit (Security): `{protection} enabled|disabled platform-wide` · `Watermark style set to {label}` · `Concurrent stream ceiling set to {n}`.
 
 ### `PUT /media/drm/providers/{key}` — connect & verify / replace credentials
 
@@ -118,13 +123,22 @@ delivery is refused and polling settles transcodes); the DRM configuration ID tu
 
 ### `DELETE /media/drm/providers/{key}`
 
-Deletes the stored credentials → `{ data: Connection }` (`connected: false`). Playback falls back to AES-128 only.
-Audit (Security): `Disconnected DRM provider {name}`.
+Deletes the stored credentials → `{ data: Connection }` (`connected: false`). Video then plays from its source file.
+Audit (Security): `Disconnected DRM provider {name}`. Mux with a rotation's previous key still stored: that key is deleted
+at Mux first; when Mux refuses, the disconnect is refused too (409, `reason: signing_key_retiring`), so no key is left live
+at Mux that nothing could retire.
 
 ### `POST /media/drm/rotate-keys`
 
-Rotates the license signing keys → `{ data: DrmSettings }` with a new `keys_rotated_at`. Forces re-licensing on next play; the console asks for confirmation.
-Audit (Security): `Rotated DRM license signing keys`.
+Body `{ immediate?: boolean }` → `{ data: DrmSettings }`. Needs `platform.manage` and a password confirmed in the last 15
+minutes (`423 password_confirmation_required`; `lib/api/client.ts` asks and retries). Creates a new Mux signing key;
+links signed with the old key keep working until it retires 4 h 15 min later (`previous_key_retires_at`). `immediate`
+(Owners only, else 403) revokes the old key at once: videos playing now stop. 409 without a Mux connection, or while a
+previous key still retires (unless `immediate`). The console asks for confirmation. When Mux refuses to delete the old key
+on an immediate revoke, the rotation still stands: the old key is kept for the 10-minute job to retry and
+`previous_key_overdue` is true (the console warns, never claims it revoked). Audit tail then: `could not be deleted at Mux;
+retrying every 10 minutes)`.
+Audit (Security): `Rotated the Mux signing key (new …abcd; old …wxyz retires at HH:MM UTC)` (key ids as suffixes only).
 
 ## Storage & delivery
 

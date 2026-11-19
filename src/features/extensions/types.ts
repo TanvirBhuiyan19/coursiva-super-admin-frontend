@@ -9,6 +9,10 @@ export interface Extension {
   name: string;
   category: string;
   blurb: string;
+  /** What schools get today, derived from the platform's capabilities (never more than it delivers). */
+  features: string[];
+  /** For staff: what is held back and how to offer it (e.g. DRM without a Mux DRM configuration ID); null: nothing. */
+  offerNote: string | null;
   /** Tenant module the extension belongs to. */
   module: string;
   /** True when the extension gates the whole module (its plan inclusion drives Plan entitlements). */

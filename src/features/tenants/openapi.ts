@@ -75,7 +75,7 @@ export const spec = defineSpec({
       body: ref('ProvisionTenantInput'),
       response: resource(ref('Tenant'), 201),
       audit: { text: 'Provisioned tenant "{name}" on {plan}', category: 'Tenants' },
-      example: { body: { name: 'Harbor Music School', owner_email: 'ana@harbor.com', plan: 'growth' } },
+      example: { body: { name: 'Harbor Music School', owner_email: 'ana@harbor.com', plan: 'growth', timezone: 'Europe/London' } },
     },
     {
       method: 'POST',

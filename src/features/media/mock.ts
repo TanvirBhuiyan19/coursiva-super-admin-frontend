@@ -9,6 +9,7 @@ import { toConnection as baseConnection, mergeCredentials, type CredentialDef, t
 import {
   authorize,
   handle,
+  HttpError,
   http,
   invalid,
   notFound,
@@ -22,11 +23,7 @@ import {
 } from '@/mocks/http';
 import { PLANS } from '@/lib/domain';
 import {
-  DRM_AVAILABILITY,
-  DRM_AVAILABILITY_LABELS,
   DRM_PROTECTIONS,
-  DRM_SECURITY_LEVEL_LABELS,
-  DRM_SECURITY_LEVELS,
   LIVE_ROOM_POLICIES,
   RENDITION_LADDER_LABELS,
   RENDITION_LADDERS,
@@ -34,9 +31,7 @@ import {
   WATERMARK_STYLES,
   type Connection,
   type CredentialsInput,
-  type DrmAvailability,
   type DrmProtectionKey,
-  type DrmSecurityLevel,
   type DrmSettings,
   type DrmUpdate,
   type LiveRoomPolicyKey,
@@ -56,15 +51,13 @@ const LR_POLICIES: Record<LiveRoomPolicyKey, [string, string]> = {
 };
 
 const DRM: Record<DrmProtectionKey, [string, string, boolean]> = {
-  encryption: ['AES-128 stream encryption', 'All video is encrypted at rest and in transit. Cannot be disabled.', true],
-  hardware_drm: ['Hardware DRM (Widevine / FairPlay)', 'License-based playback on web, iOS and Android.', false],
-  watermark: ['Dynamic viewer watermark', 'Overlays the student’s email + IP on playback.', false],
-  block_capture: [
-    'Block downloads & screen capture',
-    'Disables native download and blackouts screen recording where the OS allows.',
-    false,
+  signed_links: [
+    'Signed, expiring stream links',
+    'Every stream, licence and file link is signed for one viewer and expires (licences in 5 minutes).',
+    true,
   ],
-  geo_restrictions: ['Geo & VPN restrictions', 'Tenants can allow-list countries; known VPN exits are challenged.', false],
+  watermark: ['Dynamic viewer watermark', 'The viewer’s identity is overlaid on playback.', false],
+  geo_restrictions: ['Geo-restrictions', 'Schools can limit playback to chosen countries.', false],
 };
 
 type Kind = 'drm' | 'storage';
@@ -228,12 +221,6 @@ const PIPELINE: StorageSettings['pipeline'] = [
   { step: 'Archive', description: 'Masters → Glacier Deep Archive after lifecycle window', healthy: true },
 ];
 
-const DRM_STATS = [
-  { label: 'Protected streams · 30d', value: '48,210' },
-  { label: 'Blocked capture attempts', value: '312' },
-  { label: 'License errors', value: '0.04%' },
-  { label: 'Takedown requests', value: '2 resolved' },
-];
 const STORAGE_STATS = [
   { label: 'Video stored', value: '38.4 TB' },
   { label: 'Delivered · 30d', value: '182 TB' },
@@ -247,11 +234,13 @@ interface MediaStore {
   /** Built-in room minutes used this month (usage meter). */
   liveRoomUsage: { tenantId: string; usedMinutes: number }[];
   drmOff: DrmProtectionKey[];
-  securityLevel: DrmSecurityLevel;
   watermarkStyle: WatermarkStyle;
   deviceLeases: number;
-  availableOn: DrmAvailability;
-  keysRotatedAt: string;
+  keyGeneration: number;
+  keysRotatedAt: string | null;
+  previousKeyRetiresAt: string | null;
+  /** Mux refused deleting the old key (an immediate revoke): retried by the job, still live at Mux. */
+  previousKeyOverdue?: boolean;
   /** Stored credentials per connection (server-side only). */
   credentials: { connection: string; values: Record<string, string>; verifiedAt: string }[];
   archiveAfterDays: number;
@@ -272,11 +261,11 @@ export const mediaStore = singleton<MediaStore>('mediaSettings', () => ({
     { tenantId: 'tn_silva', usedMinutes: 680 },
   ],
   drmOff: [],
-  securityLevel: 'widevine_l3_fairplay',
   watermarkStyle: 'email',
-  deviceLeases: 6,
-  availableOn: 'growth',
+  deviceLeases: 3,
+  keyGeneration: 2,
   keysRotatedAt: ago({ d: 41 }),
+  previousKeyRetiresAt: null,
   credentials: [
     cred(
       'mux',
@@ -369,21 +358,39 @@ function liveUsageRows(search = ''): LiveRoomUsage[] {
 
 function drm(): DrmSettings {
   const s = mediaStore.get();
+  const mux = s.credentials.find((c) => c.connection === 'mux');
+  const watermarkOn = !s.drmOff.includes('watermark');
+  const reasons: string[] = [];
+  if (mux && !mux.values.drm_configuration_id)
+    reasons.push('Add a DRM configuration ID to the Mux connection: streams are signed but not encrypted.');
+  if (mux && !watermarkOn) reasons.push('The dynamic watermark is off platform-wide.');
+  const protections = DRM_PROTECTIONS.map((key) => ({
+    key,
+    label: DRM[key][0],
+    description: DRM[key][1],
+    locked: DRM[key][2],
+    enabled: DRM[key][2] || !s.drmOff.includes(key),
+  }));
+  // Mux is the only DRM provider: EZDRM and KeyOS stay hidden.
+  const providers = CONNECTIONS.filter((c) => c.key === 'mux').map(toConnection);
   return {
-    stats: DRM_STATS,
-    protections: DRM_PROTECTIONS.map((key) => ({
-      key,
-      label: DRM[key][0],
-      description: DRM[key][1],
-      locked: DRM[key][2],
-      enabled: DRM[key][2] || !s.drmOff.includes(key),
-    })),
-    securityLevel: s.securityLevel,
+    stats: [
+      { label: 'Protections on', value: String(protections.filter((p) => p.enabled).length) },
+      { label: 'Providers connected', value: String(providers.filter((p) => p.connected).length) },
+      { label: 'Signing key generation', value: String(s.keyGeneration) },
+    ],
+    posture: !mux ? 'setup_required' : reasons.length ? 'partial' : 'protected',
+    postureReasons: mux ? reasons : ['Connect Mux with a signing key: until then video plays from its source file.'],
+    protections,
+    drmConfigured: !!mux?.values.drm_configuration_id,
     watermarkStyle: s.watermarkStyle,
     deviceLeases: s.deviceLeases,
-    availableOn: s.availableOn,
-    providers: CONNECTIONS.filter((c) => c.kind === 'drm').map(toConnection),
+    providers,
+    keyGeneration: s.keyGeneration,
     keysRotatedAt: s.keysRotatedAt,
+    // Only while the old key is still retiring.
+    previousKeyRetiresAt: s.previousKeyRetiresAt && new Date(s.previousKeyRetiresAt).getTime() > Date.now() ? s.previousKeyRetiresAt : null,
+    previousKeyOverdue: s.previousKeyOverdue ?? false,
   };
 }
 
@@ -519,12 +526,10 @@ export const handlers = [
         else if (typeof p.enabled !== 'boolean') errors[`protections.${i}.enabled`] = 'Enabled must be true or false.';
         else if (DRM[p.key][2] && !p.enabled) errors[`protections.${i}.enabled`] = `${DRM[p.key][0]} can’t be turned off.`;
       });
-      if (body.securityLevel !== undefined && !DRM_SECURITY_LEVELS.includes(body.securityLevel))
-        errors.securityLevel = 'The selected security level is invalid.';
+      // A retired `forensic` style is accepted and saved as `email`.
+      if ((body.watermarkStyle as string | undefined) === 'forensic') body.watermarkStyle = 'email';
       if (body.watermarkStyle !== undefined && !WATERMARK_STYLES.includes(body.watermarkStyle))
         errors.watermarkStyle = 'The selected watermark style is invalid.';
-      if (body.availableOn !== undefined && !DRM_AVAILABILITY.includes(body.availableOn))
-        errors.availableOn = 'The selected plan gate is invalid.';
       if (body.deviceLeases !== undefined && (!isWhole(body.deviceLeases) || body.deviceLeases < 1 || body.deviceLeases > 20))
         errors.deviceLeases = 'Device leases must be a whole number from 1 to 20.';
       if (Object.keys(errors).length) throw invalid(errors);
@@ -536,21 +541,13 @@ export const handlers = [
         mediaStore.patch({ drmOff: toggleList(off, p.key, p.enabled) });
         recordAudit(`${DRM[p.key][0]} ${p.enabled ? 'enabled' : 'disabled'} platform-wide`, 'Security');
       }
-      if (body.securityLevel !== undefined && body.securityLevel !== s.securityLevel) {
-        mediaStore.patch({ securityLevel: body.securityLevel });
-        recordAudit(`DRM security level set to ${DRM_SECURITY_LEVEL_LABELS[body.securityLevel]}`, 'Security');
-      }
       if (body.watermarkStyle !== undefined && body.watermarkStyle !== s.watermarkStyle) {
         mediaStore.patch({ watermarkStyle: body.watermarkStyle });
         recordAudit(`Watermark style set to ${WATERMARK_STYLE_LABELS[body.watermarkStyle]}`, 'Security');
       }
       if (body.deviceLeases !== undefined && body.deviceLeases !== s.deviceLeases) {
         mediaStore.patch({ deviceLeases: body.deviceLeases });
-        recordAudit(`Concurrent device leases set to ${body.deviceLeases}`, 'Security');
-      }
-      if (body.availableOn !== undefined && body.availableOn !== s.availableOn) {
-        mediaStore.patch({ availableOn: body.availableOn });
-        recordAudit(`DRM made available on ${DRM_AVAILABILITY_LABELS[body.availableOn].toLowerCase()}`, 'Security');
+        recordAudit(`Concurrent stream ceiling set to ${body.deviceLeases}`, 'Security');
       }
       return ok(drm());
     }),
@@ -558,10 +555,31 @@ export const handlers = [
 
   http.post(
     route('/media/drm/rotate-keys'),
-    handle(() => {
-      authorize('platform.manage');
-      mediaStore.patch({ keysRotatedAt: new Date().toISOString() });
-      recordAudit('Rotated DRM license signing keys', 'Security');
+    handle(async ({ request }) => {
+      const actor = authorize('platform.manage');
+      requireRecentPassword();
+      const body: { immediate?: unknown } = await readBody<{ immediate?: unknown }>(request).catch(() => ({}));
+      const immediate = body.immediate === true;
+      if (immediate && actor.role !== 'Owner') throw new HttpError(403, 'Only an Owner can revoke the old key immediately.');
+      const s = mediaStore.get();
+      if (!s.credentials.some((c) => c.connection === 'mux')) throw new HttpError(409, 'Connect Mux with a signing key first.');
+      const retiring = s.previousKeyRetiresAt !== null && new Date(s.previousKeyRetiresAt).getTime() > Date.now();
+      if (retiring && !immediate)
+        throw new HttpError(409, 'The previous signing key is still retiring. Wait until it retires, or revoke it immediately.');
+      const now = new Date();
+      const retiresAt = immediate ? null : new Date(now.getTime() + (4 * 60 + 15) * 60_000).toISOString();
+      mediaStore.patch({
+        keysRotatedAt: now.toISOString(),
+        keyGeneration: s.keyGeneration + 1,
+        previousKeyRetiresAt: retiresAt,
+        previousKeyOverdue: false,
+      });
+      recordAudit(
+        `Rotated the Mux signing key (new …${String(s.keyGeneration + 1).padStart(4, '0')}; old …${String(s.keyGeneration).padStart(4, '0')} ${
+          retiresAt ? `retires at ${retiresAt.slice(11, 16)} UTC)` : 'revoked immediately)'
+        }`,
+        'Security',
+      );
       return ok(drm());
     }),
   ),

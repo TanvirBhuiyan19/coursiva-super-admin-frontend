@@ -26,36 +26,42 @@ export interface Growth {
     trialConversionDeltaPts: number;
     netRevenueRetentionPct: number;
     netRevenueRetentionDeltaPts: number;
-    nps: number;
-    npsDelta: number;
+    /** Not tracked (null) until a school-NPS survey exists. */
+    nps: number | null;
+    npsDelta: number | null;
     logoChurnPct: number;
     logoChurnDeltaPts: number;
   };
-  /** Acquisition funnel, last 90 days, in stage order. `ratePct` = share of the previous stage (null for the first). */
-  funnel: { stage: FunnelStage; count: number; ratePct: number | null }[];
+  /**
+   * Acquisition funnel of the schools that signed up in the last 90 days, in stage order, every stage a real count.
+   * `count` null = not tracked (coursiva.com records no visits, so `visitors` is null). `ratePct` = share of signups
+   * (null for visitors and signups).
+   */
+  funnel: { stage: FunnelStage; count: number | null; ratePct: number | null }[];
   /** Monthly signup cohorts, oldest first. `retention[i]` = % of the cohort still active i months after signup. */
   cohorts: { month: string; retention: number[] }[];
   /** The top 10 health scores (same score as the tenant drawer), best first; the whole ranking pages through `/analytics/growth/health-scores`. */
   healthScores: HealthScore[];
-  /** Onboarding funnel, last 90 days, in stage order. */
+  /** Onboarding of the last 90 days' signups, in stage order (`provisioned` = all of them), from the hourly measurement. */
   onboarding: { stage: OnboardingStage; tenants: number }[];
-  /** Tenants idle at an onboarding stage for 10+ days. */
+  /** Up to five schools not yet paying, idle at their first unreached stage for 10+ days. */
   stuck: { tenantId: string; name: string; stage: OnboardingStage; days: number }[];
   totalTenants: number;
 }
 
 // ---------- GET /analytics/usage ----------
-export const USAGE_METERS = ['storage', 'bandwidth', 'transcode', 'api_requests'] as const;
+export const USAGE_METERS = ['storage', 'bandwidth', 'transcode', 'api_requests', 'video_delivery'] as const;
 export type UsageMeter = (typeof USAGE_METERS)[number];
 
 export interface Usage {
   /** First day of the billing month the figures cover (ISO date). */
   period: string;
   /**
-   * Platform capacity. Units: `storage` and `bandwidth` in GB, `transcode` in minutes, `api_requests` in requests.
-   * `used` is the sum over all tenants. `nearLimit` when used ≥ 80% of capacity.
+   * Platform capacity. Units: `storage` and `bandwidth` in GB, `transcode` and `video_delivery` in minutes, `api_requests` in
+   * requests. `used` is the sum over all tenants. `nearLimit` when used ≥ 80% of capacity. `updatedAt` is the newest
+   * measurement of the meter (storage hourly, API requests hourly, bandwidth and video delivery daily), null when none yet.
    */
-  capacity: { meter: UsageMeter; used: number; capacity: number; usedPct: number; nearLimit: boolean }[];
+  capacity: { meter: UsageMeter; used: number; capacity: number; usedPct: number; nearLimit: boolean; updatedAt: string | null }[];
   /** Top 5 tenants by share of platform usage (mean of their share of each meter). */
   topConsumers: {
     tenantId: string;
@@ -64,6 +70,8 @@ export interface Usage {
     bandwidthGb: number;
     videoMinutes: number;
     apiRequests: number;
+    /** Mux video minutes delivered to learners this month. */
+    videoDeliveryMinutes: number;
     sharePct: number;
     /** Unbilled overage on the tenant, if any. */
     overage: { meter: string; amount: number } | null;
@@ -104,7 +112,10 @@ export interface AiUsage {
     throttled: number;
     /** What the model calls really cost this month (USD), summed from each charge — beside `spend`, the credit cost. */
     modelCost: number;
+    /** Model cost ÷ the monthly cap, in %. */
     capUsedPct: number;
+    /** The month's model cost reached the cap: every school is on the fastest model until the 1st. */
+    capReached: boolean;
   };
   /** The 10 heaviest tenants; every tenant with usage pages through `/analytics/ai/tenants`. */
   tenants: AiTenantUsage[];
@@ -137,7 +148,9 @@ export interface AiSettingsInput {
 
 // ---------- GET /analytics/experiments ----------
 export type ExperimentStatus = 'running' | 'shipped' | 'stopped';
-export type ExperimentVerdict = 'Winning' | 'Losing' | 'Inconclusive';
+export type ExperimentVerdict = 'Winning' | 'Losing' | 'Inconclusive' | 'Collecting data';
+export const EXPERIMENT_METRICS = ['trial_converted', 'activated_14d', 'active_30d', 'addon_purchased'] as const;
+export type ExperimentMetric = (typeof EXPERIMENT_METRICS)[number];
 
 export interface Experiment {
   id: string;
@@ -156,6 +169,32 @@ export interface Experiment {
   verdict: ExperimentVerdict;
   status: ExperimentStatus;
   endedAt: string | null;
+  metric: ExperimentMetric;
+  metricLabel: string;
+  /** % of schools sent to the variant (1–50). */
+  allocationPct: number;
+  hypothesis: string | null;
+  /** Exposed schools per arm. */
+  controlN: number;
+  variantN: number;
+  startedAt: string;
+}
+
+/** GET /analytics/experiments/{id}: the row plus its arms. */
+export interface ExperimentDetail extends Experiment {
+  arms: { arm: 'control' | 'variant'; exposed: number; converted: number; ratePct: number }[];
+  previousFlag: { enabled: boolean; rollout: string } | null;
+  /** Schools needed in each arm before a verdict is shown. */
+  minTenants: number;
+}
+
+export interface ExperimentInput {
+  name: string;
+  surface: string;
+  flagKey: string;
+  metric: ExperimentMetric;
+  allocationPct: number;
+  hypothesis?: string | null;
 }
 
 export interface Experiments {

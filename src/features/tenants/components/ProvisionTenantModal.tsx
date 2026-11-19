@@ -5,10 +5,11 @@ import { errorMessage } from '@/lib/api/errors';
 import { PLANS } from '@/lib/domain';
 import { applyServerErrors, useZodForm } from '@/lib/useForm';
 import { toast, useUi } from '@/store/ui';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useT as useCommonT } from '@/lib/i18n/common';
 import { useCan } from '@/features/auth/useCan';
 import { usePlatformSettings } from '@/features/settings/api';
+import { isTimezone } from '@/features/settings/validation';
 import { useProvisionTenant } from '../api';
 import { t as msg, useT } from '../i18n';
 
@@ -20,6 +21,11 @@ const schema = z.object({
     .max(80, { error: () => msg('provision.errors.nameMax') }),
   ownerEmail: z.email({ error: () => msg('provision.errors.email') }),
   plan: z.enum(PLANS),
+  // IANA zone for the school's site.timezone; the console's default timezone until changed.
+  timezone: z
+    .string()
+    .trim()
+    .refine(isTimezone, { error: () => msg('provision.errors.timezone') }),
 });
 
 export function ProvisionTenantModal() {
@@ -28,14 +34,20 @@ export function ProvisionTenantModal() {
   const navigate = useNavigate();
   const close = () => useUi.getState().set({ provisionOpen: false });
   const provision = useProvisionTenant();
-  const form = useZodForm(schema, { defaultValues: { name: '', ownerEmail: '', plan: 'Launch' } });
+  const form = useZodForm(schema, { defaultValues: { name: '', ownerEmail: '', plan: 'Launch', timezone: 'UTC' } });
   const [formError, setFormError] = useState<string | null>(null);
   const name = form.watch('name');
   const plan = form.watch('plan');
   // The address Laravel will derive (TenantRules::slugFrom) on the platform's configured root domain — never a
   // hard-coded host. Without access to platform settings the root shows as a placeholder.
   const can = useCan();
-  const root = usePlatformSettings({ enabled: can('platform.view') }).data?.primaryDomain;
+  const settings = usePlatformSettings({ enabled: can('platform.view') }).data;
+  const root = settings?.primaryDomain;
+  // The time zone starts at the console's default (Settings → default timezone) unless staff already changed it.
+  const defaultTimezone = settings?.defaultTimezone;
+  useEffect(() => {
+    if (defaultTimezone && !form.getFieldState('timezone').isDirty) form.setValue('timezone', defaultTimezone);
+  }, [defaultTimezone, form]);
   const derived = name
     .trim()
     .normalize('NFKD')
@@ -96,6 +108,17 @@ export function ProvisionTenantModal() {
             {t('provision.autoSsl')}
           </span>
         </div>
+        <Field label={t('provision.timezone')} hint={t('provision.timezoneHint')} error={form.formState.errors.timezone?.message}>
+          {(p) => (
+            <Input
+              {...p}
+              {...form.register('timezone')}
+              placeholder={t('provision.timezonePlaceholder')}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          )}
+        </Field>
         <div className="field-label" id="prov-plan">
           {t('provision.plan')}
         </div>

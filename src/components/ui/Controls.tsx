@@ -151,9 +151,21 @@ interface SelectProps<V extends string> {
   label?: string;
   disabled?: boolean;
   id?: string;
+  /** Options shown but not selectable (say why in their text). */
+  disabledOptions?: readonly V[];
 }
 
-export function Select<V extends string>({ value, onChange, options, className = 'select', style, label, disabled, id }: SelectProps<V>) {
+export function Select<V extends string>({
+  value,
+  onChange,
+  options,
+  className = 'select',
+  style,
+  label,
+  disabled,
+  id,
+  disabledOptions,
+}: SelectProps<V>) {
   return (
     <select
       id={id}
@@ -167,7 +179,7 @@ export function Select<V extends string>({ value, onChange, options, className =
       {options.map((o) => {
         const [v, text] = split(o);
         return (
-          <option key={v} value={v}>
+          <option key={v} value={v} disabled={disabledOptions?.includes(v)}>
             {typeof text === 'string' ? text : v}
           </option>
         );

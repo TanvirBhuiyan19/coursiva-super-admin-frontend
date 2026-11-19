@@ -20,7 +20,12 @@ Permission: reads `billing.view`, writes `billing.manage`.
 
 Paginated `Extension[]` (the catalogue is small — the console asks for `per_page=100`).
 
-`Extension`: `key, name, category, blurb, module, gates_module, price, status (Live|Beta|Hidden), hidden, included_plans[], installs, paying_installs, free_installs, mrr, attach_pct`.
+`Extension`: `key, name, category, blurb, features[], offer_note, module, gates_module, price, status (Live|Beta|Hidden), hidden, included_plans[], installs, paying_installs, free_installs, mrr, attach_pct`.
+`features[]` = what schools get today, derived from the platform's capabilities (the dashboard store's `perks[]` and
+coursiva.com's pricing show the same list); `offer_note` (null when nothing is held back) tells staff what isn't
+offered and how to change it. `drm` is **Video protection**: five protections always, plus "Studio-grade DRM (Widevine
+& FairPlay)" only while `drm_encryption` is available; otherwise `offer_note` is e.g. "DRM: not offered — add a Mux DRM
+configuration ID to include it." The catalogue row shows both.
 
 ## `GET /extensions/summary`
 

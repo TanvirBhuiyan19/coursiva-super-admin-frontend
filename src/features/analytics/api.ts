@@ -5,6 +5,8 @@ import type {
   AiSettingsInput,
   AiTenantUsage,
   AiUsage,
+  ExperimentDetail,
+  ExperimentInput,
   Experiments,
   Growth,
   Health,
@@ -24,6 +26,7 @@ export const analyticsKeys = {
   ai: ['analytics', 'ai'] as const,
   aiTenants: (page: number) => ['analytics', 'ai', 'tenants', page] as const,
   experiments: ['analytics', 'experiments'] as const,
+  experiment: (id: string) => ['analytics', 'experiments', id] as const,
 };
 
 const get = <T>(path: string, signal: AbortSignal) => api.get<Resource<T>>(path, { signal }).then((r) => r.data);
@@ -71,6 +74,13 @@ export const useHealth = () =>
 export const useAiUsage = () => useQuery({ queryKey: analyticsKeys.ai, queryFn: ({ signal }) => get<AiUsage>('/analytics/ai', signal) });
 export const useExperiments = () =>
   useQuery({ queryKey: analyticsKeys.experiments, queryFn: ({ signal }) => get<Experiments>('/analytics/experiments', signal) });
+
+export const useExperiment = (id: string | null) =>
+  useQuery({
+    queryKey: analyticsKeys.experiment(id ?? ''),
+    queryFn: ({ signal }) => get<ExperimentDetail>(`/analytics/experiments/${encodeURIComponent(id ?? '')}`, signal),
+    enabled: !!id,
+  });
 
 const invalidateAudit = (qc: QueryClient) => void qc.invalidateQueries({ queryKey: ['audit'] });
 
@@ -149,9 +159,48 @@ export function useExperimentAction() {
       api.post<Resource<Experiments>>(`/analytics/experiments/${encodeURIComponent(id)}/${action}`).then((r) => r.data),
     onSuccess: (data) => {
       qc.setQueryData(analyticsKeys.experiments, data);
-      // Promoting flips the experiment's feature flag to 100%.
+      void qc.invalidateQueries({ queryKey: analyticsKeys.experiments, exact: false, predicate: (q) => q.queryKey.length > 2 });
+      // Promoting flips the experiment's feature flag to 100%; stopping restores the state saved at creation.
       void qc.invalidateQueries({ queryKey: ['flags'] });
       void qc.invalidateQueries({ queryKey: ['platform', 'flags'] });
+      invalidateAudit(qc);
+    },
+  });
+}
+
+/** DELETE /analytics/experiments/{id}: a stopped or shipped experiment, with its assignments (409 while running). */
+export function useDeleteExperiment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/analytics/experiments/${encodeURIComponent(id)}`),
+    onSuccess: (_d, id) => {
+      qc.removeQueries({ queryKey: analyticsKeys.experiment(id) });
+      void qc.invalidateQueries({ queryKey: analyticsKeys.experiments, exact: true });
+      invalidateAudit(qc);
+    },
+  });
+}
+
+export function useCreateExperiment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ExperimentInput) => api.post<Resource<ExperimentDetail>>('/analytics/experiments', input).then((r) => r.data),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: analyticsKeys.experiments });
+      void qc.invalidateQueries({ queryKey: ['platform', 'flags'] });
+      invalidateAudit(qc);
+    },
+  });
+}
+
+export function useUpdateExperiment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: { id: string; name?: string; hypothesis?: string | null }) =>
+      api.patch<Resource<ExperimentDetail>>(`/analytics/experiments/${encodeURIComponent(id)}`, patch).then((r) => r.data),
+    onSuccess: (data) => {
+      qc.setQueryData(analyticsKeys.experiment(data.id), data);
+      void qc.invalidateQueries({ queryKey: analyticsKeys.experiments, exact: true });
       invalidateAudit(qc);
     },
   });

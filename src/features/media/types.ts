@@ -88,32 +88,27 @@ export interface CredentialsInput {
 }
 
 // ---------- DRM ----------
-export const DRM_PROTECTIONS = ['encryption', 'hardware_drm', 'watermark', 'block_capture', 'geo_restrictions'] as const;
+/**
+ * Only switches something reads: `signed_links` (locked: every stream, licence and file link is signed and expires),
+ * the schools' dynamic `watermark` kill switch and `geo_restrictions` (schools may use their country rules).
+ */
+export const DRM_PROTECTIONS = ['signed_links', 'watermark', 'geo_restrictions'] as const;
 export type DrmProtectionKey = (typeof DRM_PROTECTIONS)[number];
 
-export const DRM_SECURITY_LEVELS = ['widevine_l3_fairplay', 'widevine_l1', 'clearkey'] as const;
-export type DrmSecurityLevel = (typeof DRM_SECURITY_LEVELS)[number];
-export const DRM_SECURITY_LEVEL_LABELS: Record<DrmSecurityLevel, string> = {
-  widevine_l3_fairplay: 'Widevine L3 + FairPlay',
-  widevine_l1: 'Widevine L1 required (HD lock)',
-  clearkey: 'Clearkey (testing only)',
-};
-
-export const WATERMARK_STYLES = ['email', 'email_ip', 'forensic'] as const;
+/** `forensic` is retired (no forensic vendor): the API still accepts it and saves `email`. */
+export const WATERMARK_STYLES = ['email', 'email_ip'] as const;
 export type WatermarkStyle = (typeof WATERMARK_STYLES)[number];
 export const WATERMARK_STYLE_LABELS: Record<WatermarkStyle, string> = {
   email: 'Email overlay',
   email_ip: 'Email + IP overlay',
-  forensic: 'Forensic (invisible)',
 };
 
-export const DRM_AVAILABILITY = ['all', 'growth', 'scale'] as const;
-export type DrmAvailability = (typeof DRM_AVAILABILITY)[number];
-export const DRM_AVAILABILITY_LABELS: Record<DrmAvailability, string> = {
-  all: 'All plans',
-  growth: 'Growth and above',
-  scale: 'Scale only',
-};
+/**
+ * What the platform protects today: `setup_required` (no Mux signing key: video plays from its source file),
+ * `protected` (Mux signs every stream, a DRM configuration is set, DRM is available, the watermark is on) or `partial`.
+ */
+export const DRM_POSTURES = ['protected', 'partial', 'setup_required'] as const;
+export type DrmPosture = (typeof DRM_POSTURES)[number];
 
 export interface DrmProtection extends PolicyToggle<DrmProtectionKey> {
   /** Locked protections are always on. */
@@ -122,21 +117,33 @@ export interface DrmProtection extends PolicyToggle<DrmProtectionKey> {
 
 export interface DrmSettings {
   stats: Stat[];
+  posture: DrmPosture;
+  /** Why the posture isn't `protected` (empty when it is). */
+  postureReasons: string[];
   protections: DrmProtection[];
-  securityLevel: DrmSecurityLevel;
+  /** The Mux connection has a DRM configuration ID (its security level is set in Mux → Settings → DRM). */
+  drmConfigured: boolean;
   watermarkStyle: WatermarkStyle;
+  /** The ceiling of a school's concurrent-stream limit (1–20). */
   deviceLeases: number;
-  availableOn: DrmAvailability;
+  /** Mux only (EZDRM and KeyOS are hidden). */
   providers: Connection[];
-  keysRotatedAt: string;
+  /** Signing keys created so far (1 = never rotated). */
+  keyGeneration: number;
+  keysRotatedAt: string | null;
+  /** When the previous signing key stops working, while one is retiring. */
+  previousKeyRetiresAt: string | null;
+  /**
+   * A previous key past its retire time is still live at Mux: an immediate revoke or a retirement Mux refused. The job
+   * retries every 10 minutes; links signed with it keep working until it is gone. Absent in older answers.
+   */
+  previousKeyOverdue?: boolean;
 }
 
 export type DrmUpdate = Partial<{
   protections: { key: DrmProtectionKey; enabled: boolean }[];
-  securityLevel: DrmSecurityLevel;
   watermarkStyle: WatermarkStyle;
   deviceLeases: number;
-  availableOn: DrmAvailability;
 }>;
 
 // ---------- Storage ----------

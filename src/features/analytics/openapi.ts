@@ -1,4 +1,4 @@
-import { defineSpec, paginated, ref, resource, type ParamDef } from '@/openapi/dsl';
+import { defineSpec, noContent, paginated, ref, resource, type ParamDef } from '@/openapi/dsl';
 
 const tenantId: Record<string, ParamDef> = {
   id: { type: 'string', description: 'Tenant id (must have AI studio usage), e.g. `tn_amplify`.' },
@@ -13,6 +13,8 @@ export const spec = defineSpec({
       method: 'GET',
       path: '/analytics/growth',
       summary: 'Growth funnel, cohorts, health scores and onboarding',
+      description:
+        'Every figure is real: funnel and onboarding count the last 90 days’ signups; a figure with no source is null ("Not tracked"): funnel `visitors` and the `nps` / `nps_delta` KPIs.',
       auth: 'analytics.view',
       response: resource(ref('Growth')),
     },
@@ -137,6 +139,55 @@ export const spec = defineSpec({
     },
     {
       method: 'POST',
+      path: '/analytics/experiments',
+      summary: 'Start an experiment over schools on a feature flag',
+      description:
+        'The flag must be in the catalogue, not owned by another running experiment (422 `experiment_flag_busy`) and reach no school yet: on for all tenants or a partial rollout is 422 `experiment_flag_already_live` (the control group would lose a live feature; off or Beta list only is fine). A flag that gates nothing (`gates` null in `GET /platform/flags`) is 422 `experiment_flag_no_effect`. Its current state is saved and restored on stop. Schools land in an arm by `crc32("exp:{id}:{tenant}") % 100 < allocation_pct`; overridden schools are excluded.',
+      auth: 'platform.manage',
+      body: ref('ExperimentInput'),
+      response: resource(ref('ExperimentDetail'), 201),
+      errors: [422],
+      audit: { text: 'Started experiment "{name}" on {flag_key} ({allocation_pct}% of schools in the variant)', category: 'Flags' },
+      example: {
+        skip: 'Every mock flag that gates something is already live or owned by a running experiment (422 experiment_flag_already_live / experiment_flag_busy); the others gate nothing (422 experiment_flag_no_effect).',
+      },
+    },
+    {
+      method: 'GET',
+      path: '/analytics/experiments/{id}',
+      summary: 'One experiment with its arms',
+      auth: 'analytics.view',
+      path_params: experimentId,
+      response: resource(ref('ExperimentDetail')),
+      errors: [404],
+      example: { params: { id: 'ex_site_builder' } },
+    },
+    {
+      method: 'PATCH',
+      path: '/analytics/experiments/{id}',
+      summary: 'Edit an experiment’s name or hypothesis',
+      auth: 'platform.manage',
+      path_params: experimentId,
+      body: { type: 'object', properties: { name: { type: 'string' }, hypothesis: { type: 'string' } } },
+      response: resource(ref('ExperimentDetail')),
+      errors: [404, 422],
+      audit: { text: 'Edited experiment "{name}"', category: 'Flags' },
+      example: { params: { id: 'ex_site_builder' }, body: { hypothesis: 'The new builder lifts publishing.' } },
+    },
+    {
+      method: 'DELETE',
+      path: '/analytics/experiments/{id}',
+      summary: 'Delete a stopped or shipped experiment with its results',
+      description: 'Removes the experiment and its assignments. A running experiment answers 409 (stop it first, so its flag is restored).',
+      auth: 'platform.manage',
+      path_params: experimentId,
+      response: noContent(),
+      errors: [404, 409],
+      audit: { text: 'Deleted experiment "{name}" and its results', category: 'Flags' },
+      example: { params: { id: 'ex_trust_badges' } },
+    },
+    {
+      method: 'POST',
       path: '/analytics/experiments/{id}/promote',
       summary: 'Promote a running experiment to 100% (enables its flag for all tenants)',
       auth: 'platform.manage',
@@ -149,7 +200,7 @@ export const spec = defineSpec({
     {
       method: 'POST',
       path: '/analytics/experiments/{id}/stop',
-      summary: 'Stop a running experiment (traffic returns to control)',
+      summary: 'Stop a running experiment (its flag goes back to the state saved at creation)',
       auth: 'platform.manage',
       path_params: experimentId,
       response: resource(ref('Experiments')),

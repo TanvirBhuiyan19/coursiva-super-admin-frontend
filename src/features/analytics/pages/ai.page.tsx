@@ -110,7 +110,13 @@ function CapCard({ ai }: { ai: AiUsage }) {
         style={{ marginTop: 14 }}
         label={t('ai.cap.barLabel', { pct: ratio })}
       />
+      {ai.totals.capReached && (
+        <div className="callout callout--bad" role="status" style={{ marginTop: 10 }}>
+          {t('ai.cap.reached')}
+        </div>
+      )}
       <p className="faint" style={{ fontSize: 11.5, margin: '8px 0 0', lineHeight: 1.5 }}>
+        {t('ai.cap.measuredOn', { amount: moneyFine(ai.totals.modelCost) })}{' '}
         {t('ai.cap.explainer', { allowances, cost: moneyFine(ai.pricing.costPer1k), billed: moneyFine(ai.pricing.billedPer1k) })}
         {!allowed && ` ${t('ai.cap.noPermission')}`}
       </p>

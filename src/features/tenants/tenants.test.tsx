@@ -390,6 +390,35 @@ describe('provisioning', () => {
     fetchSpy.mockRestore();
   });
 
+  it('sends a time zone that starts at the console default and can be changed', async () => {
+    platformSettings.patch({ defaultTimezone: 'Europe/London' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    signInAs('Owner');
+    const { user } = renderApp('/tenants');
+    await user.click(await screen.findByRole('button', { name: /new tenant/i }));
+    const dialog = await screen.findByRole('dialog', { name: 'Provision a new tenant' });
+    const zone = within(dialog).getByLabelText('Time zone');
+    await waitFor(() => expect(zone).toHaveValue('Europe/London'));
+    await user.type(within(dialog).getByLabelText('School name'), 'Tide School');
+    await user.type(within(dialog).getByLabelText('Owner email'), 'tide@school.com');
+
+    // An unknown zone is refused before anything is sent.
+    await user.clear(zone);
+    await user.type(zone, 'Mars/Olympus');
+    await user.click(within(dialog).getByRole('button', { name: /create tenant/i }));
+    expect(await within(dialog).findByText('Choose a time zone such as Europe/London.')).toBeInTheDocument();
+
+    await user.clear(zone);
+    await user.type(zone, 'Asia/Tokyo');
+    await user.click(within(dialog).getByRole('button', { name: /create tenant/i }));
+    expect(await screen.findByRole('dialog', { name: 'Tide School' })).toBeInTheDocument();
+    const bodies = fetchSpy.mock.calls
+      .filter(([input, init]) => String(input instanceof Request ? input.url : input).endsWith('/tenants') && init?.method === 'POST')
+      .map(([, init]) => JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as { timezone?: string });
+    expect(bodies).toEqual([expect.objectContaining({ timezone: 'Asia/Tokyo' })]);
+    fetchSpy.mockRestore();
+  });
+
   it('previews the subdomain on the configured platform domain (no hard-coded host)', async () => {
     platformSettings.patch({ primaryDomain: 'schools.example.com' });
     signInAs('Owner');
